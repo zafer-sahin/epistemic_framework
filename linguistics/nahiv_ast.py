@@ -84,3 +84,36 @@ class NahivDependencyCompiler:
             # Analiz bittiğinde geçici cümle state'ini (kısıtları) bellekten sil
             # Böylece ontolojik evrenin sıfır entropi kuralı korunur.
             self.solver.solver.pop()
+
+
+    def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, str]) -> List[Tuple[str, str, str, str]]:
+            """
+            Token dizisi ve Leksikon üzerinden otomatik Bağımlılık Ağacı (AST) önerir.
+            İ'rab alametlerini (un, an, in) baz alarak rolleri (Fail, Meful) atar.
+            """
+            dependencies = []
+            amil = None
+            
+            # İlk fiili Amil (Yöneten) olarak belirle
+            for token in tokens:
+                if lexicon.get(token) == "Fiil":
+                    amil = token
+                    break
+            
+            if not amil:
+                return [] # Nominal cümleler için ayrı mantık gerekecek (Mubteda-Haber)
+
+            for token in tokens:
+                if token == amil: continue
+                
+                # Marfu (Nominative) tespiti: 'un' suffix'i
+                if token.lower().endswith('un'):
+                    dependencies.append((amil, token, 'Fail', 'Marfu'))
+                # Mansub (Accusative) tespiti: 'an' suffix'i
+                elif token.lower().endswith('an'):
+                    dependencies.append((amil, token, 'Meful', 'Mansub'))
+                # Majrur (Genitive) tespiti: 'in' suffix'i
+                elif token.lower().endswith('in'):
+                    dependencies.append((amil, token, 'Majrur', 'Majrur'))
+                    
+            return dependencies

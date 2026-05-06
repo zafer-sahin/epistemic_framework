@@ -1,6 +1,7 @@
 from schools.taftazani.adab_al_bahth import AdabAlBahthEngine
 from linguistics.nahiv_ast import NahivDependencyCompiler
 from linguistics.sarf_parser import SarfEngine
+from linguistics.tokenizer import EpistemicTokenizer
 
 import cmd
 import sys
@@ -38,8 +39,11 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             # Sentaktik Bağımlılık (Nahiv) Derleyicisi
             self.nahiv_compiler = NahivDependencyCompiler(self.solver)
 
-            # YENİ: Sarf (Morfoloji) Motoru Entegrasyonu
+            # Sarf (Morfoloji) Motoru Entegrasyonu
             self.sarf_engine = SarfEngine(Path("data/arabic_roots.json"))
+
+            # Tokenizer'ın İlklendirilmesi
+            self.tokenizer = EpistemicTokenizer()
             
             print("[SİSTEM] Ontoloji yüklendi. Global SAT doğrulandı.")
         except Exception as e:
@@ -295,6 +299,34 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
 
         except Exception as e:
             print(f"[SİSTEM HATASI]: {e}")
+
+
+    def do_parse_sentence(self, arg):
+        """
+        Ham metni alıp Tokenize-Sarf-Nahiv-Z3 boru hattında otonom olarak doğrular.
+        Kullanım: parse_sentence Daraba Zeydun Amran
+        """
+        try:
+            # 1. Tokenization
+            tokens = self.tokenizer.tokenize(arg)
+            
+            # 2. Otonom Sarf (Lexicon Generation)
+            lexicon = self.sarf_engine.derive_lexicon(tokens)
+            
+            # 3. Otonom Nahiv (Dependency Suggestion)
+            ast_suggested = self.nahiv_compiler.suggest_dependencies(tokens, lexicon)
+            
+            print(f"\n[SİSTEM] Önerilen AST: {ast_suggested}")
+            
+            # 4. Z3 Semantik/Sentaktik Çarpıştırma
+            is_valid = self.nahiv_compiler.verify_sentence_ast(ast_suggested, lexicon)
+            
+            if is_valid:
+                print("[GEÇERLİ - SAT] Cümle ontolojik ve sentaktik olarak tescillendi.")
+            else:
+                print("[UNSAT] Cümle kurgusunda mantıksal çelişki tespit edildi.")
+        except Exception as e:
+            print(f"[HATA] {e}")
 
 if __name__ == '__main__':
     EpistemicShell().cmdloop()
