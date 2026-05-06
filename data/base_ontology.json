@@ -1,0 +1,386 @@
+{
+    "Logical_Components": {
+        "Terms": {
+            "S": {
+                "symbol": "S",
+                "tr": "Hadd-i Asgar",
+                "ar": "el-Haddü'l-Asgar",
+                "en": "Minor Term"
+            },
+            "P": {
+                "symbol": "P",
+                "tr": "Hadd-i Ekber",
+                "ar": "el-Haddü'l-Ekber",
+                "en": "Major Term"
+            },
+            "M": {
+                "symbol": "M",
+                "tr": "Hadd-i Evsat",
+                "ar": "el-Haddü'l-Evsat",
+                "en": "Middle Term"
+            }
+        },
+        "Premises": {
+            "Major": {
+                "tr": "Kübrâ",
+                "ar": "el-Mukaddimetü'l-Kübrâ"
+            },
+            "Minor": {
+                "tr": "Suğrâ",
+                "ar": "el-Mukaddimetü'l-Suğrâ"
+            },
+            "Conclusion": {
+                "tr": "Netice",
+                "ar": "en-Netîce"
+            },
+            "Derived_Axiom_1777722343": {
+                "en": "Forall([x], Implies(Rationale(x), Substantia(x)))"
+            }
+        }
+    },
+    "Quinque_Voces": {
+        "elements": [
+            {
+                "name": "Genus",
+                "tr": "Cins",
+                "ar": "Cins"
+            },
+            {
+                "name": "Species",
+                "tr": "Nev",
+                "ar": "Nev"
+            },
+            {
+                "name": "Differentia",
+                "tr": "Fasıl",
+                "ar": "Fasl"
+            },
+            {
+                "name": "Proprium",
+                "tr": "Hâssa",
+                "ar": "Hâssa"
+            },
+            {
+                "name": "Accident",
+                "tr": "Araz-ı Âm",
+                "ar": "Aradu'l-Âm"
+            }
+        ]
+    },
+    "Porphyrian_Tree": {
+        "root": {
+            "name": "Substantia",
+            "terms": {
+                "tr": "Cevher",
+                "ar": "Cevher",
+                "en": "Substance"
+            },
+            "level": 1,
+            "propria": [],
+            "accidents": [],
+            "children": [
+                {
+                    "name": "Corpus",
+                    "terms": {
+                        "tr": "Cisim",
+                        "ar": "Cism",
+                        "en": "Body"
+                    },
+                    "level": 2,
+                    "differentia": {
+                        "tr": "Mütehayyiz",
+                        "ar": "Mutahayyiz",
+                        "en": "Extensionality"
+                    },
+                    "propria": [
+                        {
+                            "tr": "Üç Boyutluluk",
+                            "ar": "el-Eb'âdü's-selâse",
+                            "en": "Three-dimensionality"
+                        }
+                    ],
+                    "accidents": [
+                        {
+                            "tr": "Renk",
+                            "ar": "el-Levn",
+                            "en": "Color"
+                        }
+                    ],
+                    "children": [
+                        {
+                            "name": "Vivens",
+                            "terms": {
+                                "tr": "Canlı / Nâmî",
+                                "ar": "en-Nâmî",
+                                "en": "Living Being"
+                            },
+                            "level": 3,
+                            "differentia": {
+                                "tr": "Büyüyen / Beslenen",
+                                "ar": "Gâzi",
+                                "en": "Nutritive"
+                            },
+                            "propria": [
+                                {
+                                    "tr": "Üreme",
+                                    "ar": "et-Tenâsül",
+                                    "en": "Reproduction"
+                                }
+                            ],
+                            "accidents": [
+                                {
+                                    "tr": "Sağlık / Hastalık",
+                                    "ar": "es-Sıhha ve'l-Marad",
+                                    "en": "Health/Sickness"
+                                }
+                            ],
+                            "children": [
+                                {
+                                    "name": "Planta",
+                                    "terms": {
+                                        "tr": "Bitki",
+                                        "ar": "Nebât",
+                                        "en": "Plant"
+                                    },
+                                    "level": 4,
+                                    "differentia": {
+                                        "tr": "Duyumsamayan",
+                                        "ar": "Gayr-i Hassâs",
+                                        "en": "Non-sensitive"
+                                    },
+                                    "propria": [
+                                        {
+                                            "tr": "Toprağa bağlı olma",
+                                            "ar": "el-İltisâk bi'l-ard",
+                                            "en": "Rootedness"
+                                        }
+                                    ],
+                                    "accidents": [
+                                        {
+                                            "tr": "Yeşil olma",
+                                            "ar": "el-Hudre",
+                                            "en": "Being green"
+                                        }
+                                    ],
+                                    "children": [
+                                        {
+                                            "name": "Arbor",
+                                            "terms": {
+                                                "tr": "Ağaç",
+                                                "ar": "Şecer",
+                                                "en": "Tree"
+                                            },
+                                            "level": 5,
+                                            "differentia": {
+                                                "tr": "Gövdesi olan",
+                                                "ar": "Sâk",
+                                                "en": "Trunked"
+                                            },
+                                            "propria": [
+                                                {
+                                                    "tr": "Meyve verme",
+                                                    "ar": "İsmâr",
+                                                    "en": "Fruiting"
+                                                }
+                                            ],
+                                            "accidents": [],
+                                            "children": []
+                                        }
+                                    ]
+                                },
+                                {
+                                    "name": "Animal",
+                                    "terms": {
+                                        "tr": "Hayvan",
+                                        "ar": "Hayvân",
+                                        "en": "Animal"
+                                    },
+                                    "level": 4,
+                                    "differentia": {
+                                        "tr": "Duyumsayan / İradeli Hareket",
+                                        "ar": "Müdrik / Hassâs",
+                                        "en": "Sensitive"
+                                    },
+                                    "propria": [
+                                        {
+                                            "tr": "Uykulu olma",
+                                            "ar": "en-Nevm",
+                                            "en": "Sleepiness"
+                                        }
+                                    ],
+                                    "accidents": [
+                                        {
+                                            "tr": "Açlık",
+                                            "ar": "el-Cû'",
+                                            "en": "Hunger"
+                                        }
+                                    ],
+                                    "children": [
+                                        {
+                                            "name": "Rationale",
+                                            "terms": {
+                                                "tr": "İnsan",
+                                                "ar": "İnsân",
+                                                "en": "Human"
+                                            },
+                                            "level": 5,
+                                            "differentia": {
+                                                "tr": "Nâtık",
+                                                "ar": "Nâtık",
+                                                "en": "Reasoning"
+                                            },
+                                            "propria": [
+                                                {
+                                                    "tr": "Dâhik (Gülen)",
+                                                    "ar": "ed-Dâhik",
+                                                    "en": "Laughing"
+                                                },
+                                                {
+                                                    "tr": "Ağlayan",
+                                                    "ar": "el-Bâkî",
+                                                    "en": "Crying"
+                                                }
+                                            ],
+                                            "accidents": [
+                                                {
+                                                    "tr": "Kâtip (Yazan)",
+                                                    "ar": "el-Kâtib",
+                                                    "en": "Writing"
+                                                },
+                                                {
+                                                    "tr": "Kâim (Ayakta duran)",
+                                                    "ar": "el-Kâim",
+                                                    "en": "Standing"
+                                                }
+                                            ],
+                                            "children": []
+                                        },
+                                        {
+                                            "name": "Equus",
+                                            "terms": {
+                                                "tr": "At",
+                                                "ar": "Feres",
+                                                "en": "Horse"
+                                            },
+                                            "level": 5,
+                                            "differentia": {
+                                                "tr": "Kişneyen",
+                                                "ar": "Sâhil",
+                                                "en": "Neighing"
+                                            },
+                                            "propria": [
+                                                {
+                                                    "tr": "Nallanma",
+                                                    "ar": "et-Tesfîh",
+                                                    "en": "Being shod"
+                                                }
+                                            ],
+                                            "accidents": [
+                                                {
+                                                    "tr": "Esmer olma",
+                                                    "ar": "el-Üdme",
+                                                    "en": "Being brown"
+                                                }
+                                            ],
+                                            "children": []
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Inanimatum",
+                            "terms": {
+                                "tr": "Cansız",
+                                "ar": "el-Cemâdât",
+                                "en": "Inanimate"
+                            },
+                            "level": 3,
+                            "differentia": {
+                                "tr": "Büyümeyen",
+                                "ar": "Lâ-Nâmî",
+                                "en": "Non-nutritive"
+                            },
+                            "propria": [
+                                {
+                                    "tr": "Dış etkiyle hareket",
+                                    "ar": "el-Hareketü'l-kasriyye",
+                                    "en": "Forced motion"
+                                }
+                            ],
+                            "accidents": [],
+                            "children": [
+                                {
+                                    "name": "Minerale",
+                                    "terms": {
+                                        "tr": "Maden",
+                                        "ar": "Ma'din",
+                                        "en": "Mineral"
+                                    },
+                                    "level": 4,
+                                    "differentia": {
+                                        "tr": "Erime kabiliyeti",
+                                        "ar": "el-İnzibâk",
+                                        "en": "Fusibility"
+                                    },
+                                    "propria": [
+                                        {
+                                            "tr": "Paslanma (bazı metaller)",
+                                            "ar": "et-Te'ekkül",
+                                            "en": "Rusting"
+                                        }
+                                    ],
+                                    "accidents": [],
+                                    "children": [
+                                        {
+                                            "name": "Aurum",
+                                            "terms": {
+                                                "tr": "Altın",
+                                                "ar": "Zeheb",
+                                                "en": "Gold"
+                                            },
+                                            "level": 5,
+                                            "propria": [
+                                                {
+                                                    "tr": "Paslanmama",
+                                                    "ar": "Ademü't-Te'ekkül",
+                                                    "en": "Non-rusting"
+                                                }
+                                            ],
+                                            "accidents": [
+                                                {
+                                                    "tr": "Saflık derecesi",
+                                                    "ar": "el-Iyâr",
+                                                    "en": "Purity"
+                                                }
+                                            ],
+                                            "children": []
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    },
+    "Syllogism_Moods": {
+        "Figure_1": {
+            "Barbara": {
+                "islamic_term": "Darb-ı Evvel",
+                "logic_structure": "AAA",
+                "mapping": {
+                    "Major": "M-P",
+                    "Minor": "S-M",
+                    "Conclusion": "S-P"
+                },
+                "predicates": [
+                    "Forall([x], Implies(M(x), P(x)))",
+                    "Forall([x], Implies(S(x), M(x)))",
+                    "Forall([x], Implies(S(x), P(x)))"
+                ]
+            }
+        }
+    }
+}
