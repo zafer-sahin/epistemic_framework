@@ -49,6 +49,7 @@ class NahivDependencyCompiler:
             x, y = z3.Consts('x y', self.builder.EntitySort)
             Fail = self.builder.get_or_create_predicate('Fail', arity=2)
             Meful = self.builder.get_or_create_predicate('Meful', arity=2)
+            Mubteda_Haber = self.builder.get_or_create_predicate('Mubteda_Haber', arity=2)
             Fiil = self.builder.get_or_create_predicate('Fiil', arity=1)
             Ism = self.builder.get_or_create_predicate('Ism', arity=1)
 
@@ -59,6 +60,10 @@ class NahivDependencyCompiler:
             # Kural: Fail veya Meful ilişkisi varsa, amil Fiil'dir, mamul İsim'dir.
             self.solver.solver.add(z3.ForAll([x, y], z3.Implies(Fail(x, y), z3.And(Fiil(x), Ism(y)))))
             self.solver.solver.add(z3.ForAll([x, y], z3.Implies(Meful(x, y), z3.And(Fiil(x), Ism(y)))))
+
+            # Mübteda-Haber ilişkisinde her iki argüman da İsim olmak zorundadır.
+            # $ \forall x, y . \text{Mubteda\_Haber}(x, y) \rightarrow \text{Ism}(x) \land \text{Ism}(y) $
+            self.solver.solver.add(z3.ForAll([x, y], z3.Implies(Mubteda_Haber(x, y), z3.And(Ism(x), Ism(y)))))
 
             # 2. LEKSİKOLOJİK ENJEKSİYON (Kelime Türlerinin Tanımlanması)
             if lexicon:
@@ -89,30 +94,36 @@ class NahivDependencyCompiler:
     def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, str]) -> List[Tuple[str, str, str, str]]:
             """
             Token dizisi ve Leksikon üzerinden otomatik Bağımlılık Ağacı (AST) önerir.
-            İ'rab alametlerini (un, an, in) baz alarak rolleri (Fail, Meful) atar.
+            Fiil Cümlesi ve İsim Cümlesi (Önerme) matrislerini ayırır.
             """
             dependencies = []
             amil = None
             
-            # İlk fiili Amil (Yöneten) olarak belirle
+            # 1. FİİL CÜMLESİ (Verbal Sentence) KONTROLÜ
             for token in tokens:
                 if lexicon.get(token) == "Fiil":
                     amil = token
                     break
             
+            # 2. İSİM CÜMLESİ (Nominal Sentence / Kadiyye) KONTROLÜ
             if not amil:
-                return [] # Nominal cümleler için ayrı mantık gerekecek (Mubteda-Haber)
+                # Mantık ilminde önermeler (Da'vâ) genellikle iki merfu isimden oluşur.
+                marfu_tokens = [t for t in tokens if t.lower().endswith('un')]
+                if len(marfu_tokens) >= 2:
+                    mubteda = marfu_tokens[0]
+                    haber = marfu_tokens[1]
+                    # Haber (Yüklem), Mübteda'ya (Özne) isnad edilir.
+                    dependencies.append((haber, mubteda, 'Mubteda_Haber', 'Marfu'))
+                return dependencies
 
+            # 3. FİİL CÜMLESİ BAĞIMLILIKLARI
             for token in tokens:
-                if token == amil: continue
-                
-                # Marfu (Nominative) tespiti: 'un' suffix'i
+                if token == amil: 
+                    continue
                 if token.lower().endswith('un'):
                     dependencies.append((amil, token, 'Fail', 'Marfu'))
-                # Mansub (Accusative) tespiti: 'an' suffix'i
                 elif token.lower().endswith('an'):
                     dependencies.append((amil, token, 'Meful', 'Mansub'))
-                # Majrur (Genitive) tespiti: 'in' suffix'i
                 elif token.lower().endswith('in'):
                     dependencies.append((amil, token, 'Majrur', 'Majrur'))
                     

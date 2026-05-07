@@ -36,13 +36,11 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             # Taftazani motorunu solver bağımlılığı ile başlat
             self.dialectics = AdabAlBahthEngine(self.solver)
 
-            # Sentaktik Bağımlılık (Nahiv) Derleyicisi
+             #Sentaktik Bağımlılık (Nahiv) Derleyicisi
             self.nahiv_compiler = NahivDependencyCompiler(self.solver)
 
-            # Sarf (Morfoloji) Motoru Entegrasyonu
-            self.sarf_engine = SarfEngine(Path("data/arabic_roots.json"))
-
-            # Tokenizer'ın İlklendirilmesi
+            #Otonom Üretken Sarf Motoru
+            self.sarf_engine = SarfEngine() 
             self.tokenizer = EpistemicTokenizer()
             
             print("[SİSTEM] Ontoloji yüklendi. Global SAT doğrulandı.")
