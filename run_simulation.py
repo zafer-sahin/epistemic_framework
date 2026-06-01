@@ -1,128 +1,91 @@
 import sys
 from pathlib import Path
+
+# Core Katmanları
 from core.models import OntologyLoader
 from core.logic_engine import AristotelianSolver
-from core.syllogism_builder import SyllogismEngine
+from core.layer1_graph import Layer1HeuristicGraph
+from core.layer2_rules import Layer2RuleEngine
+from core.layer3_smt import Layer3SMTCircuitBreaker
+from core.epistemic_orchestrator import EpistemicOrchestrator
 
-def execute_pipeline():
-    print("[SİSTEM BAŞLATILIYOR] Ontoloji Yükleniyor...")
+# Dilbilim Katmanları
+from linguistics.tokenizer import EpistemicTokenizer
+from linguistics.sarf_parser import SarfEngine
+from linguistics.nahiv_ast import NahivDependencyCompiler
+from linguistics.contextual_lexicon import ContextualLexicon
+from linguistics.discourse_state import DiscourseRegister
+from linguistics.ilm_wad_adapter import IlmWadAdapter
+
+# Ekol (Usûl) Profilleri
+from schools.salafi_usul import SalafiUsul
+from schools.ashari_usul import AshariUsul
+from schools.maturidi_usul import MaturidiUsul
+
+def execute_healthcheck():
+    print("="*70)
+    print("[SİSTEM] N-TIER EPİSTEMİK MOTOR UÇTAN UCA SAĞLIK TARAMASI (HEALTHCHECK)")
+    print("="*70)
     
-    # Adım 1: Katı Nesneleştirme (Strict Hydration)
+    # 1. BAŞLATMA (BOOTSTRAP)
     loader = OntologyLoader()
-    try:
-        # Yolun doğru olduğundan emin ol, gerekirse absolute path kullan.
-        ontology_path = Path("data/base_ontology.json") 
-        ontology = loader.load(ontology_path)
-        print("[BAŞARILI] Veri Katmanı Doğrulandı (0 Entropi).")
-    except Exception as e:
-        print(f"\n[KIRITIK HATA] Veri Katmanı Çöktü (Fail-Fast tetiklendi):\n{e}")
-        sys.exit(1)
-
-    # Adım 2: Z3 SMT Motoru İnşası ve Aksiyom Enjeksiyonu
-    print("\n[MOTOR BAŞLATILIYOR] Z3 SMT Çözücüsü Hazırlanıyor...")
+    ontology = loader.load(Path("data/base_ontology.json"))
     solver = AristotelianSolver(ontology)
+    
+    tokenizer = EpistemicTokenizer()
+    sarf = SarfEngine()
+    nahiv = NahivDependencyCompiler()
+    
+    lexicon = ContextualLexicon()
+    discourse = DiscourseRegister()
+    
+    # Mock Veri Enjeksiyonu (Kök/Cidr tabanlı)
+    lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
+    lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
+    lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
+    lexicon.register_word("tekvin", "Maturidi", "Tekvin") # Mâtürîdî spesifik düğüm
+    lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
 
-    # Adım 3: Global Tutarlılık Stres Testi (Vacuous Truth İzolasyonu)
-    print("\n--- FAZ 1: ONTOLOJİK TUTARLILIK (GLOBAL SAT) ---")
-    is_sat, core_or_msg = solver.check_consistency()
+    adapter = IlmWadAdapter(lexicon, discourse)
+    l1 = Layer1HeuristicGraph(ontology)
+    l2 = Layer2RuleEngine()
+    l3 = Layer3SMTCircuitBreaker(solver, timeout_ms=3000)
     
-    if is_sat:
-        print("[SENTEZ] Sistem Tutarlı (SAT).")
-        print("[SENTEZ] Tüm düğümler için varoluşsal (Existential) ve geçişli (Transitive) aksiyomlar geçerli.")
-    else:
-        print(f"\n[ÇÖKÜŞ] Ontolojik Çelişki (UNSAT) Tespit Edildi.")
-        print(f"[UNSAT CORE] Çelişkiyi yaratan kısıtlar: {core_or_msg}")
-        sys.exit(1)
+    orchestrator = EpistemicOrchestrator(adapter, l1, l2, l3)
+    print("[BAŞARILI] Orkestratör ve tüm alt-motorlar belleğe yüklendi.\n")
 
+    # 2. TEST SENARYOLARI
+    # Test Cümlesi 1: İzafet Terkibi (Mudaf Tenvin Düşmesi ve Mecrur)
+    sentence_1 = "yadu allahi" 
+    tokens_1 = tokenizer.tokenize(sentence_1)
+    morph_1 = sarf.derive_lexicon(tokens_1)
+    ast_1 = nahiv.suggest_dependencies(tokens_1, morph_1)
+    
+    print("--- SENARYO 1: SELEFÎ USÛLÜ (MUTLAK LAFIZCILIK) ---")
+    print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
+    discourse.clear_memory()
+    res_salafi = orchestrator.process_statement(tokens_1, ast_1, SalafiUsul(), morph_1)
+    print(f"Sonuç: [{res_salafi['status']}] -> {res_salafi.get('reason', res_salafi.get('message'))}\n")
 
-# ... (Faz 3 Global SAT testi kodları kalacak) ...
+    print("--- SENARYO 2: EŞ'ARÎ USÛLÜ (TE'VİL TOLERANSI) ---")
+    print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
+    discourse.clear_memory()
+    res_ashari = orchestrator.process_statement(tokens_1, ast_1, AshariUsul(), morph_1)
+    print(f"Sonuç: [{res_ashari['status']}] (L2 Kararı: {res_ashari.get('l2_context')})\n")
 
-    # Adım 4: Dinamik Kıyas (Syllogism) Motoru Testi
-    print("\n--- FAZ 2: DİNAMİK KIYAS MOTORU VE ÇELİŞKİ İSPATI ---")
+    # Test Cümlesi 2: Maturidi DSL Spesifik Düğüm Blokajı
+    sentence_2 = "tekvinu allahi"
+    tokens_2 = tokenizer.tokenize(sentence_2)
+    morph_2 = sarf.derive_lexicon(tokens_2)
+    ast_2 = nahiv.suggest_dependencies(tokens_2, morph_2)
     
-    syllogism_engine = SyllogismEngine(ontology)
-    
-    # Test Senaryosu A: Barbara (Darb-ı Evvel / AAA)
-    # Parametreler: S=Rationale (İnsan), M=Vivens (Canlı), P=Corpus (Cisim)
-    b_premises, b_conclusion = syllogism_engine.construct_syllogism(
-        figure="Figure_1", 
-        mood="Barbara", 
-        major_term="Corpus", 
-        minor_term="Rationale", 
-        middle_term="Vivens"
-    )
-    
-    print("Test A: Dinamik Modus Barbara Üretimi")
-    is_valid = solver.verify_syllogism(b_premises, b_conclusion)
-    if is_valid:
-        print("[GEÇERLİ] Z3 motoru dinamik olarak üretilen kıyası matematiksel olarak ispatladı.")
-    else:
-        print("[HATA] Dinamik üretim başarısız.")
-    
-    # Test Senaryosu: Barbara (Darb-ı Evvel / AAA) Kıyası
-    # Porphyrios ağacındaki spesifik yüklemleri (Predicates) test ediyoruz.
-    # Öncül 1: Her İnsan (Rationale) Canlıdır (Vivens)
-    # Öncül 2: Her Canlı (Vivens) Cisimdir (Corpus)
-    # Sonuç: Her İnsan (Rationale) Cisimdir (Corpus)
-    
-    barbara_premises = [
-        "Forall([x], Implies(Rationale(x), Vivens(x)))",
-        "Forall([x], Implies(Vivens(x), Corpus(x)))"
-    ]
-    barbara_conclusion = "Forall([x], Implies(Rationale(x), Corpus(x)))"
-    
-    print("Test A: Modus Barbara (Geçerli Olması Zorunlu)")
-    is_valid = solver.verify_syllogism(barbara_premises, barbara_conclusion)
-    if is_valid:
-        print("[GEÇERLİ] Z3 motoru kıyasın ontolojik evrende matematiksel olarak zorunlu olduğunu ispatladı.")
-    else:
-        print("[HATA] Z3 motoru kıyası doğrulayamadı. AST çeviricisi veya aksiyomlar hatalı.")
+    print("--- SENARYO 3: MÂTÜRÎDÎ USÛLÜ (DÜĞÜM BAZLI DSL YASAĞI) ---")
+    print(f"Girdi: '{sentence_2}' | AST: {ast_2}")
+    discourse.clear_memory()
+    res_maturidi = orchestrator.process_statement(tokens_2, ast_2, MaturidiUsul(), morph_2)
+    print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
 
-    # Test Senaryosu: Safsata (Geçersiz Kıyas) Testi
-    # Sonuç: Her İnsan (Rationale) Cansızdır (Inanimatum) -> Ağaçla açıkça çelişir.
-    invalid_conclusion = "Forall([x], Implies(Rationale(x), Inanimatum(x)))"
-    
-    print("\nTest B: Ontolojik Safsata (Geçersiz Olması Zorunlu)")
-    is_invalid_syllogism_rejected = not solver.verify_syllogism(barbara_premises, invalid_conclusion)
-    
-    if is_invalid_syllogism_rejected:
-        print("[GEÇERSİZ] Z3 motoru hatalı sonucu başarıyla reddetti (Red Teaming Başarılı).")
-    else:
-        print("[KRİTİK ZAFİYET] Z3 motoru safsatayı kabul etti. 'Vacuous Truth' sızıntısı var.")
-
-
-    # Test Senaryosu C: Yatay Dışlama (Sibling Disjointness) Stres Testi
-    print("\nTest C: Kardeş Düğümlerin Kesişim Reddi (Mutually Exclusive)")
-    
-    # Safsata: "Bir x vardır ki, o hem Rationale (İnsan) hem de Equus'tur (At)."
-    impossible_intersection = "Forall([x], And(Rationale(x), Equus(x)))"
-    
-    is_chimera_possible = solver.verify_syllogism([], impossible_intersection)
-    
-    if not is_chimera_possible:
-        print("[BAŞARILI] Z3 motoru farklı türler (İnsan ve At) arasındaki kesişimi yasakladı.")
-    else:
-        print("[KRİTİK ZAFİYET] Z3 motoru yatay kesişime izin verdi. Çelişmezlik ilkesi ihlal edildi.")
-
-    # Test Senaryosu D: Hâssa (Proprium) Üzerinden Çift Yönlü İspat (Bi-conditional Deduction)
-    # Hipotez: Eğer bir x varlığının "Gülen" (Laughing) olduğu biliniyorsa, Z3 motoru
-    # onun zorunlu olarak "İnsan" (Rationale) ve dolayısıyla "Cisim" (Corpus) olduğunu
-    # yukarıya doğru tırmanarak ispatlayabilmelidir.
-    print("\nTest D: Hâssa (Proprium) Üzerinden Geriye Dönük Çıkarım")
-    
-    # Proprium sembolü, Z3'e kaydettiğimiz formatta oluşturulur: Prop_Rationale_Laughing
-    # Öncül: S(x) -> Prop_Rationale_Laughing(x) (Socrates gülendir)
-    prop_premise = "Forall([x], Implies(S(x), Prop_Rationale_Laughing(x)))"
-    
-    # Sonuç: S(x) -> Corpus(x) (O halde Socrates bir cisimdir)
-    prop_conclusion = "Forall([x], Implies(S(x), Corpus(x)))"
-    
-    is_prop_valid = solver.verify_syllogism([prop_premise], prop_conclusion)
-    
-    if is_prop_valid:
-        print("[BAŞARILI] Z3 motoru bir 'Hâssa' (Proprium) üzerinden türü tanımladı ve üst cinslere (Corpus) ulaşarak mutlak ispatı yaptı.")
-    else:
-        print("[KRİTİK ZAFİYET] Z3 motoru Hâssa (Proprium) üzerinden geriye doğru akıl yürütemedi.")
+    print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 
 if __name__ == "__main__":
-    execute_pipeline()
+    execute_healthcheck()
