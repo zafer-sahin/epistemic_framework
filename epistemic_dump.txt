@@ -39,8 +39,12 @@ PROJE AĞACI (PROJECT TREE)
 ./schools/taftazani/adab_al_bahth.py
 ./tests/__init__.py
 ./tests/integration/__init__
+./tests/integration/__init__.py
+./tests/integration/test_adab_al_bahth_fsm.py
+./tests/integration/test_defeasibility_loop.py
 ./tests/integration/test_semantic_pipeline.py
 ./tests/test_core/__init__.py
+./tests/test_core/test_modal_and_hypotetical.py
 ./tests/test_core/test_ontology.py
 ./tests/test_core/test_z3_engine.py
 ./tests/test_linguistics/__init__.py
@@ -224,19 +228,12 @@ from linguistics.ilm_wad_adapter import SemanticStatementIR
 from core.models import BaseOntology, EpistemicEntity
 
 class Layer1HeuristicGraph:
-    """
-    Heuristic Discovery Katmanı (Ontolojik Mesafe Motoru).
-    Statik substring kontrolleri iptal edilmiş, yerine Porphyrian Tree
-    üzerinde LCA (Lowest Common Ancestor) tabanlı ontolojik mesafe
-    hesaplama mekanizması getirilmiştir.
-    """
     def __init__(self, ontology: BaseOntology):
         self.ontology = ontology
         self.parent_map: Dict[str, str] = {}
         self._build_parent_map()
 
     def _build_parent_map(self) -> None:
-        """Ağacı düzleştirerek hızlı LCA hesaplaması için bir parent matrisi (hash map) oluşturur."""
         for root_node in self.ontology.porphyrian_tree.roots.values():
             self._traverse_and_map(root_node, None)
 
@@ -247,8 +244,6 @@ class Layer1HeuristicGraph:
             self._traverse_and_map(child, entity.ontologic_id)
 
     def _get_distance(self, node_a: str, node_b: str) -> int:
-        """İki ontolojik düğüm arasındaki en kısa yolu (LCA üzerinden) hesaplar."""
-        # Eğer düğümler ontolojide yoksa (Örn: Z3 sentaktik ilişkileri), mesafeyi sıfır kabul et.
         if node_a not in self.parent_map and node_a not in self.ontology.porphyrian_tree.roots:
             return 0 
         if node_b not in self.parent_map and node_b not in self.ontology.porphyrian_tree.roots:
@@ -264,13 +259,11 @@ class Layer1HeuristicGraph:
                 break
         
         if not lca:
-            # Ortak ata yoksa (Farklı root isim alanları), mutlak mesafe toplanır.
             return len(path_a) + len(path_b)
 
         return path_a.index(lca) + path_b.index(lca)
 
     def _get_ancestors(self, node: str) -> List[str]:
-        """Bir düğümden köke (Root) kadar olan kalıtım yolunu çıkartır."""
         path = [node]
         current = node
         while current in self.parent_map:
@@ -279,10 +272,6 @@ class Layer1HeuristicGraph:
         return path
 
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
-        """
-        IR Matrisini tarar. Amil ve Mamul arasındaki hiyerarşik mesafeyi (Edges) ölçer.
-        Mesafe ne kadar büyükse, Karîne-i Mânia (Mecaz) olma olasılığı o kadar artar.
-        """
         if not ir_matrix.is_valid_for_z3:
             return {"status": "REJECTED", "metaphor_probability": 0.0, "reason": "İnşâî form"}
 
@@ -292,18 +281,16 @@ class Layer1HeuristicGraph:
         for pred_id, arg_id, arity in ir_matrix.predicates:
             if arity == 2:
                 try:
-                    # Semantic IR formatından (amil_id + '_' + mamul_id) düğümleri ayır
-                    amil_str, mamul_str = arg_id.split('_', 1)
+                    # [LOGIC FIX]: Ayrıştırıcı '_' yerine '::' yapıldı.
+                    amil_str, mamul_str = arg_id.split('::', 1)
                     distance = self._get_distance(amil_str, mamul_str)
                     
-                    # Ontolojik eşik: 3 düğümden (Edge) daha uzak varlıkların isnadı ontolojik uyumsuzluk yaratır.
                     if distance > 3:
                         max_distance = max(max_distance, distance)
                         flagged_predicates.append(arg_id)
                 except ValueError:
-                    continue # İlişki formatı parçalanamazsa atla
+                    continue 
 
-        # Doğrusal regresyon bazlı Heuristic Karar (Max Prob = 1.0)
         metaphor_score = min((max_distance / 10.0), 1.0) if max_distance > 3 else 0.0
         is_metaphor_likely = metaphor_score >= 0.5
 
@@ -316,9 +303,6 @@ class Layer1HeuristicGraph:
         }
 
 
-==================================================
-DOSYA: ./core/layer2_rules.py
-==================================================
 ==================================================
 DOSYA: ./core/layer2_rules.py
 ==================================================
@@ -358,7 +342,8 @@ class Layer2RuleEngine:
         # 3. Düğüm (Node) Bazlı Teolojik Yasaklar (DSL Otoritesi)
         blocked_nodes = ruleset.get("blocked_nodes", [])
         for element in flagged_elements:
-            nodes = element.split('_')
+            # [LOGIC FIX]: L1 Graph'tan gelen 'amil::mamul' formatını '_' yerine '::' ile ayırarak ontolojik kimlikleri (Örn: 'Tekvin') izole et
+            nodes = element.split('::')
             for node in nodes:
                 if node in blocked_nodes:
                     return {
@@ -381,29 +366,21 @@ from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
 class Layer3SMTCircuitBreaker:
-    """
-    İzole Z3 Çözücü Katmanı (Devre Kesici ve Cache Motoru).
-    Faz 2 - Adım 3: Kripke Semantiği (WorldSort) ve NestedPredicate (Hiyerarşik IR)
-    yapılarını destekleyen özyineli SMT derleyicisi ve derin önbellek algoritması.
-    """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 2000):
         self.core_solver = solver
         self.core_solver.solver.set("timeout", timeout_ms)
         self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
 
     def _freeze_ir_matrix(self, predicates: list) -> Tuple:
-        """Hiyerarşik (Nested) Pydantic listelerini Hashable (değiştirilemez) Tuple'lara dönüştürür."""
         frozen_elements = []
         for item in predicates:
             if isinstance(item, tuple):
                 frozen_elements.append(item)
             elif isinstance(item, NestedPredicate):
                 frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
-        # Kombinatoryal tekrarı önlemek için düğümler sıralanarak (lexicographical) imza oluşturulur
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
     def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef) -> z3.ExprRef:
-        """IR Matrisini Z3 Node'larına dönüştüren özyineli inşacı (Recursive Builder)."""
         if isinstance(item, tuple):
             pred_id, arg_id, arity = item
             if arity == 1:
@@ -411,7 +388,8 @@ class Layer3SMTCircuitBreaker:
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
                 return predicate(w_const, entity_const)
             elif arity == 2:
-                amil_str, mamul_str = arg_id.split('_', 1) 
+                # [LOGIC FIX]: Ayrıştırıcı '_' yerine '::' yapıldı.
+                amil_str, mamul_str = arg_id.split('::', 1) 
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
@@ -419,13 +397,11 @@ class Layer3SMTCircuitBreaker:
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
-            # NestedPredicate (Kadiyye-i Şartiyye) Çözümlemesi
             args = [self._build_z3_expr(a, w_const) for a in item.args]
             if item.operator == "Luzumi":
-                # Şartlı önermelerin ana omurgası (Implies)
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
-                return z3.And(args) # N-Ary bağlama
+                return z3.And(args) 
             elif item.operator == "Inadi":
                 if len(args) == 2:
                     return z3.And(z3.Or(args[0], args[1]), z3.Not(z3.And(args[0], args[1])))
@@ -434,9 +410,6 @@ class Layer3SMTCircuitBreaker:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 
     def execute_sat_check(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
-        """Güvenli ve izole edilmiş Z3 SAT çözümü. Modal uzay destekli."""
-        
-        # 1. Hiyerarşik İmza Üretimi
         matrix_signature = self._freeze_ir_matrix(ir_matrix.predicates)
         
         if matrix_signature in self._memoization_cache:
@@ -445,7 +418,6 @@ class Layer3SMTCircuitBreaker:
         self.core_solver.solver.push()
         
         try:
-            # Muvaccehât (Modalite): Her önerme varsayılan bir baz uzayda (w_base) test edilir
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
             
             for item in ir_matrix.predicates:
@@ -1167,7 +1139,7 @@ class DiscourseRegister:
 DOSYA: ./linguistics/ilm_wad_adapter.py
 ==================================================
 from __future__ import annotations
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Dict, Union, Optional
 from pydantic import BaseModel, ConfigDict
 from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.pragmatics import PragmaticsFilter
@@ -1175,10 +1147,6 @@ from linguistics.discourse_state import DiscourseRegister
 from linguistics.sarf_parser import MorphologicalAnalysis
 
 class NestedPredicate(BaseModel):
-    """
-    Faz 1 - Adım 3: Düz (Flat) tuple yapısını hiyerarşik Kadiyye-i Şartiyye
-    kapsamlarına (Lüzumi/İnadi) bağlayan özyineli (recursive) IR düğümü.
-    """
     model_config = ConfigDict(extra="forbid")
     operator: str
     args: List[Union[Tuple[str, str, int], 'NestedPredicate']]
@@ -1196,13 +1164,18 @@ class IlmWadAdapter:
         self.lexicon = lexicon
         self.discourse = discourse
         self.pragmatics = PragmaticsFilter()
-        # Transliterasyonlu İslâmî Şart Edatları (Conditional Particles)
         self.conditional_particles = {"in", "iza", "law", "amma"}
+        self.current_tevil_targets: List[str] = []
 
-    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> SemanticStatementIR:
+    # [LOGIC FIX]: 'tevil_fallback_nodes' parametresi eklendi
+    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None) -> SemanticStatementIR:
         if auto_lexicon is None:
             auto_lexicon = {}
-
+        if tevil_fallback_nodes is None:
+            tevil_fallback_nodes = []
+            
+        self.current_tevil_targets = tevil_fallback_nodes
+        
         if not self.pragmatics.is_khabari(tokens):
             return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False)
 
@@ -1212,7 +1185,6 @@ class IlmWadAdapter:
         has_condition = any(t.lower() in self.conditional_particles for t in tokens)
 
         for amil, mamul, rel_type, _ in dependencies:
-            # Şart edatlarını ontolojik varlık çözümlemesinden (resolve_entity) muaf tut
             if amil.lower() in self.conditional_particles or mamul.lower() in self.conditional_particles:
                 continue
 
@@ -1226,9 +1198,6 @@ class IlmWadAdapter:
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
         if has_condition:
-            # Şart edatı tespit edildiğinde, düz matris "Luzumi" operatörü ile 
-            # nested (hiyerarşik) bir şartlı önerme gövdesine hapsedilir.
-            # (Faz 4 FSM entegrasyonunda bu düğüm Mukaddem ve Tâli olarak iki alt-ağaca bölünecektir).
             nested_logic = NestedPredicate(
                 operator="Luzumi",
                 args=atomic_predicates
@@ -1249,9 +1218,18 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        ontologic_id = self.lexicon.resolve_id(search_key, active_namespace)
+        # Varsayılan literal bağlam çekilir
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Kadiyye-i_Hamliyye")
         
-        # Söylem belleğine sadece ontolojik yük taşıyan isim ve türevleri (Fiil/Harf hariç) atılır
+        # [LOGIC FIX]: Te'vil hedefleri Z3'ten UNSAT dönmüşse Leksikon Tensöründe mecaz anlama düş (Fallback)
+        if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
+            try:
+                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback")
+            except ValueError:
+                ontologic_id = base_ontologic_id
+        else:
+            ontologic_id = base_ontologic_id
+        
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_"):
             self.discourse.add_mention(word, ontologic_id)
         
@@ -2136,10 +2114,167 @@ DOSYA: ./tests/__init__.py
 
 
 ==================================================
+DOSYA: ./tests/integration/__init__.py
+==================================================
+
+
+
+==================================================
+DOSYA: ./tests/integration/test_adab_al_bahth_fsm.py
+==================================================
+import unittest
+from pathlib import Path
+from core.models import OntologyLoader
+from core.logic_engine import AristotelianSolver
+from core.layer1_graph import Layer1HeuristicGraph
+from core.layer2_rules import Layer2RuleEngine
+from core.layer3_smt import Layer3SMTCircuitBreaker
+from core.epistemic_orchestrator import EpistemicOrchestrator
+from linguistics.contextual_lexicon import ContextualLexicon
+from linguistics.discourse_state import DiscourseRegister
+from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
+from schools.taftazani.adab_al_bahth import AdabAlBahthEngine
+from schools.ashari_usul import AshariUsul
+from schools.salafi_usul import SalafiUsul
+
+class TestDialecticsFSM(unittest.TestCase):
+    def setUp(self):
+        loader = OntologyLoader()
+        self.ontology = loader.load(Path("data/base_ontology.json"))
+        self.solver = AristotelianSolver(self.ontology)
+        self.lexicon = ContextualLexicon()
+        self.discourse = DiscourseRegister()
+        self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
+        self.l1 = Layer1HeuristicGraph(self.ontology)
+        self.l2 = Layer2RuleEngine()
+        self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
+        self.orchestrator = EpistemicOrchestrator(self.adapter, self.l1, self.l2, self.l3)
+        self.engine = AdabAlBahthEngine(self.solver, self.discourse)
+
+    def test_fsm_sequential_integrity(self):
+        """[Faz 4.2] FSM'nin AWAITING_CLAIM -> AWAITING_EVIDENCE -> AWAITING_ATTACK sıralaması ihlali koruması."""
+        with self.assertRaises(ValueError):
+            self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
+            
+        self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
+        self.assertEqual(self.engine.current_state, "AWAITING_EVIDENCE", "FSM durum geçişi başarısız.")
+
+    def test_cross_school_muaradah_stalemate(self):
+        """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu."""
+        mujib_ir = SemanticStatementIR(active_namespace="Ashari", predicates=[("Cevher", "Cevher", 1)], is_valid_for_z3=True)
+        sail_ir = SemanticStatementIR(active_namespace="Salafi", predicates=[("Cism", "Cism", 1)], is_valid_for_z3=True)
+        
+        result = self.orchestrator.execute_cross_school_muaradah(
+            mujib_ir, AshariUsul(), sail_ir, SalafiUsul()
+        )
+        
+        self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE", "MUARADAH_FAILED"], "[DİYALEKTİK ÇÖKÜŞ] Çapraz ekol çarpışması hatası.")
+
+if __name__ == '__main__':
+    unittest.main()
+
+
+==================================================
+DOSYA: ./tests/integration/test_defeasibility_loop.py
+==================================================
+import unittest
+from pathlib import Path
+from core.models import OntologyLoader
+from core.logic_engine import AristotelianSolver
+from core.layer1_graph import Layer1HeuristicGraph
+from core.layer2_rules import Layer2RuleEngine
+from core.layer3_smt import Layer3SMTCircuitBreaker
+from core.epistemic_orchestrator import EpistemicOrchestrator
+from linguistics.tokenizer import EpistemicTokenizer
+from linguistics.sarf_parser import SarfEngine
+from linguistics.nahiv_ast import NahivDependencyCompiler
+from linguistics.contextual_lexicon import ContextualLexicon
+from linguistics.discourse_state import DiscourseRegister
+from linguistics.ilm_wad_adapter import IlmWadAdapter
+from schools.maturidi_usul import MaturidiUsul
+from schools.salafi_usul import SalafiUsul
+
+class TestDefeasibilityEngine(unittest.TestCase):
+    def setUp(self):
+        loader = OntologyLoader()
+        self.ontology = loader.load(Path("data/base_ontology.json"))
+        self.solver = AristotelianSolver(self.ontology)
+        self.tokenizer = EpistemicTokenizer()
+        self.sarf = SarfEngine()
+        self.nahiv = NahivDependencyCompiler()
+        self.lexicon = ContextualLexicon()
+        self.discourse = DiscourseRegister()
+        
+        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
+        
+        # Mâtürîdî uzayında literal anlam Kadiyye-i_Hamliyye, mecaz anlam Metaphor_Fallback olarak ayrıştırılmalıdır.
+        self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
+        self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
+        
+        self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
+        self.lexicon.register_word("tekvin", "Maturidi", "Tekvin")
+        
+        self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
+        self.l1 = Layer1HeuristicGraph(self.ontology)
+        
+        # [MOCK L1 GRAPH] Karîne-i Mânia algılanması için sahte ontolojik mesafeler (LCA>3) enjekte edilir
+        self.l1.parent_map["Sifat_Yed_Literal"] = "Cism"
+        self.l1.parent_map["Wajib_al_Wujud"] = "Divine"
+        self.l1.parent_map["Tekvin"] = "Sifat_Action"
+        self.l1.parent_map["Cism"] = "Cevher"
+        self.l1.parent_map["Cevher"] = "Base_Root"
+        self.l1.parent_map["Divine"] = "Absolute_Root"
+        self.l1.parent_map["Sifat_Action"] = "Action_Root"
+        self.l1.parent_map["Action_Root"] = "Absolute_Root"
+
+        self.l2 = Layer2RuleEngine()
+        self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
+        
+        # [MOCK L3 Z3] Z3'ün Literal bağlamda çelişki (UNSAT) üretmesini simüle ediyoruz
+        original_sat_check = self.l3.execute_sat_check
+        def mock_sat_check(ir_matrix):
+            for pred in ir_matrix.predicates:
+                if isinstance(pred, tuple) and "Sifat_Yed_Literal" in pred[1]:
+                    return {"status": "UNSAT", "message": "AXIOM_DISJOINT_Wajib_al_Wujud_AND_Sifat_Yed_Literal"}
+            return original_sat_check(ir_matrix)
+        self.l3.execute_sat_check = mock_sat_check
+
+        self.orchestrator = EpistemicOrchestrator(self.adapter, self.l1, self.l2, self.l3)
+
+        sentence = "yadu allahi"
+        self.tokens = self.tokenizer.tokenize(sentence)
+        self.morph = self.sarf.derive_lexicon(self.tokens)
+        self.ast = self.nahiv.suggest_dependencies(self.tokens, self.morph)
+
+        tekvin_sentence = "tekvinu allahi"
+        self.tekvin_tokens = self.tokenizer.tokenize(tekvin_sentence)
+        self.tekvin_morph = self.sarf.derive_lexicon(self.tekvin_tokens)
+        self.tekvin_ast = self.nahiv.suggest_dependencies(self.tekvin_tokens, self.tekvin_morph)
+
+    def test_autonomous_tevil_recovery(self):
+        """[Faz 3.2] Z3 UNSAT sonrasında orkestratörün Metaphor_Fallback ile kurtarma (SAT) işlemi."""
+        result = self.orchestrator.process_statement(self.tokens, self.ast, MaturidiUsul(), self.morph)
+        self.assertTrue(result.get("tevil_applied"), "[ÇÖKÜŞ] Defeasibility döngüsü tetiklenmedi.")
+        self.assertEqual(result["status"], "SAT", "[MANTIK HATASI] Te'vil sonrası Z3 SAT üretemedi.")
+
+    def test_l2_blocked_nodes_dsl(self):
+        """[Faz 3.3] Maturidi Usulü'ndeki 'Tekvin' spesifik DSL düğüm blokesi."""
+        result = self.orchestrator.process_statement(self.tekvin_tokens, self.tekvin_ast, MaturidiUsul(), self.tekvin_morph)
+        self.assertEqual(result["status"], "REJECTED_BY_USUL", "[OTORİTE İHLALİ] Yasaklı düğüm te'vile uğradı.")
+        
+    def test_zero_transformation_salafi(self):
+        """[Faz 3.3] Selefi Usulü'nün (allow_tevil=False) mutlak literalizm kısıtı."""
+        result = self.orchestrator.process_statement(self.tokens, self.ast, SalafiUsul(), self.morph)
+        # Selefi kural motoru "allow_tevil=False" olduğu için direkt BLOCK atar ve usûl reddi döner
+        self.assertEqual(result["status"], "REJECTED_BY_USUL", "[OTORİTE İHLALİ] Selefi usulünde te'vil (geri çekilme) yapıldı.")
+
+if __name__ == '__main__':
+    unittest.main()
+
+
+==================================================
 DOSYA: ./tests/integration/test_semantic_pipeline.py
 ==================================================
-# DOSYA: ./tests/integration/test_semantic_pipeline.py
-
 import unittest
 from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.discourse_state import DiscourseRegister
@@ -2147,40 +2282,30 @@ from linguistics.pragmatics import PragmaticsFilter
 from linguistics.ilm_wad_adapter import IlmWadAdapter
 
 class TestSemanticPipeline(unittest.TestCase):
-    """
-    Faz 1 ve Faz 2 bileşenlerinin (Polimorfik İsim Alanları, Söylem Belleği,
-    Pragmatik Filtre ve Semantik IR Üretimi) entegrasyon testlerini içerir.
-    """
-
     def setUp(self):
-        """Her testten önce izole test ortamını (fixtures) sıfırla ve hazırla."""
         self.lexicon = ContextualLexicon()
         self.discourse = DiscourseRegister()
         self.pragmatics = PragmaticsFilter()
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
-        # Temel ontolojik matrisin enjeksiyonu
         self.lexicon.register_word("Zeydun", "Base", "Zeyd_Entity")
         self.lexicon.register_word("Daraba", "Base", "Fiil_Daraba")
         
-        # Teolojik Polimorfizm enjeksiyonu
-        self.lexicon.register_word("Istiva", "Salafi", "Istiva_Literal")
-        self.lexicon.register_word("Istiva", "Ashari", "Istiva_Metaphor")
+        # [LOGIC FIX]: 3D Leksikon imza uyuşmazlığı çözüldü
+        self.lexicon.register_word("Istiva", "Salafi", "Istiva_Literal", proposition_type="Kadiyye-i_Hamliyye")
+        self.lexicon.register_word("Istiva", "Ashari", "Istiva_Metaphor", proposition_type="Kadiyye-i_Hamliyye")
 
     def test_polymorphic_lexicon_resolution(self):
         """[BRQ-02] Polimorfik isim alanı ve kalıtım (fallback) doğrulaması."""
-        # 1. Base (Kalıtsal) Fallback Testi
         resolved_base = self.lexicon.resolve_id("Zeydun", "Salafi")
-        self.assertEqual(resolved_base, "Zeyd_Entity", "Base ontolojiye geri çekilme (fallback) başarısız.")
+        self.assertEqual(resolved_base, "Zeyd_Entity")
 
-        # 2. Namespace İzolasyon Testi
         resolved_salafi = self.lexicon.resolve_id("Istiva", "Salafi")
-        self.assertEqual(resolved_salafi, "Istiva_Literal", "Selefi isim alanı ihlali.")
+        self.assertEqual(resolved_salafi, "Istiva_Literal")
 
         resolved_ashari = self.lexicon.resolve_id("Istiva", "Ashari")
-        self.assertEqual(resolved_ashari, "Istiva_Metaphor", "Eş'ari isim alanı ihlali.")
+        self.assertEqual(resolved_ashari, "Istiva_Metaphor")
 
-        # 3. Tanımsız Kelime (Exception) Testi
         with self.assertRaises(ValueError):
             self.lexicon.resolve_id("Meçhul", "Base")
 
@@ -2188,47 +2313,39 @@ class TestSemanticPipeline(unittest.TestCase):
         """[BRQ-04] Söylem belleği ve zamir (Anafora) çözümlemesi doğrulaması."""
         self.discourse.add_mention("Zeydun", "Zeyd_Entity")
         
-        # Geçerli Zamir Çözümlemesi
         resolved_id = self.discourse.resolve_pronoun("Huve")
-        self.assertEqual(resolved_id, "Zeyd_Entity", "Anafora referans kaybı yaşadı.")
+        self.assertEqual(resolved_id, "Zeyd_Entity")
         
-        # Zamir Olmayan Kelimenin Pas Geçilmesi
-        self.assertIsNone(self.discourse.resolve_pronoun("Kalem"), "Normal kelime zamir olarak işlendi.")
+        self.assertIsNone(self.discourse.resolve_pronoun("Kalem"))
         
-        # Boş Bellekte Zamir Çözümleme Hatası
         self.discourse.clear_memory()
         with self.assertRaises(ValueError):
             self.discourse.resolve_pronoun("Huve")
 
     def test_khabari_propositional_isolation(self):
-        """[BRQ-03] 'İlm-i Ma'ânî (Pragmatics) filtresi doğrulaması."""
         khabari_tokens = ["Daraba", "Zeydun", "Amran"]
-        self.assertTrue(self.pragmatics.is_khabari(khabari_tokens), "Khabarî önerme reddedildi.")
+        self.assertTrue(self.pragmatics.is_khabari(khabari_tokens))
         
         inshai_tokens = ["Hal", "Daraba", "Zeydun"]
-        self.assertFalse(self.pragmatics.is_khabari(inshai_tokens), "İnşâî dizilim sisteme sızdı.")
+        self.assertFalse(self.pragmatics.is_khabari(inshai_tokens))
 
     def test_semantic_ir_matrix_generation(self):
-        """[BRQ-03] 'İlm-i Vaz Adaptörünün Z3 öncesi Sentaktik-Semantik IR üretim doğrulaması."""
         tokens = ["Daraba", "Zeydun"]
         dependencies = [("Daraba", "Zeydun", "Fail", "Marfu")]
         
         ir_matrix = self.adapter.generate_ir(tokens, dependencies, active_namespace="Base")
         
-        self.assertTrue(ir_matrix.is_valid_for_z3, "IR Matrisi geçersiz işaretlendi.")
-        self.assertEqual(ir_matrix.active_namespace, "Base", "İsim alanı IR matrisine taşınamadı.")
+        self.assertTrue(ir_matrix.is_valid_for_z3)
+        self.assertEqual(ir_matrix.active_namespace, "Base")
         
-        # Predicate Arite ve İlişki Kontrolü
         predicates = ir_matrix.predicates
-        self.assertEqual(len(predicates), 3, "Eksik veya fazla arite yüklemesi.")
+        self.assertEqual(len(predicates), 3)
         
-        # Beklenen: [('Rel_Fail', 'Fiil_Daraba_Zeyd_Entity', 2), ('Fiil_Daraba', 'Fiil_Daraba', 1), ('Zeyd_Entity', 'Zeyd_Entity', 1)]
-        self.assertEqual(predicates[0][0], "Rel_Fail", "İlişkisel (N-Ary) operatör kökünü kaybetti.")
-        self.assertEqual(predicates[0][1], "Fiil_Daraba_Zeyd_Entity", "Amil-Ma'mul ilişkisel ID'si hatalı oluşturuldu.")
+        self.assertEqual(predicates[0][0], "Rel_Fail")
+        # [LOGIC FIX]: '_' yerine '::' separasyonu ile test uyumlandırıldı
+        self.assertEqual(predicates[0][1], "Fiil_Daraba::Zeyd_Entity")
 
     def test_anaphoric_ir_injection(self):
-        """Sentaktik ağaca söylem belleği (Zamir) entegrasyonu doğrulaması."""
-        # Geçmiş bağlama bir varlık ekle
         self.discourse.add_mention("Zeydun", "Zeyd_Entity")
         
         tokens = ["Daraba", "Huve"]
@@ -2236,9 +2353,9 @@ class TestSemanticPipeline(unittest.TestCase):
         
         ir_matrix = self.adapter.generate_ir(tokens, dependencies, active_namespace="Base")
         
-        # 'Huve' token'ının IR matrisinde doğrudan 'Zeyd_Entity' olarak derlenmesi gerekir
         predicates = ir_matrix.predicates
-        self.assertEqual(predicates[0][1], "Fiil_Daraba_Zeyd_Entity", "Zamir, IR matrisine ontolojik kimliğiyle zerk edilemedi.")
+        # [LOGIC FIX]: '_' yerine '::' separasyonu ile test uyumlandırıldı
+        self.assertEqual(predicates[0][1], "Fiil_Daraba::Zeyd_Entity")
 
 if __name__ == '__main__':
     unittest.main()
@@ -2248,6 +2365,45 @@ if __name__ == '__main__':
 DOSYA: ./tests/test_core/__init__.py
 ==================================================
 
+
+
+==================================================
+DOSYA: ./tests/test_core/test_modal_and_hypotetical.py
+==================================================
+import unittest
+import z3
+from core.logic_parser import Z3ExpressionBuilder
+
+class TestModalLogicEngine(unittest.TestCase):
+    def setUp(self):
+        self.builder = Z3ExpressionBuilder()
+        self.solver = z3.Solver()
+
+    def test_kripke_semantics_world_injection(self):
+        """[Faz 2.1] N-Ary yüklemlere otonom olarak 'WorldSort' parametresi enjeksiyonu."""
+        expr_str = "Forall([x], Insan(x))"
+        z3_ast = self.builder.parse(expr_str)
+        # Oluşan AST'de 'Insan' yükleminin aritesi (w_base, x) olarak 2 olmalıdır.
+        self.assertTrue("w_base" in str(z3_ast), "[MODAL ÇÖKÜŞ] Olası Dünyalar (WorldSort) Z3 değişkenine zerk edilemedi.")
+
+    def test_inadi_mutually_exclusive_operator(self):
+        """[Faz 1.1] İnadi Şartiyye (Hulüvv ve Cem'i Mânia) XOR mantıksal operatörü."""
+        # [DÜZELTME]: 'x' değişkeni Forall niceleyicisi (Quantifier) ile scope içine alınarak bağlı değişken (Bound Variable) yapıldı.
+        expr_str = "Forall([x], Inadi(Fail_Muhtar(x), Mecbur(x)))"
+        z3_ast = self.builder.parse(expr_str)
+        self.solver.add(z3_ast)
+        
+        # [Z3 ASSERTION]: İnadi (XOR) şartına göre bir varlığın aynı anda hem Fail_Muhtar hem Mecbur olması 
+        # (Zıtların Cem'i) ontolojik olarak imkansızdır (Müstahil).
+        conflict_expr = self.builder.parse("Exists([y], And(Fail_Muhtar(y), Mecbur(y)))")
+        self.solver.add(conflict_expr)
+        
+        # Testin UNSAT dönmesi, Z3 motorunun İnadi (XOR) operatörünü başarılı şekilde işlediğini kanıtlar.
+        result = self.solver.check()
+        self.assertEqual(result, z3.unsat, "[ZAFİYET] İnadi Şartiyye (Cem'i Mânia) ihlali Z3 tarafından engellenemedi.")
+
+if __name__ == '__main__':
+    unittest.main()
 
 
 ==================================================
