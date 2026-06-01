@@ -1,60 +1,78 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel
 
 class EntityMention(BaseModel):
     word: str
     ontologic_id: str
     timestamp: int
+    agent: Literal["Mujib", "Sail"]
 
 class DiscourseRegister:
     """
-    Kapsamlı (Scoped) Söylem Belleği (Discourse Register).
-    Z3 push/pop state mimarisiyle tam senkronize çalışır.
-    İptal edilebilir (Defeasible) önermeler çürütüldüğünde, ilgili
-    bağlam çerçevesi (Frame) yok edilerek bellek zehirlenmesi engellenir.
+    Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
+    Faz 4 - Adım 1: Taftazânî Diyalektiği için Mucîb ve Sâil yığıtları (Stack) izole edilmiştir.
+    Z3 push/pop state mimarisiyle tam senkronize, aktör-spesifik çalışır.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
-        self.frames: List[List[EntityMention]] = [[]]  
+        self.mujib_frames: List[List[EntityMention]] = [[]]  
+        self.sail_frames: List[List[EntityMention]] = [[]]  
         self.clock: int = 0
         self.pronouns = {"huve", "hiye", "huma", "hum", "hunne"}
+        self.active_agent: Literal["Mujib", "Sail"] = "Mujib" # Varsayılan aktör iddia sahibidir
+
+    def set_agent(self, agent: Literal["Mujib", "Sail"]) -> None:
+        """Diyalektik sırasına göre aktif aktörü (Sâil veya Mucîb) değiştirir."""
+        self.active_agent = agent
 
     def push_scope(self) -> None:
-        """Z3.push() veya yeni bir diyalektik iddia açıldığında alt bağlam (Scope) yaratır."""
-        self.frames.append([])
+        """Z3.push() veya yeni bir diyalektik iddia açıldığında, sadece aktif aktörün alt bağlamını yaratır."""
+        if self.active_agent == "Mujib":
+            self.mujib_frames.append([])
+        else:
+            self.sail_frames.append([])
 
     def pop_scope(self) -> None:
-        """Z3.pop() tetiklendiğinde veya iddia çürütüldüğünde varsayımsal bağlamı imha eder."""
-        if len(self.frames) > 1:
-            self.frames.pop()
+        """Z3.pop() tetiklendiğinde veya iddia çürütüldüğünde aktif aktörün varsayımsal bağlamını imha eder."""
+        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
+        
+        if len(frames) > 1:
+            frames.pop()
         else:
-            raise RuntimeError("[BELLEK HATASI] Global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
+            raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
 
     def add_mention(self, word: str, ontologic_id: str) -> None:
-        """Mevcut (Aktif) kapsama yeni bir ontolojik varlık ekler."""
-        self.frames[-1].append(EntityMention(
+        """Aktif aktörün kapsamına yeni bir ontolojik varlık ataması yapar."""
+        mention = EntityMention(
             word=word, 
             ontologic_id=ontologic_id, 
-            timestamp=self.clock
-        ))
+            timestamp=self.clock,
+            agent=self.active_agent
+        )
+        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
+        frames[-1].append(mention)
         self.clock += 1
 
     def resolve_pronoun(self, pronoun: str) -> Optional[str]:
         """
-        Zamir (Anafora) tespiti. 
-        Aktif çerçeveden başlayarak (LIFO) geçmişe doğru tarar ve ilk uyumlu varlığı döndürür.
+        Aktör-Spesifik Zamir (Anafora) tespiti.
+        Sadece konuşan aktörün kendi yığıtındaki (LIFO) geçmiş kabulleri (Müsellemat) taranır.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
             return None
 
-        for frame in reversed(self.frames):
+        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
+
+        for frame in reversed(frames):
             if frame:
                 return frame[-1].ontologic_id
                 
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")
         
     def clear_memory(self) -> None:
-        """Mezhep (Usûl) profili değiştiğinde veya oturum sıfırlandığında belleği donanımsal olarak temizler."""
-        self.frames = [[]]
+        """Mezhep (Usûl) profili değiştiğinde veya diyalektik oturum sıfırlandığında belleği donanımsal olarak temizler."""
+        self.mujib_frames = [[]]
+        self.sail_frames = [[]]
         self.clock = 0
+        self.active_agent = "Mujib"
