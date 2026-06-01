@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Dict, Union, Optional
 from pydantic import BaseModel, ConfigDict
 from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.pragmatics import PragmaticsFilter
@@ -7,10 +7,6 @@ from linguistics.discourse_state import DiscourseRegister
 from linguistics.sarf_parser import MorphologicalAnalysis
 
 class NestedPredicate(BaseModel):
-    """
-    Faz 1 - Adım 3: Düz (Flat) tuple yapısını hiyerarşik Kadiyye-i Şartiyye
-    kapsamlarına (Lüzumi/İnadi) bağlayan özyineli (recursive) IR düğümü.
-    """
     model_config = ConfigDict(extra="forbid")
     operator: str
     args: List[Union[Tuple[str, str, int], 'NestedPredicate']]
@@ -28,13 +24,18 @@ class IlmWadAdapter:
         self.lexicon = lexicon
         self.discourse = discourse
         self.pragmatics = PragmaticsFilter()
-        # Transliterasyonlu İslâmî Şart Edatları (Conditional Particles)
         self.conditional_particles = {"in", "iza", "law", "amma"}
+        self.current_tevil_targets: List[str] = []
 
-    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> SemanticStatementIR:
+    # [LOGIC FIX]: 'tevil_fallback_nodes' parametresi eklendi
+    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None) -> SemanticStatementIR:
         if auto_lexicon is None:
             auto_lexicon = {}
-
+        if tevil_fallback_nodes is None:
+            tevil_fallback_nodes = []
+            
+        self.current_tevil_targets = tevil_fallback_nodes
+        
         if not self.pragmatics.is_khabari(tokens):
             return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False)
 
@@ -44,7 +45,6 @@ class IlmWadAdapter:
         has_condition = any(t.lower() in self.conditional_particles for t in tokens)
 
         for amil, mamul, rel_type, _ in dependencies:
-            # Şart edatlarını ontolojik varlık çözümlemesinden (resolve_entity) muaf tut
             if amil.lower() in self.conditional_particles or mamul.lower() in self.conditional_particles:
                 continue
 
@@ -58,9 +58,6 @@ class IlmWadAdapter:
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
         if has_condition:
-            # Şart edatı tespit edildiğinde, düz matris "Luzumi" operatörü ile 
-            # nested (hiyerarşik) bir şartlı önerme gövdesine hapsedilir.
-            # (Faz 4 FSM entegrasyonunda bu düğüm Mukaddem ve Tâli olarak iki alt-ağaca bölünecektir).
             nested_logic = NestedPredicate(
                 operator="Luzumi",
                 args=atomic_predicates
@@ -81,9 +78,18 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        ontologic_id = self.lexicon.resolve_id(search_key, active_namespace)
+        # Varsayılan literal bağlam çekilir
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Kadiyye-i_Hamliyye")
         
-        # Söylem belleğine sadece ontolojik yük taşıyan isim ve türevleri (Fiil/Harf hariç) atılır
+        # [LOGIC FIX]: Te'vil hedefleri Z3'ten UNSAT dönmüşse Leksikon Tensöründe mecaz anlama düş (Fallback)
+        if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
+            try:
+                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback")
+            except ValueError:
+                ontologic_id = base_ontologic_id
+        else:
+            ontologic_id = base_ontologic_id
+        
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_"):
             self.discourse.add_mention(word, ontologic_id)
         

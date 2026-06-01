@@ -16,8 +16,19 @@ class TestModalLogicEngine(unittest.TestCase):
 
     def test_inadi_mutually_exclusive_operator(self):
         """[Faz 1.1] İnadi Şartiyye (Hulüvv ve Cem'i Mânia) XOR mantıksal operatörü."""
-        expr_str = "Inadi(Fail_Muhtar(x), Mecbur(x))"
+        # [DÜZELTME]: 'x' değişkeni Forall niceleyicisi (Quantifier) ile scope içine alınarak bağlı değişken (Bound Variable) yapıldı.
+        expr_str = "Forall([x], Inadi(Fail_Muhtar(x), Mecbur(x)))"
         z3_ast = self.builder.parse(expr_str)
         self.solver.add(z3_ast)
-        # Her ikisinin de aynı anda doğru (And) veya aynı anda yanlış (Not Or) olma durumu UNSAT vermelidir.
-        pass # Z3 SAT/UNSAT assert işlemleri
+        
+        # [Z3 ASSERTION]: İnadi (XOR) şartına göre bir varlığın aynı anda hem Fail_Muhtar hem Mecbur olması 
+        # (Zıtların Cem'i) ontolojik olarak imkansızdır (Müstahil).
+        conflict_expr = self.builder.parse("Exists([y], And(Fail_Muhtar(y), Mecbur(y)))")
+        self.solver.add(conflict_expr)
+        
+        # Testin UNSAT dönmesi, Z3 motorunun İnadi (XOR) operatörünü başarılı şekilde işlediğini kanıtlar.
+        result = self.solver.check()
+        self.assertEqual(result, z3.unsat, "[ZAFİYET] İnadi Şartiyye (Cem'i Mânia) ihlali Z3 tarafından engellenemedi.")
+
+if __name__ == '__main__':
+    unittest.main()

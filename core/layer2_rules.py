@@ -1,6 +1,3 @@
-==================================================
-DOSYA: ./core/layer2_rules.py
-==================================================
 from typing import Dict, Any, List
 
 class Layer2RuleEngine:
@@ -37,7 +34,8 @@ class Layer2RuleEngine:
         # 3. Düğüm (Node) Bazlı Teolojik Yasaklar (DSL Otoritesi)
         blocked_nodes = ruleset.get("blocked_nodes", [])
         for element in flagged_elements:
-            nodes = element.split('_')
+            # [LOGIC FIX]: L1 Graph'tan gelen 'amil::mamul' formatını '_' yerine '::' ile ayırarak ontolojik kimlikleri (Örn: 'Tekvin') izole et
+            nodes = element.split('::')
             for node in nodes:
                 if node in blocked_nodes:
                     return {
