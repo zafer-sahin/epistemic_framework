@@ -3,11 +3,6 @@ from schools.base_usul import AbstractSchoolUsul
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class MaturidiUsul(AbstractSchoolUsul):
-    """
-    Mâtürîdî Yönlü Asiklik Çizgesi (DAG) ve DSL Kuralları.
-    Eş'arîlikten farklı olarak 'Tekvin' ve fiilî sıfatlarda katı 
-    ontolojik kısıtlar (Blocked Nodes) uygular.
-    """
     @property
     def namespace(self) -> str:
         return "Maturidi"
@@ -16,19 +11,21 @@ class MaturidiUsul(AbstractSchoolUsul):
     def dsl_ruleset(self) -> Dict[str, Any]:
         return {
             "allow_tevil": True,
-            "blocked_nodes": ["Tekvin", "Hikmet"] # Bu ontolojik düğümlerde te'vil mekanizması kilitlenir.
+            "max_tevil_retries": 2,
+            "blocked_nodes": ["Tekvin", "Hikmet"] 
         }
 
-    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine) -> Dict[str, Any]:
+    # [LOGIC FIX]: İmza uyumluluğu ve parametre aktarımı sağlandı.
+    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
         l2_decision = l2_engine.enforce_rules(
             is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False), 
             ruleset=self.dsl_ruleset, 
-            flagged_elements=l1_analysis.get("flagged_elements", [])
+            flagged_elements=l1_analysis.get("flagged_elements", []),
+            current_attempt=current_attempt
         )
         
-        # Mâtürîdî spesifik blokajı
         if l2_decision["action"] == "BLOCK":
             return {
                 "status": "REJECTED_BY_USUL", 

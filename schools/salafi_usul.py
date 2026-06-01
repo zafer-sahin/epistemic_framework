@@ -3,7 +3,6 @@ from schools.base_usul import AbstractSchoolUsul
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class SalafiUsul(AbstractSchoolUsul):
-    """Selefî Yönlü Asiklik Çizgesi (DAG) ve DSL Kuralları."""
     @property
     def namespace(self) -> str:
         return "Salafi"
@@ -12,16 +11,19 @@ class SalafiUsul(AbstractSchoolUsul):
     def dsl_ruleset(self) -> Dict[str, Any]:
         return {
             "allow_tevil": False,
-            "blocked_nodes": ["ALL"] # Sıkı lafızcılık (Strict Literalism). Sıfır transformasyon.
+            "max_tevil_retries": 0,
+            "blocked_nodes": ["ALL"] 
         }
 
-    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine) -> Dict[str, Any]:
+    # [LOGIC FIX]: İmza uyumluluğu ve parametre aktarımı sağlandı.
+    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
         l2_decision = l2_engine.enforce_rules(
             is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False), 
             ruleset=self.dsl_ruleset, 
-            flagged_elements=l1_analysis.get("flagged_elements", [])
+            flagged_elements=l1_analysis.get("flagged_elements", []),
+            current_attempt=current_attempt
         )
         
         if l2_decision["action"] == "BLOCK":

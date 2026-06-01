@@ -1,33 +1,42 @@
+==================================================
+DOSYA: ./core/layer2_rules.py
+==================================================
 from typing import Dict, Any, List
 
 class Layer2RuleEngine:
     """
     DSL (Domain Specific Language) Tabanlı Deterministik Kural Motoru.
-    Faz 11: Boolean bazlı ilkel yetkilendirme (allow_tevil) iptal edildi.
-    Usûl sınıflarının zerk ettiği 'ruleset' sözdizimi ayrıştırılarak 
-    düğüm (Node) bazlı teolojik kısıtlamalar uygulanır.
+    Faz 3 - Adım 3: Te'vil döngüleri için rekürsif limitasyon entegrasyonu.
+    Usûl sınıflarının belirlediği 'max_tevil_retries' limitini denetler.
     """
-    def enforce_rules(self, is_metaphor_likely: bool, ruleset: Dict[str, Any], flagged_elements: List[str] = None) -> Dict[str, Any]:
+    def enforce_rules(self, is_metaphor_likely: bool, ruleset: Dict[str, Any], flagged_elements: List[str] = None, current_attempt: int = 0) -> Dict[str, Any]:
         if flagged_elements is None:
             flagged_elements = []
 
-        if not is_metaphor_likely:
+        # 1. Te'vil Rekürsiyon Limiti Kontrolü (Infinite Loop Koruması)
+        max_retries = ruleset.get("max_tevil_retries", 1)
+        if current_attempt > max_retries:
+            return {
+                "action": "BLOCK",
+                "reason": f"[L2 Otorite İhlali] Te'vil deneme limiti ({max_retries}) aşıldı. Sonsuz döngü engellendi."
+            }
+
+        if not is_metaphor_likely and current_attempt == 0:
             return {
                 "action": "PROCEED_LITERAL",
                 "reason": "Karîne tespit edilmedi. Doğrudan Z3 Ontolojisine (Hakikat) yollanacak."
             }
 
-        # 1. Mutlak Sıfır-Transformasyon (Zero-Transformation) Kısıtı
+        # 2. Mutlak Sıfır-Transformasyon (Zero-Transformation) Kısıtı
         if not ruleset.get("allow_tevil", False):
             return {
                 "action": "BLOCK",
                 "reason": f"Usûl kuralları te'vili (mecazı) mutlak reddeder. İhlal Verisi: {flagged_elements}"
             }
             
-        # 2. Düğüm (Node) Bazlı Teolojik Yasaklar (DSL Otoritesi)
+        # 3. Düğüm (Node) Bazlı Teolojik Yasaklar (DSL Otoritesi)
         blocked_nodes = ruleset.get("blocked_nodes", [])
         for element in flagged_elements:
-            # L1'den gelen Rel_ edge verisini (Örn: Yed_Allah) parçala
             nodes = element.split('_')
             for node in nodes:
                 if node in blocked_nodes:
@@ -38,5 +47,5 @@ class Layer2RuleEngine:
 
         return {
             "action": "OVERRIDE_APPROVED",
-            "reason": f"Karîne-i Mânia Usûl tarafından onaylandı. Spesifik bir düğüm yasağına takılmadı. Etkilenenler: {flagged_elements}"
+            "reason": f"Karîne-i Mânia Usûl tarafından onaylandı. (Deneme: {current_attempt}/{max_retries}). Etkilenenler: {flagged_elements}"
         }

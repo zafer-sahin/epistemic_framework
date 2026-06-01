@@ -8,17 +8,13 @@ from typing import List, Optional, Literal, Dict, Any
 class EpistemicNamespace(BaseModel):
     model_config = ConfigDict(extra="forbid")
     
-    id: str  # Örn: "Base", "Maturidi", "Ashari"
-    parent_namespace: Optional[str] = None  # Hiyerarşik kalıtım için
+    id: str
+    parent_namespace: Optional[str] = None
 
 class TermModel(BaseModel):
-    """
-    Çifte çeviri safsatası (BRQ-01) iptal edilmiştir.
-    Z3 değişkenleri sadece 'ar' (Transliterasyon) üzerinden türetilir.
-    """
     model_config = ConfigDict(extra="forbid")
-    ar: str  # Mutlak Ontolojik ID (Örn: Natiq, Hayvan)
-    ar_script: Optional[str] = None # Arapça orijinal yazım (Görsel/Loglama için)
+    ar: str
+    ar_script: Optional[str] = None
 
 class RelationalConstraint(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,6 +30,10 @@ class EpistemicEntity(BaseModel):
     namespace: str = "Base" 
     terms: TermModel
     level: Optional[int] = None
+    
+    # Faz 2 - Adım 2: Muvaccehât (Kiplik) belirteci eklendi.
+    # Varsayılan ontolojik statü "Mumkin" (Caiz/Contingent) olarak kabul edilir.
+    modal_status: Literal["Wajib", "Mumkin", "Mustahil"] = "Mumkin"
 
     differentia_id: Optional[str] = None
     propria_ids: List[str] = Field(default_factory=list)
@@ -62,7 +62,6 @@ class SyllogismMood(BaseModel):
     predicates: List[str] = Field(default_factory=list)
 
 class PorphyrianTree(BaseModel):
-    """Monolitik ağaç yerine namespace bazlı çoklu kök yapısı (BRQ-02)."""
     model_config = ConfigDict(extra="forbid")
     namespaces: Dict[str, EpistemicNamespace] = Field(default_factory=dict)
     roots: Dict[str, EpistemicEntity] = Field(default_factory=dict)

@@ -3,7 +3,9 @@
         "Terms": {
             "S": { "symbol": "S", "ar": "el-Haddü'l-Asgar" },
             "P": { "symbol": "P", "ar": "el-Haddü'l-Ekber" },
-            "M": { "symbol": "M", "ar": "el-Haddü'l-Evsat" }
+            "M": { "symbol": "M", "ar": "el-Haddü'l-Evsat" },
+            "A": { "symbol": "A", "ar": "el-Mukaddem" },
+            "C": { "symbol": "C", "ar": "et-Tâli" }
         },
         "Premises": {
             "Major": { "ar": "el-Mukaddimetü'l-Kübrâ" },
@@ -105,7 +107,7 @@
     "Syllogism_Moods": {
         "Figure_1": {
             "Barbara": {
-                "islamic_term": "Darb-ı Evvel",
+                "islamic_term": "Darb-ı Evvel (Kıyas-ı İktiranî)",
                 "logic_structure": "AAA",
                 "mapping": {
                     "Major": "M-P",
@@ -116,6 +118,36 @@
                     "Forall([x], Implies(M(x), P(x)))",
                     "Forall([x], Implies(S(x), M(x)))",
                     "Forall([x], Implies(S(x), P(x)))"
+                ]
+            }
+        },
+        "Sartiyye": {
+            "Modus_Ponens": {
+                "islamic_term": "Kıyas-ı İstisnâî (Lüzumi İttisali)",
+                "logic_structure": "Modus Ponens",
+                "mapping": {
+                    "Major": "A->C",
+                    "Minor": "A",
+                    "Conclusion": "C"
+                },
+                "predicates": [
+                    "Forall([x], Luzumi(A(x), C(x)))",
+                    "Forall([x], A(x))",
+                    "Forall([x], C(x))"
+                ]
+            },
+            "Modus_Tollens": {
+                "islamic_term": "Kıyas-ı İstisnâî (Lüzumi İttisali - Ref')",
+                "logic_structure": "Modus Tollens",
+                "mapping": {
+                    "Major": "A->C",
+                    "Minor": "~C",
+                    "Conclusion": "~A"
+                },
+                "predicates": [
+                    "Forall([x], Luzumi(A(x), C(x)))",
+                    "Forall([x], Not(C(x)))",
+                    "Forall([x], Not(A(x)))"
                 ]
             }
         }

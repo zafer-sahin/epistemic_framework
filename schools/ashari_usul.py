@@ -3,7 +3,6 @@ from schools.base_usul import AbstractSchoolUsul
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class AshariUsul(AbstractSchoolUsul):
-    """Eş'arî Yönlü Asiklik Çizgesi (DAG) ve DSL Kuralları."""
     @property
     def namespace(self) -> str:
         return "Ashari"
@@ -12,17 +11,26 @@ class AshariUsul(AbstractSchoolUsul):
     def dsl_ruleset(self) -> Dict[str, Any]:
         return {
             "allow_tevil": True,
-            "blocked_nodes": [] # Eş'arîler haberî sıfatlarda te'vile geniş izin verir. Spesifik yasak yoktur.
+            "max_tevil_retries": 3,
+            "blocked_nodes": [] 
         }
 
-    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine) -> Dict[str, Any]:
+    # [LOGIC FIX]: İmza uyumluluğu ve parametre aktarımı sağlandı.
+    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
         l2_decision = l2_engine.enforce_rules(
             is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False), 
             ruleset=self.dsl_ruleset, 
-            flagged_elements=l1_analysis.get("flagged_elements", [])
+            flagged_elements=l1_analysis.get("flagged_elements", []),
+            current_attempt=current_attempt
         )
+        
+        if l2_decision["action"] == "BLOCK":
+            return {
+                "status": "REJECTED_BY_USUL", 
+                "reason": l2_decision['reason']
+            }
         
         l3_result = l3_engine.execute_sat_check(ir_matrix)
         
