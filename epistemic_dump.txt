@@ -102,7 +102,7 @@ DOSYA: ./core/epistemic_orchestrator.py
 ==================================================
 from typing import Dict, Any, List, Tuple
 import re
-from linguistics.ilm_wad_adapter import IlmWadAdapter
+from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
 from linguistics.sarf_parser import MorphologicalAnalysis
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -111,8 +111,8 @@ from schools.base_usul import AbstractSchoolUsul
 class EpistemicOrchestrator:
     """
     Bilişsel Çıkarım Motoru (Pipeline Manager).
-    Faz 3 - Adım 2: Defeasibility (Çürütülebilirlik) ve Otomatik Te'vil Döngüsü.
-    UNSAT durumlarında Karîne-i Mânia otonom olarak çözümlenir ve IR matrisi mecaz üzerinden yeniden derlenir.
+    Faz 4 - Adım 3: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu.
+    Rakip iki ekolün (Sâil ve Mucîb) ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
     """
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
         self.adapter = adapter
@@ -121,25 +121,19 @@ class EpistemicOrchestrator:
         self.l3 = l3_circuit_breaker
 
     def _extract_conflict_nodes_from_core(self, unsat_core: str) -> List[str]:
-        """Z3'ün unsat_core çıktısındaki çatışan ontolojik düğümleri ayıklar."""
-        # Örn: "AXIOM_DISJOINT_Wajib_al_Wujud_AND_Cism" veya "AXIOM_EXISTENCE_Istiva_Literal"
         conflict_nodes = set()
         matches = re.findall(r'AXIOM_[A-Z]+_([A-Za-z0-9_]+)', unsat_core)
         for match in matches:
-            # 'AND' operatörü ile birleşmiş düğümleri parçala
             parts = match.split('_AND_')
             conflict_nodes.update(parts)
         return list(conflict_nodes)
 
     def process_statement(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], usul_profile: AbstractSchoolUsul, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
-        """Uçtan uca AST derleme ve Usûl'e (Ekol) dayalı Z3 ispat ve TE'VİL döngüsü."""
-        
-        max_tevil_retries = 1
+        max_tevil_retries = usul_profile.dsl_ruleset.get("max_tevil_retries", 1)
         current_attempt = 0
         tevil_flagged_nodes = []
         
         while current_attempt <= max_tevil_retries:
-            # tevil_flagged_nodes listesi doluysa, adaptör bu düğümleri mecaz bağlamında derler
             ir_matrix = self.adapter.generate_ir(
                 tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_fallback_nodes=tevil_flagged_nodes
             )
@@ -150,25 +144,22 @@ class EpistemicOrchestrator:
                     "message": "İlm-i Ma'ânî İhlali: İnşâî form mantık motoruna giremez."
                 }
             
-            execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3)
+            execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
             
-            # Te'vil Döngüsü Tetikleyicisi (Defeasibility)
             if execution_result.get("status") == "FALLBACK_TRIGGERED" and current_attempt < max_tevil_retries:
                 if usul_profile.dsl_ruleset.get("allow_tevil", False):
-                    # Z3 Çelişki çekirdeğini oku ve sorunlu düğümleri mecaz listesine ekle
                     unsat_core_str = str(execution_result.get("unsat_core", ""))
                     conflicts = self._extract_conflict_nodes_from_core(unsat_core_str)
                     
                     if conflicts:
                         tevil_flagged_nodes.extend(conflicts)
                         current_attempt += 1
-                        continue # Döngüyü yeni te'vil parametreleriyle tekrar başlat
+                        continue
                     else:
-                        break # Çatışan düğüm tespit edilemedi, mutlak çöküş.
+                        break
                 else:
-                    break # Usûl te'vile izin vermiyor (Örn: Selefî), döngüyü kır.
-                    
-            # Başarılı SAT veya aşılamaz UNSAT durumu
+                    break
+
             if current_attempt > 0 and execution_result.get("status") == "SAT":
                 execution_result["tevil_applied"] = True
                 execution_result["message"] += f" (Te'vil uygulandı: {tevil_flagged_nodes})"
@@ -176,6 +167,47 @@ class EpistemicOrchestrator:
             return execution_result
             
         return execution_result
+
+    def execute_cross_school_muaradah(self, mujib_claim_ir: SemanticStatementIR, mujib_usul: AbstractSchoolUsul, sail_counter_ir: SemanticStatementIR, sail_usul: AbstractSchoolUsul) -> Dict[str, Any]:
+        """
+        Z3 Push/Pop İzolasyonu ile Çapraz Sorgu.
+        Sâil'in karşı argümanını Mucîb'in Z3 uzayına enjekte ederek diyalektik kilitlenme (Stalemate) arar.
+        """
+        # 1. Sâil'in karşı argümanı kendi usûlünde (DAG) geçerli mi?
+        sail_result = sail_usul.execute_dag(sail_counter_ir, self.l1, self.l2, self.l3, current_attempt=0)
+
+        if sail_result["status"] not in ["SAT", "FALLBACK_TRIGGERED"]:
+            return {
+                "status": "MUARADAH_FAILED",
+                "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
+            }
+
+        # 2. Sâil'in delili geçerliyse, Mucîb'in ontolojisinde mutlak çelişki (UNSAT) yaratıyor mu?
+        self.l3.core_solver.solver.push()
+        try:
+            # Mucîb'in argüman uzayını (varsayılan doğru) Z3'e zorla
+            mujib_base_result = self.l3.execute_sat_check(mujib_claim_ir)
+            
+            if mujib_base_result["status"] != "SAT":
+                 return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
+
+            # Sâil'in karşı argümanını aynı matrise bindir (Cross-Injection)
+            cross_result = self.l3.execute_sat_check(sail_counter_ir)
+
+            if cross_result["status"] == "UNSAT":
+                # Ortak Z3 solver patladıysa Sâil başarılıdır. Eşdeğer güçte zıt bir hakikat bulunmuştur.
+                return {
+                    "status": "MUARADAH_SUCCESS",
+                    "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in ({mujib_usul.namespace}) ontolojik uzayında çelişki (UNSAT) yarattı. Diyalektik Stalemate."
+                }
+            else:
+                return {
+                    "status": "MUARADAH_INEFFECTIVE",
+                    "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla sentaktik veya semantik bir çelişki yaratmadı (Paralel Gerçeklik)."
+                }
+        finally:
+            # Diyalektik çapraz ateş sonrası bellekleri her halükarda temizle
+            self.l3.core_solver.solver.pop()
 
 
 ==================================================
@@ -1051,66 +1083,84 @@ class ContextualLexicon:
 ==================================================
 DOSYA: ./linguistics/discourse_state.py
 ==================================================
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel
 
 class EntityMention(BaseModel):
     word: str
     ontologic_id: str
     timestamp: int
+    agent: Literal["Mujib", "Sail"]
 
 class DiscourseRegister:
     """
-    Kapsamlı (Scoped) Söylem Belleği (Discourse Register).
-    Z3 push/pop state mimarisiyle tam senkronize çalışır.
-    İptal edilebilir (Defeasible) önermeler çürütüldüğünde, ilgili
-    bağlam çerçevesi (Frame) yok edilerek bellek zehirlenmesi engellenir.
+    Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
+    Faz 4 - Adım 1: Taftazânî Diyalektiği için Mucîb ve Sâil yığıtları (Stack) izole edilmiştir.
+    Z3 push/pop state mimarisiyle tam senkronize, aktör-spesifik çalışır.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
-        self.frames: List[List[EntityMention]] = [[]]  
+        self.mujib_frames: List[List[EntityMention]] = [[]]  
+        self.sail_frames: List[List[EntityMention]] = [[]]  
         self.clock: int = 0
         self.pronouns = {"huve", "hiye", "huma", "hum", "hunne"}
+        self.active_agent: Literal["Mujib", "Sail"] = "Mujib" # Varsayılan aktör iddia sahibidir
+
+    def set_agent(self, agent: Literal["Mujib", "Sail"]) -> None:
+        """Diyalektik sırasına göre aktif aktörü (Sâil veya Mucîb) değiştirir."""
+        self.active_agent = agent
 
     def push_scope(self) -> None:
-        """Z3.push() veya yeni bir diyalektik iddia açıldığında alt bağlam (Scope) yaratır."""
-        self.frames.append([])
+        """Z3.push() veya yeni bir diyalektik iddia açıldığında, sadece aktif aktörün alt bağlamını yaratır."""
+        if self.active_agent == "Mujib":
+            self.mujib_frames.append([])
+        else:
+            self.sail_frames.append([])
 
     def pop_scope(self) -> None:
-        """Z3.pop() tetiklendiğinde veya iddia çürütüldüğünde varsayımsal bağlamı imha eder."""
-        if len(self.frames) > 1:
-            self.frames.pop()
+        """Z3.pop() tetiklendiğinde veya iddia çürütüldüğünde aktif aktörün varsayımsal bağlamını imha eder."""
+        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
+        
+        if len(frames) > 1:
+            frames.pop()
         else:
-            raise RuntimeError("[BELLEK HATASI] Global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
+            raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
 
     def add_mention(self, word: str, ontologic_id: str) -> None:
-        """Mevcut (Aktif) kapsama yeni bir ontolojik varlık ekler."""
-        self.frames[-1].append(EntityMention(
+        """Aktif aktörün kapsamına yeni bir ontolojik varlık ataması yapar."""
+        mention = EntityMention(
             word=word, 
             ontologic_id=ontologic_id, 
-            timestamp=self.clock
-        ))
+            timestamp=self.clock,
+            agent=self.active_agent
+        )
+        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
+        frames[-1].append(mention)
         self.clock += 1
 
     def resolve_pronoun(self, pronoun: str) -> Optional[str]:
         """
-        Zamir (Anafora) tespiti. 
-        Aktif çerçeveden başlayarak (LIFO) geçmişe doğru tarar ve ilk uyumlu varlığı döndürür.
+        Aktör-Spesifik Zamir (Anafora) tespiti.
+        Sadece konuşan aktörün kendi yığıtındaki (LIFO) geçmiş kabulleri (Müsellemat) taranır.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
             return None
 
-        for frame in reversed(self.frames):
+        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
+
+        for frame in reversed(frames):
             if frame:
                 return frame[-1].ontologic_id
                 
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")
         
     def clear_memory(self) -> None:
-        """Mezhep (Usûl) profili değiştiğinde veya oturum sıfırlandığında belleği donanımsal olarak temizler."""
-        self.frames = [[]]
+        """Mezhep (Usûl) profili değiştiğinde veya diyalektik oturum sıfırlandığında belleği donanımsal olarak temizler."""
+        self.mujib_frames = [[]]
+        self.sail_frames = [[]]
         self.clock = 0
+        self.active_agent = "Mujib"
 
 
 ==================================================
@@ -1767,7 +1817,6 @@ from schools.base_usul import AbstractSchoolUsul
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class AshariUsul(AbstractSchoolUsul):
-    """Eş'arî Yönlü Asiklik Çizgesi (DAG) ve DSL Kuralları."""
     @property
     def namespace(self) -> str:
         return "Ashari"
@@ -1776,17 +1825,26 @@ class AshariUsul(AbstractSchoolUsul):
     def dsl_ruleset(self) -> Dict[str, Any]:
         return {
             "allow_tevil": True,
-            "blocked_nodes": [] # Eş'arîler haberî sıfatlarda te'vile geniş izin verir. Spesifik yasak yoktur.
+            "max_tevil_retries": 3,
+            "blocked_nodes": [] 
         }
 
-    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine) -> Dict[str, Any]:
+    # [LOGIC FIX]: İmza uyumluluğu ve parametre aktarımı sağlandı.
+    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
         l2_decision = l2_engine.enforce_rules(
             is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False), 
             ruleset=self.dsl_ruleset, 
-            flagged_elements=l1_analysis.get("flagged_elements", [])
+            flagged_elements=l1_analysis.get("flagged_elements", []),
+            current_attempt=current_attempt
         )
+        
+        if l2_decision["action"] == "BLOCK":
+            return {
+                "status": "REJECTED_BY_USUL", 
+                "reason": l2_decision['reason']
+            }
         
         l3_result = l3_engine.execute_sat_check(ir_matrix)
         
@@ -1809,21 +1867,19 @@ from typing import Dict, Any
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class AbstractSchoolUsul(ABC):
-    """
-    Polimorfik Ekol (Mezhep) Yürütme Usûlü Soyut Sınıfı.
-    Her mezhep bu sınıftan türeyerek kendi Yönlü Asiklik Çizgesini (DAG) dayatır.
-    """
     @property
     @abstractmethod
     def namespace(self) -> str:
-        """Leksikon ve Ontoloji katmanındaki isim alanı (Örn: 'Salafi', 'Ashari')"""
         pass
 
+    @property
     @abstractmethod
-    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine) -> Dict[str, Any]:
-        """
-        N-Katmanlı motorun hangi sırayla ve kısıtla çağrılacağını orkestre eder.
-        """
+    def dsl_ruleset(self) -> Dict[str, Any]:
+        pass
+
+    # [LOGIC FIX]: Abstract Interface'e current_attempt eklendi.
+    @abstractmethod
+    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         pass
 
 
@@ -1847,11 +1903,6 @@ from schools.base_usul import AbstractSchoolUsul
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class MaturidiUsul(AbstractSchoolUsul):
-    """
-    Mâtürîdî Yönlü Asiklik Çizgesi (DAG) ve DSL Kuralları.
-    Eş'arîlikten farklı olarak 'Tekvin' ve fiilî sıfatlarda katı 
-    ontolojik kısıtlar (Blocked Nodes) uygular.
-    """
     @property
     def namespace(self) -> str:
         return "Maturidi"
@@ -1860,19 +1911,21 @@ class MaturidiUsul(AbstractSchoolUsul):
     def dsl_ruleset(self) -> Dict[str, Any]:
         return {
             "allow_tevil": True,
-            "blocked_nodes": ["Tekvin", "Hikmet"] # Bu ontolojik düğümlerde te'vil mekanizması kilitlenir.
+            "max_tevil_retries": 2,
+            "blocked_nodes": ["Tekvin", "Hikmet"] 
         }
 
-    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine) -> Dict[str, Any]:
+    # [LOGIC FIX]: İmza uyumluluğu ve parametre aktarımı sağlandı.
+    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
         l2_decision = l2_engine.enforce_rules(
             is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False), 
             ruleset=self.dsl_ruleset, 
-            flagged_elements=l1_analysis.get("flagged_elements", [])
+            flagged_elements=l1_analysis.get("flagged_elements", []),
+            current_attempt=current_attempt
         )
         
-        # Mâtürîdî spesifik blokajı
         if l2_decision["action"] == "BLOCK":
             return {
                 "status": "REJECTED_BY_USUL", 
@@ -1906,7 +1959,6 @@ from schools.base_usul import AbstractSchoolUsul
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class SalafiUsul(AbstractSchoolUsul):
-    """Selefî Yönlü Asiklik Çizgesi (DAG) ve DSL Kuralları."""
     @property
     def namespace(self) -> str:
         return "Salafi"
@@ -1915,16 +1967,19 @@ class SalafiUsul(AbstractSchoolUsul):
     def dsl_ruleset(self) -> Dict[str, Any]:
         return {
             "allow_tevil": False,
-            "blocked_nodes": ["ALL"] # Sıkı lafızcılık (Strict Literalism). Sıfır transformasyon.
+            "max_tevil_retries": 0,
+            "blocked_nodes": ["ALL"] 
         }
 
-    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine) -> Dict[str, Any]:
+    # [LOGIC FIX]: İmza uyumluluğu ve parametre aktarımı sağlandı.
+    def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
         l2_decision = l2_engine.enforce_rules(
             is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False), 
             ruleset=self.dsl_ruleset, 
-            flagged_elements=l1_analysis.get("flagged_elements", [])
+            flagged_elements=l1_analysis.get("flagged_elements", []),
+            current_attempt=current_attempt
         )
         
         if l2_decision["action"] == "BLOCK":
@@ -1954,66 +2009,124 @@ DOSYA: ./schools/taftazani/__init__.py
 DOSYA: ./schools/taftazani/adab_al_bahth.py
 ==================================================
 import z3
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Literal
 from core.logic_engine import AristotelianSolver
 from linguistics.discourse_state import DiscourseRegister
 
 class AdabAlBahthEngine:
     """
-    Taftâzânî ve Cürcânî temelli Münazara Durum Makinesi.
-    Z3 (Mantıksal Uzay) ile DiscourseRegister (Dilbilimsel Uzay) arasında
-    donanımsal Push/Pop senkronizasyonunu sağlar.
+    Taftâzânî ve Cürcânî temelli Münazara Sonlu Durum Makinesi (FSM).
+    Faz 4 - Adım 2: Statik otomat yapısı, karşılıklı etkileşimli ve durum izoleli (Stateful)
+    bir diyalektik protokole dönüştürülmüştür.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
         self.discourse = discourse
-
-    def evaluate_claim(self, claim: str) -> Dict[str, Any]:
-        """İddianın (Da'vâ) ontolojik zorunluluğunu (Tahsîl-i Hâsıl / Men') test eder."""
-        try:
-            # İddia testi statik bir kontroldür, söylem belleğini zehirlemez.
-            is_already_valid = self.solver.verify_syllogism([], claim)
-            if is_already_valid:
-                return {"status": "TAHSIL_I_HASIL", "message": "İddia zaten ontolojik bir zorunluluktur."}
-            return {"status": "MEN", "message": "İddia zorunlu değil. Delil talep ediliyor."}
-        except Exception as e:
-            return {"status": "ERROR", "message": f"İddia Derleme Hatası: {e}"}
-
-    def evaluate_evidence(self, claim: str, premises: List[str]) -> Dict[str, Any]:
-        """Delillerin tutarlılığını ve iddiaya olan lüzum bağını test eder."""
         
-        # Mantıksal ve Dilbilimsel uzayda eşzamanlı Frame (Kapsam) açılışı
+        # FSM Durum Değişkenleri
+        self.current_state: Literal["AWAITING_CLAIM", "AWAITING_EVIDENCE", "AWAITING_ATTACK", "RESOLVED"] = "AWAITING_CLAIM"
+        self.active_claim: Optional[str] = None
+        self.active_premises: List[str] = []
+
+    def submit_claim(self, claim: str) -> Dict[str, Any]:
+        """Mucîb tarafından iddia (Da'vâ) sunumu."""
+        if self.current_state != "AWAITING_CLAIM":
+            raise ValueError(f"[DİYALEKTİK İHLAL] Mevcut durum '{self.current_state}'. Yeni iddia sunulamaz.")
+            
+        self.discourse.set_agent("Mujib")
+        
+        # İddia ontolojik bir aksiyom mu? (Bedîhiyyât kontrolü)
+        is_already_valid = self.solver.verify_syllogism([], claim)
+        
+        if is_already_valid:
+            self.current_state = "RESOLVED"
+            return {"status": "TAHSIL_I_HASIL", "message": "İddia ontolojik bir aksiyomdur (Tahsîl-i Hâsıl), ispat gerektirmez."}
+        
+        self.active_claim = claim
+        self.current_state = "AWAITING_EVIDENCE"
+        
+        # Sâil otomatik olarak varsayılan iddiayı reddeder (Men')
+        self.discourse.set_agent("Sail")
+        return {"status": "MEN_ACCEPTED", "message": "Sâil iddiayı kabul etmedi (Men'). Mucîb delil getirmelidir."}
+
+    def submit_evidence(self, premises: List[str]) -> Dict[str, Any]:
+        """Mucîb tarafından delil (İstidlal) sunumu."""
+        if self.current_state != "AWAITING_EVIDENCE":
+            raise ValueError("[DİYALEKTİK İHLAL] Şu an delil sunma aşamasında değilsiniz.")
+        
+        self.discourse.set_agent("Mujib")
+        
+        # Mantıksal ve Dilbilimsel uzayda eşzamanlı Mucîb kapsamı (Frame) açılışı
         self.solver.solver.push()
         self.discourse.push_scope()
         
-        is_consistent = True
         try:
             for p in premises:
                 self.solver.solver.add(self.solver.builder.parse(p))
             is_consistent = (self.solver.solver.check() == z3.sat)
         except Exception as e:
-            # Çöküş durumunda her iki uzayı da temizle
             self.solver.solver.pop()
             self.discourse.pop_scope()
             return {"status": "ERROR", "message": f"Delil Derleme Hatası (Sentaks/Arite): {e}"}
         
-        # Eğer öncüller birbiriyle çelişiyorsa
         if not is_consistent:
             self.solver.solver.pop()
             self.discourse.pop_scope()
-            return {"status": "MUKABERE", "message": "İmkansız veya birbiriyle çelişen öncüller (Ex Falso Quodlibet ihlali)."}
-
-        # Öncüller tutarlıysa, iddiayı (Da'vâ) doğrulayıp doğrulamadığını kontrol et
-        is_valid = self.solver.verify_syllogism(premises, claim)
+            self.current_state = "RESOLVED"
+            return {"status": "MUKABERE", "message": "Mucîb'in kendi öncülleri birbiriyle çelişiyor. İddia baştan çöktü."}
+            
+        self.active_premises = premises
+        self.current_state = "AWAITING_ATTACK"
+        self.discourse.set_agent("Sail") # Hamle sırası Sâil'e geçti
         
-        # Test bittiği için varsayımsal kapsamları bellekten düşür
-        self.solver.solver.pop()
-        self.discourse.pop_scope()
+        return {"status": "EVIDENCE_LOGGED", "message": "Delil kendi içinde tutarlı. Sâil'in diyalektik saldırısı bekleniyor."}
 
-        if is_valid:
-            return {"status": "ILZAM", "message": "Deliller iddiayı ontolojik olarak zorunlu kılmaktadır."}
+    def attack_evidence(self, attack_type: Literal["Men", "Nakz", "Muaradah"], target_premise: Optional[str] = None) -> Dict[str, Any]:
+        """Sâil'in argümana saldırı protolü."""
+        if self.current_state != "AWAITING_ATTACK":
+            raise ValueError("[DİYALEKTİK İHLAL] Şu an saldırı/itiraz aşamasında değilsiniz.")
+            
+        self.discourse.set_agent("Sail")
+        
+        if attack_type == "Men":
+            if not target_premise or target_premise not in self.active_premises:
+                return {"status": "INVALID_ATTACK", "message": "Men' saldırısı için hedef öncül belirtilmelidir."}
+            
+            # Sâil öncülü reddettiği için FSM tekrar Mucîb'in ispat durumuna döner
+            self.current_state = "AWAITING_EVIDENCE"
+            self.discourse.set_agent("Mujib")
+            return {"status": "MEN_ON_PREMISE", "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti. Mucîb bu öncülü ara-iddia olarak ispatlamalıdır."}
+            
+        elif attack_type == "Nakz":
+            # Nakz: Mucîb'in öncülleri doğru kabul edilse dahi, kıyasın neticeyi vermediğinin (Lüzum Bağı/Hadd-i Evsat hatası) ispatı
+            is_valid = self.solver.verify_syllogism(self.active_premises, self.active_claim)
+            
+            # Test bittiği için varsayımsal kapsamları bellekten düşür
+            self.solver.solver.pop()
+            self.discourse.pop_scope()
+            self.current_state = "RESOLVED"
+            
+            if is_valid:
+                return {"status": "ILZAM", "message": "Sâil'in Nakz girişimi başarısız. Lüzum bağı ontolojik olarak geçerli. Mucîb kazandı (İlzam)."}
+            else:
+                return {"status": "NAKZ_SUCCESS", "message": "Fasid İstidlal kanıtlandı. Öncüller sonucu doğurmuyor (Nakz). Sâil kazandı."}
+                
+        elif attack_type == "Muaradah":
+            # Muaradah (Cross-School çatışması) Faz 4 - Adım 3'te orkestratör üzerinden yönetilecektir.
+            return {"status": "PENDING_CROSS_SCHOOL", "message": "Mu'aradah saldırısı için çift usûllü izolasyon motoru tetiklenmelidir."}
         else:
-            return {"status": "NAKZ", "message": "Fasid İstidlal. Öncüller tutarlı ancak lüzum bağı (Hadd-i Evsat) eksik."}
+            return {"status": "ERROR", "message": "Geçersiz Âdâb-ı Bahs saldırı tipi."}
+            
+    def reset_session(self) -> None:
+        """Diyalektik oturumu (Session) sıfırlar ve bellekleri temizler."""
+        if self.current_state == "AWAITING_ATTACK":
+            self.solver.solver.pop()
+            self.discourse.pop_scope()
+            
+        self.current_state = "AWAITING_CLAIM"
+        self.active_claim = None
+        self.active_premises = []
+        self.discourse.clear_memory()
 
 
 ==================================================

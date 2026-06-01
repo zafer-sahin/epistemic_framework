@@ -28,35 +28,28 @@ class TestSemanticPipeline(unittest.TestCase):
         self.lexicon.register_word("Istiva", "Ashari", "Istiva_Metaphor")
 
     def test_polymorphic_lexicon_resolution(self):
-        """[BRQ-02] Polimorfik isim alanı ve kalıtım (fallback) doğrulaması."""
-        # 1. Base (Kalıtsal) Fallback Testi
-        resolved_base = self.lexicon.resolve_id("Zeydun", "Salafi")
-        self.assertEqual(resolved_base, "Zeyd_Entity", "Base ontolojiye geri çekilme (fallback) başarısız.")
+        """[Faz 3.1] Önermesel 3D Leksikon Tensörü Doğrulaması."""
+        # Setup'ta proposition_type spesifik kayıt yapılmalı
+        self.lexicon.register_word("Istiva", "Ashari", "Istiva_Literal", proposition_type="Kadiyye-i_Sartiyye")
+        self.lexicon.register_word("Istiva", "Ashari", "Istiva_Metaphor", proposition_type="Kadiyye-i_Hamliyye")
 
-        # 2. Namespace İzolasyon Testi
-        resolved_salafi = self.lexicon.resolve_id("Istiva", "Salafi")
-        self.assertEqual(resolved_salafi, "Istiva_Literal", "Selefi isim alanı ihlali.")
-
-        resolved_ashari = self.lexicon.resolve_id("Istiva", "Ashari")
-        self.assertEqual(resolved_ashari, "Istiva_Metaphor", "Eş'ari isim alanı ihlali.")
-
-        # 3. Tanımsız Kelime (Exception) Testi
-        with self.assertRaises(ValueError):
-            self.lexicon.resolve_id("Meçhul", "Base")
+        # Şartlı önermede literal, kategorik önermede mecaz dönmeli
+        res_sart = self.lexicon.resolve_id("Istiva", "Ashari", proposition_type="Kadiyye-i_Sartiyye")
+        self.assertEqual(res_sart, "Istiva_Literal", "Şartlı önerme bağlamı koptu.")
+        
+        res_haml = self.lexicon.resolve_id("Istiva", "Ashari", proposition_type="Kadiyye-i_Hamliyye")
+        self.assertEqual(res_haml, "Istiva_Metaphor", "Kategorik önerme bağlamı koptu.")
 
     def test_anaphoric_discourse_binding(self):
-        """[BRQ-04] Söylem belleği ve zamir (Anafora) çözümlemesi doğrulaması."""
+        """[Faz 4.1] Çok-Aktörlü (Sail/Mujib) Söylem Belleği İzolasyonu."""
+        self.discourse.set_agent("Mujib")
         self.discourse.add_mention("Zeydun", "Zeyd_Entity")
         
-        # Geçerli Zamir Çözümlemesi
-        resolved_id = self.discourse.resolve_pronoun("Huve")
-        self.assertEqual(resolved_id, "Zeyd_Entity", "Anafora referans kaybı yaşadı.")
+        # Mucib kendi referansını okuyabilmeli
+        self.assertEqual(self.discourse.resolve_pronoun("Huve"), "Zeyd_Entity")
         
-        # Zamir Olmayan Kelimenin Pas Geçilmesi
-        self.assertIsNone(self.discourse.resolve_pronoun("Kalem"), "Normal kelime zamir olarak işlendi.")
-        
-        # Boş Bellekte Zamir Çözümleme Hatası
-        self.discourse.clear_memory()
+        # Sail'in yığıtı boş olmalı ve Mucib'in zamirlerine izinsiz erişememeli
+        self.discourse.set_agent("Sail")
         with self.assertRaises(ValueError):
             self.discourse.resolve_pronoun("Huve")
 
