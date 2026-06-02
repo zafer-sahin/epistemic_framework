@@ -4,9 +4,15 @@ from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
 class Layer3SMTCircuitBreaker:
-    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 2000):
+    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
         self.core_solver = solver
+        
+        # [LOGIC FIX]: Tactic solver ezmesi iptal edildi (Unsat Core ve FOL takibini kopardığı için).
+        # Tactic yerine standart SMT çözücüsüne niceleyici (Quantifier) optimizasyon bayrakları set edildi.
         self.core_solver.solver.set("timeout", timeout_ms)
+        self.core_solver.solver.set("smt.mbqi", True)
+        self.core_solver.solver.set("smt.macro_finder", True)
+        
         self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
 
     def _freeze_ir_matrix(self, predicates: list) -> Tuple:
@@ -26,7 +32,6 @@ class Layer3SMTCircuitBreaker:
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
                 return predicate(w_const, t_const, entity_const)
             elif arity == 2:
-                # [LOGIC FIX]: Ayrıştırıcı '_' yerine '::' yapıldı.
                 amil_str, mamul_str = arg_id.split('::', 1) 
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
