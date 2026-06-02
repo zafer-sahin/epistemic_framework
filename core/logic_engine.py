@@ -27,15 +27,21 @@ class AristotelianSolver:
         w = z3.Const(f"w_{entity.ontologic_id}", self.builder.WorldSort)
         t = z3.Const(f"t_{entity.ontologic_id}", self.builder.TimeSort)
         
-        # KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu - Zaman Düzlemi Eklendi
-        if entity.modal_status == "Wajib":
-            # Zorunlu Varlık: Tüm olası dünyalarda ve tüm zamanlarda mevcudiyeti zorunludur.
+        # KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu - eş-Şemsiyye Makroları
+        if entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"]:
+            # Zorunlu Varlık / Zarûriyye-i Mutlaka: Tüm dünyalarda ve tüm zamanlarda aidiyet zorunludur. (∀w, ∀t)
             existence_axiom = z3.ForAll([w, t], z3.Exists([x], predicate(w, t, x)))
+            
+        elif entity.modal_status == "Daime_i_Mutlaka":
+            # Dâime-i Mutlaka: Varlık mevcut olduğu sürece aktüel aidiyet. (∃w, ∀t)
+            existence_axiom = z3.Exists([w], z3.ForAll([t], z3.Exists([x], predicate(w, t, x))))
+            
         elif entity.modal_status == "Mustahil":
             # Mümteni' (İmkansız): Hiçbir olası dünyada ve zamanda var olamaz.
             existence_axiom = z3.ForAll([w, t], z3.Not(z3.Exists([x], predicate(w, t, x))))
-        else: # Mumkin
-            # Mümkün Varlık: En az bir olası dünyada ve zamanda varoluşu çelişki yaratmaz.
+            
+        else: # Mumkin veya Mumkine_i_Amme
+            # Mümkine-i Âmme: En az bir olası dünyada ve en az bir zamanda varoluşu çelişki yaratmaz. (∃w, ∃t)
             existence_axiom = z3.Exists([w, t], z3.Exists([x], predicate(w, t, x)))
             
         self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
@@ -100,7 +106,6 @@ class AristotelianSolver:
         self.solver.push()
         try:
             for premise in premises:
-                # Olası dünyalar ve zaman parametresi default olarak w_base, t_base şeklinde logic_parser içinde enjekte edilmektedir.
                 z3_premise = self.builder.parse(premise)
                 self.solver.add(z3_premise)
             

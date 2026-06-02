@@ -31,9 +31,12 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
-    # Faz 2 - Adım 2: Muvaccehât (Kiplik) belirteci eklendi.
-    # Varsayılan ontolojik statü "Mumkin" (Caiz/Contingent) olarak kabul edilir.
-    modal_status: Literal["Wajib", "Mumkin", "Mustahil"] = "Mumkin"
+    # Faz 2 - Adım 2: eş-Şemsiyye Muvaccehât (Kiplik) belirteçleri eklendi.
+    # Kâtibî'nin Zarûriyye-i Mutlaka, Dâime-i Mutlaka ve Mümkine-i Âmme kiplikleri Z3 uzayına dahil edildi.
+    modal_status: Literal[
+        "Wajib", "Mumkin", "Mustahil", 
+        "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme"
+    ] = "Mumkin"
 
     differentia_id: Optional[str] = None
     propria_ids: List[str] = Field(default_factory=list)

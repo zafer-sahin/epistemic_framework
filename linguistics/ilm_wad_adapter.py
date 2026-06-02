@@ -24,10 +24,11 @@ class IlmWadAdapter:
         self.lexicon = lexicon
         self.discourse = discourse
         self.pragmatics = PragmaticsFilter()
-        self.conditional_particles = {"in", "iza", "law", "amma"}
+        # Faz 2: Lüzumi (Gerektirici) ve İnadî (Ayrık/Dışlayıcı) bağlaç setleri ayrıştırıldı
+        self.luzumi_particles = {"in", "iza", "law", "amma"}
+        self.inadi_particles = {"imma", "aw", "ya"} # Cem'i Mânia (XOR) işaretçileri
         self.current_tevil_targets: List[str] = []
 
-    # [LOGIC FIX]: 'tevil_fallback_nodes' parametresi eklendi
     def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None) -> SemanticStatementIR:
         if auto_lexicon is None:
             auto_lexicon = {}
@@ -42,22 +43,32 @@ class IlmWadAdapter:
         ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         
-        has_condition = any(t.lower() in self.conditional_particles for t in tokens)
+        # Önerme Tipolojisi Denetimi (Şartiyye/Munfasıla)
+        has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
+        has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
 
         for amil, mamul, rel_type, _ in dependencies:
-            if amil.lower() in self.conditional_particles or mamul.lower() in self.conditional_particles:
+            if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
+                continue
+            if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
                 continue
 
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon)
             
             rel_id = f"Rel_{rel_type}"
-            atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
+            atomic_predicates.append((rel_id, f"{amil_id}::mamul_id", 2))
             
             atomic_predicates.append((amil_id, amil_id, 1))
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
-        if has_condition:
+        if has_inadi:
+            nested_logic = NestedPredicate(
+                operator="Inadi",
+                args=atomic_predicates
+            )
+            ir_predicates.append(nested_logic)
+        elif has_luzumi:
             nested_logic = NestedPredicate(
                 operator="Luzumi",
                 args=atomic_predicates
@@ -81,7 +92,6 @@ class IlmWadAdapter:
         # Varsayılan literal bağlam çekilir
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Kadiyye-i_Hamliyye")
         
-        # [LOGIC FIX]: Te'vil hedefleri Z3'ten UNSAT dönmüşse Leksikon Tensöründe mecaz anlama düş (Fallback)
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
                 ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback")
@@ -92,5 +102,5 @@ class IlmWadAdapter:
         
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_"):
             self.discourse.add_mention(word, ontologic_id)
-        
+            
         return ontologic_id
