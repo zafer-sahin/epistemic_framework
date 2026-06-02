@@ -1,3 +1,4 @@
+import z3
 from typing import Dict, Any, List, Tuple
 import re
 from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
@@ -31,7 +32,6 @@ class EpistemicOrchestrator:
         current_attempt = 0
         tevil_flagged_nodes = []
         
-        # Faz 4: Kâtibî Bağlam Tespiti (Önerme Tipolojisi)
         has_condition = any(t.lower() in ["in", "iza", "law", "amma", "imma", "aw", "ya"] for t in tokens)
         proposition_type = "Kadiyye-i_Sartiyye" if has_condition else "Kadiyye-i_Hamliyye"
         
@@ -75,7 +75,6 @@ class EpistemicOrchestrator:
         Z3 Push/Pop İzolasyonu ile Çapraz Sorgu.
         Sâil'in karşı argümanını Mucîb'in Z3 uzayına enjekte ederek diyalektik kilitlenme (Stalemate) arar.
         """
-        # 1. Sâil'in karşı argümanı kendi usûlünde (DAG) geçerli mi?
         sail_result = sail_usul.execute_dag(sail_counter_ir, self.l1, self.l2, self.l3, current_attempt=0)
 
         if sail_result["status"] not in ["SAT", "FALLBACK_TRIGGERED"]:
@@ -84,20 +83,31 @@ class EpistemicOrchestrator:
                 "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
             }
 
-        # 2. Sâil'in delili geçerliyse, Mucîb'in ontolojisinde mutlak çelişki (UNSAT) yaratıyor mu?
         self.l3.core_solver.solver.push()
         try:
-            # Mucîb'in argüman uzayını (varsayılan doğru) Z3'e zorla
+            # 1. Mucîb'in önermesi SAT dönmeli (kendi uzayında tutarlı). 
+            # execute_sat_check içi push/pop olduğu için Mucîb argümanı burada kalıcı enjekte edilmez, sadece doğrulanır.
             mujib_base_result = self.l3.execute_sat_check(mujib_claim_ir)
             
             if mujib_base_result["status"] != "SAT":
                  return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
 
-            # Sâil'in karşı argümanını aynı matrise bindir (Cross-Injection)
-            cross_result = self.l3.execute_sat_check(sail_counter_ir)
+            # [LOGIC FIX]: Çapraz-Enjeksiyon zafiyeti onarıldı.
+            # Z3 matrisine Sâil ve Mucîb'in önermeleri *aynı izolasyon katmanında* eşzamanlı olarak yerleştirilmelidir.
+            w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
+            t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
+            
+            for item in mujib_claim_ir.predicates:
+                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                self.l3.core_solver.solver.add(z3_expr)
+                
+            for item in sail_counter_ir.predicates:
+                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                self.l3.core_solver.solver.add(z3_expr)
 
-            if cross_result["status"] == "UNSAT":
-                # Ortak Z3 solver patladıysa Sâil başarılıdır. Eşdeğer güçte zıt bir hakikat bulunmuştur.
+            cross_status = self.l3.core_solver.solver.check()
+
+            if cross_status == z3.unsat:
                 return {
                     "status": "MUARADAH_SUCCESS",
                     "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in ({mujib_usul.namespace}) ontolojik uzayında çelişki (UNSAT) yarattı. Diyalektik Stalemate."
@@ -108,5 +118,4 @@ class EpistemicOrchestrator:
                     "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla sentaktik veya semantik bir çelişki yaratmadı (Paralel Gerçeklik)."
                 }
         finally:
-            # Diyalektik çapraz ateş sonrası bellekleri her halükarda temizle
             self.l3.core_solver.solver.pop()
