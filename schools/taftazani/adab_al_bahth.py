@@ -82,9 +82,13 @@ class AdabAlBahthEngine:
             if not target_premise or target_premise not in self.active_premises:
                 return {"status": "INVALID_ATTACK", "message": "Men' saldırısı için hedef öncül belirtilmelidir."}
             
+            # [LOGIC FIX]: Olası Memory Leak tıkandı. FSM AWAITING_EVIDENCE'a dönmeden önce reddedilen kapsam temizlenmelidir.
+            self.solver.solver.pop()
+            self.discourse.set_agent("Mujib")
+            self.discourse.pop_scope()
+            
             # Sâil öncülü reddettiği için FSM tekrar Mucîb'in ispat durumuna döner
             self.current_state = "AWAITING_EVIDENCE"
-            self.discourse.set_agent("Mujib")
             return {"status": "MEN_ON_PREMISE", "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti. Mucîb bu öncülü ara-iddia olarak ispatlamalıdır."}
             
         elif attack_type == "Nakz":
@@ -92,7 +96,9 @@ class AdabAlBahthEngine:
             is_valid = self.solver.verify_syllogism(self.active_premises, self.active_claim)
             
             # Test bittiği için varsayımsal kapsamları bellekten düşür
+            # [LOGIC FIX]: Pop işlemi yığıtı (frame) açan Mucîb aktörü üzerinden yürütülmelidir (Stack Underflow çözümü).
             self.solver.solver.pop()
+            self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
             self.current_state = "RESOLVED"
             
@@ -111,6 +117,7 @@ class AdabAlBahthEngine:
         """Diyalektik oturumu (Session) sıfırlar ve bellekleri temizler."""
         if self.current_state == "AWAITING_ATTACK":
             self.solver.solver.pop()
+            self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
             
         self.current_state = "AWAITING_CLAIM"
