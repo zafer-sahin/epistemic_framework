@@ -77,7 +77,8 @@ class IlmWadAdapter:
         return SemanticStatementIR(active_namespace=active_namespace, predicates=ir_predicates, is_valid_for_z3=True)
         
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str) -> str:
-        pronoun_res = self.discourse.resolve_pronoun(word)
+        # [FAZ 4] Zamir çözücüye 'active_namespace' zırhı basıldı
+        pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
             return pronoun_res
             
@@ -86,7 +87,7 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        # [FAZ 3] Bağlam Avcısı: Discourse objesi Siyak-Sibak için Leksikona zerk edilir
+        # [FAZ 3] Bağlam Avcısı
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse)
         
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
@@ -98,6 +99,7 @@ class IlmWadAdapter:
             ontologic_id = base_ontologic_id
         
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_"):
-            self.discourse.add_mention(word, ontologic_id)
+            # [FAZ 4] Söylem belleğine kayıt esnasında 'active_namespace' mührü eklendi
+            self.discourse.add_mention(word, ontologic_id, active_namespace)
             
         return ontologic_id

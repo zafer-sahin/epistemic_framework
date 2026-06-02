@@ -6,12 +6,13 @@ class EntityMention(BaseModel):
     ontologic_id: str
     timestamp: int
     agent: Literal["Mujib", "Sail"]
+    sealed_namespace: str  # [FAZ 4] Yalıtım Zırhı: Hangi usûl uzayında üretildi?
 
 class DiscourseRegister:
     """
     Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
-    Faz 4 - Adım 1: Taftazânî Diyalektiği için Mucîb ve Sâil yığıtları (Stack) izole edilmiştir.
-    Z3 push/pop state mimarisiyle tam senkronize, aktör-spesifik çalışır.
+    Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı eklendi.
+    Z3, bir uzayın zamirlerini tararken diğer uzayın Müsellemât'ına (önkabüllerine) kesinlikle sızamaz.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
@@ -41,22 +42,24 @@ class DiscourseRegister:
         else:
             raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
 
-    def add_mention(self, word: str, ontologic_id: str) -> None:
-        """Aktif aktörün kapsamına yeni bir ontolojik varlık ataması yapar."""
+    def add_mention(self, word: str, ontologic_id: str, active_namespace: str) -> None:
+        """Aktif aktörün kapsamına, aktif uzayın mührüyle (namespace) yeni bir ontolojik varlık ataması yapar."""
         mention = EntityMention(
             word=word, 
             ontologic_id=ontologic_id, 
             timestamp=self.clock,
-            agent=self.active_agent
+            agent=self.active_agent,
+            sealed_namespace=active_namespace
         )
         frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
         frames[-1].append(mention)
         self.clock += 1
 
-    def resolve_pronoun(self, pronoun: str) -> Optional[str]:
+    def resolve_pronoun(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[str]:
         """
-        Aktör-Spesifik Zamir (Anafora) tespiti.
+        Aktör-Spesifik ve Uzay-Korumalı Zamir (Anafora) tespiti.
         Sadece konuşan aktörün kendi yığıtındaki (LIFO) geçmiş kabulleri (Müsellemat) taranır.
+        Eğer çapraz sorguda (Mu'aradah) bağlam zehirlenmesi saptanırsa motor durdurulur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
@@ -66,7 +69,17 @@ class DiscourseRegister:
 
         for frame in reversed(frames):
             if frame:
-                return frame[-1].ontologic_id
+                resolved_mention = frame[-1]
+                
+                # [FAZ 4] Context Sealing (Bağlam Zehirlenmesi Koruması)
+                if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
+                    raise ValueError(
+                        f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
+                        f"'{pronoun}' zamiri '{resolved_mention.sealed_namespace}' uzayında üretildi, "
+                        f"ancak şu an '{enforcement_namespace}' uzayına sızmaya/bağlanmaya çalışıyor."
+                    )
+                    
+                return resolved_mention.ontologic_id
                 
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")
         

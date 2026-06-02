@@ -34,16 +34,18 @@ class TestSemanticPipeline(unittest.TestCase):
 
     def test_anaphoric_discourse_binding(self):
         """[BRQ-04] Söylem belleği ve zamir (Anafora) çözümlemesi doğrulaması."""
-        self.discourse.add_mention("Zeydun", "Zeyd_Entity")
+        # [LOGIC FIX]: Söylem belleği kaydında 'active_namespace' yalıtım zırhı zorunluluğu
+        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base")
         
-        resolved_id = self.discourse.resolve_pronoun("Huve")
+        # 'Base' uzayı mührüyle (enforcement_namespace) zamir araması
+        resolved_id = self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
         self.assertEqual(resolved_id, "Zeyd_Entity")
         
-        self.assertIsNone(self.discourse.resolve_pronoun("Kalem"))
+        self.assertIsNone(self.discourse.resolve_pronoun("Kalem", enforcement_namespace="Base"))
         
         self.discourse.clear_memory()
         with self.assertRaises(ValueError):
-            self.discourse.resolve_pronoun("Huve")
+            self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
 
     def test_khabari_propositional_isolation(self):
         khabari_tokens = ["Daraba", "Zeydun", "Amran"]
@@ -69,7 +71,8 @@ class TestSemanticPipeline(unittest.TestCase):
         self.assertEqual(predicates[0][1], "Fiil_Daraba::Zeyd_Entity")
 
     def test_anaphoric_ir_injection(self):
-        self.discourse.add_mention("Zeydun", "Zeyd_Entity")
+        # [LOGIC FIX]: Söylem belleği kaydında 'active_namespace' yalıtım zırhı zorunluluğu
+        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base")
         
         tokens = ["Daraba", "Huve"]
         dependencies = [("Daraba", "Huve", "Fail", "Marfu")]
