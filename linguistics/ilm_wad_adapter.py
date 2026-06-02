@@ -24,12 +24,11 @@ class IlmWadAdapter:
         self.lexicon = lexicon
         self.discourse = discourse
         self.pragmatics = PragmaticsFilter()
-        # Faz 2: Lüzumi (Gerektirici) ve İnadî (Ayrık/Dışlayıcı) bağlaç setleri ayrıştırıldı
         self.luzumi_particles = {"in", "iza", "law", "amma"}
-        self.inadi_particles = {"imma", "aw", "ya"} # Cem'i Mânia (XOR) işaretçileri
+        self.inadi_particles = {"imma", "aw", "ya"} 
         self.current_tevil_targets: List[str] = []
 
-    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None) -> SemanticStatementIR:
+    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye") -> SemanticStatementIR:
         if auto_lexicon is None:
             auto_lexicon = {}
         if tevil_fallback_nodes is None:
@@ -43,7 +42,6 @@ class IlmWadAdapter:
         ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         
-        # Önerme Tipolojisi Denetimi (Şartiyye/Munfasıla)
         has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
         has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
 
@@ -53,11 +51,10 @@ class IlmWadAdapter:
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
                 continue
 
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type)
             
             rel_id = f"Rel_{rel_type}"
-            # [HOTFIX]: Sentaktik bağımlılık formatındaki f-string hatası ({mamul_id}) giderildi.
             atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
             
             atomic_predicates.append((amil_id, amil_id, 1))
@@ -80,7 +77,7 @@ class IlmWadAdapter:
 
         return SemanticStatementIR(active_namespace=active_namespace, predicates=ir_predicates, is_valid_for_z3=True)
         
-    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> str:
+    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str) -> str:
         pronoun_res = self.discourse.resolve_pronoun(word)
         if pronoun_res:
             return pronoun_res
@@ -90,8 +87,8 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        # Varsayılan literal bağlam çekilir
-        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Kadiyye-i_Hamliyye")
+        # Faz 4: Dinamik Önerme Tipi Aktarımı (Kadiyye-i Hamliyye veya Kadiyye-i Şartiyye)
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type)
         
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:

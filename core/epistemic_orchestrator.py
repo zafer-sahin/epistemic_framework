@@ -9,7 +9,7 @@ from schools.base_usul import AbstractSchoolUsul
 class EpistemicOrchestrator:
     """
     Bilişsel Çıkarım Motoru (Pipeline Manager).
-    Faz 4 - Adım 3: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu.
+    Faz 4 - Adım 3: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu ve Kâtibî Bağlamı.
     Rakip iki ekolün (Sâil ve Mucîb) ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
     """
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
@@ -31,9 +31,13 @@ class EpistemicOrchestrator:
         current_attempt = 0
         tevil_flagged_nodes = []
         
+        # Faz 4: Kâtibî Bağlam Tespiti (Önerme Tipolojisi)
+        has_condition = any(t.lower() in ["in", "iza", "law", "amma", "imma", "aw", "ya"] for t in tokens)
+        proposition_type = "Kadiyye-i_Sartiyye" if has_condition else "Kadiyye-i_Hamliyye"
+        
         while current_attempt <= max_tevil_retries:
             ir_matrix = self.adapter.generate_ir(
-                tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_fallback_nodes=tevil_flagged_nodes
+                tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type
             )
             
             if not ir_matrix.is_valid_for_z3:

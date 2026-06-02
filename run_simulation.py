@@ -15,7 +15,7 @@ from linguistics.sarf_parser import SarfEngine
 from linguistics.nahiv_ast import NahivDependencyCompiler
 from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.discourse_state import DiscourseRegister
-from linguistics.ilm_wad_adapter import IlmWadAdapter
+from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
 
 # Ekol (Usûl) Profilleri
 from schools.salafi_usul import SalafiUsul
@@ -84,6 +84,16 @@ def execute_healthcheck():
     discourse.clear_memory()
     res_maturidi = orchestrator.process_statement(tokens_2, ast_2, MaturidiUsul(), morph_2)
     print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
+
+    print("--- SENARYO 4: CÜRCÂNÎ MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
+    # Faz 4 Red-Teaming: Eş'arî (Cemad) ve Selefî (Nami) üzerinden yatay ontolojik çelişki testi
+    # İki argüman da kendi uzaylarında SAT (Tutarlı) döner ancak çapraz sorguda Yatay Dışlama (Sibling Disjointness) nedeniyle UNSAT'a düşer.
+    ir_mujib = SemanticStatementIR(active_namespace="Ashari", predicates=[("Cemad", "test_entity", 1)], is_valid_for_z3=True)
+    ir_sail = SemanticStatementIR(active_namespace="Salafi", predicates=[("Nami", "test_entity", 1)], is_valid_for_z3=True)
+    
+    res_muaradah = orchestrator.execute_cross_school_muaradah(ir_mujib, AshariUsul(), ir_sail, SalafiUsul())
+    print(f"Mucîb (Ashari): Cemad | Sâil (Salafi): Nami")
+    print(f"Sonuç: [{res_muaradah['status']}] -> {res_muaradah.get('message')}\n")
 
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 
