@@ -43,6 +43,7 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             "ashari": AshariUsul(),
             "maturidi": MaturidiUsul()
         }
+        self.last_ir = None
         self._initialize_pipeline()
 
     def _initialize_pipeline(self):
@@ -58,10 +59,15 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             self.lexicon = ContextualLexicon()
             self.discourse = DiscourseRegister()
             
-            # Faz 9.5: Leksikon kayıtları kök (Cidr) formlarına çekildi
+            # Dinamik Leksikon Eşleştirmeleri (Ontoloji JSON ile uyumlu)
             self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
             self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
+            self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
             self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
+            self.lexicon.register_word("tekvin", "Maturidi", "Tekvin")
+            self.lexicon.register_word("nam", "Base", "Nami")
+            self.lexicon.register_word("cemad", "Base", "Cemad")
+            self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
             
             self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
@@ -86,15 +92,15 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             self.active_usul = self.available_schools[target]
             self.prompt = f"Epistemic-Engine [{self.active_usul.namespace}]> "
             self.discourse.clear_memory()
+            self.last_ir = None
             print(f"[BAĞLAM DEĞİŞİMİ] Aktif Usûl Profiline Geçildi: {self.active_usul.namespace}")
         else:
             print(f"[RED] Tanımsız Usûl. Mevcut seçenekler: {list(self.available_schools.keys())}")
 
     def do_parse_sentence(self, arg):
         """
-        Ham metni Tokenize -> Sarf -> Nahiv (AST) -> Orkestratör (L1-L2-L3)
-        zincirinden geçirerek ontolojik zorunluluğunu ve mezhepsel geçerliliğini test eder.
-        Kullanım: parse_sentence yadun allahun
+        Ham metni Mucîb (Savunucu) kimliğiyle sisteme sunar ve mantıksal geçerliliğini test eder.
+        Kullanım: parse_sentence yadu allahi
         """
         if not arg:
             print("[HATA] Analiz edilecek cümleyi girin.")
@@ -103,13 +109,13 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
         try:
             tokens = self.tokenizer.tokenize(arg)
             auto_lexicon = self.sarf_engine.derive_lexicon(tokens)
-            
             ast_dependencies = self.nahiv_parser.suggest_dependencies(tokens, auto_lexicon)
+            
             print(f"\n[SENTAKS] Üretilen Bağımlılık Ağacı (AST): {ast_dependencies}")
-
             print(f"[YÜRÜTME] Orkestratör Aktif Profil ({self.active_usul.namespace}) ile tetikleniyor...\n")
             
-            # Faz 9.4 Senkronizasyonu: auto_lexicon parametresi eklendi
+            # SemanticStatementIR matrisi mu'aradah çapraz sorgusu için belleğe alınır
+            self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon)
             result = self.orchestrator.process_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
 
             print(f"[{result.get('status', 'BİLİNMİYOR')}]")
@@ -124,9 +130,50 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             print(f"\n[SİSTEM ÇÖKÜŞÜ] Boru Hattı İhlali:")
             traceback.print_exc()
 
+    def do_muaradah(self, arg):
+        """
+        Sâil (İtirazcı) kimliğiyle, Mucîb'in son sunduğu argümana çapraz-ekol saldırısı (Muaradah) yapar.
+        Kullanım: muaradah <rakip_ekol> <karşı_cümle> (Örn: muaradah salafi namun zeydun)
+        """
+        args = arg.split(maxsplit=1)
+        if len(args) < 2:
+            print("[HATA] Rakip usûl ve karşı cümleyi eksiksiz girin. Örn: muaradah salafi namun zeydun")
+            return
+            
+        sail_usul_str, sail_sentence = args[0].strip().lower(), args[1]
+        
+        if sail_usul_str not in self.available_schools:
+            print(f"[HATA] Geçersiz Sâil usûlü: {sail_usul_str}")
+            return
+            
+        if not self.last_ir or not self.last_ir.is_valid_for_z3:
+            print("[HATA] Çapraz sorgu için önce Mucîb (parse_sentence) olarak geçerli bir iddia sunmalısınız.")
+            return
+
+        sail_usul = self.available_schools[sail_usul_str]
+
+        try:
+            sail_tokens = self.tokenizer.tokenize(sail_sentence)
+            sail_lexicon = self.sarf_engine.derive_lexicon(sail_tokens)
+            sail_ast = self.nahiv_parser.suggest_dependencies(sail_tokens, sail_lexicon)
+            
+            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) saldırı protokolü başlatıldı...")
+            
+            result = self.orchestrator.execute_cross_school_muaradah(
+                self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon
+            )
+            
+            print(f"[{result.get('status', 'BİLİNMİYOR')}]")
+            print(f"Gerekçe: {result.get('message')}")
+            
+        except Exception as e:
+            print(f"\n[SİSTEM ÇÖKÜŞÜ] Mu'aradah İhlali:")
+            traceback.print_exc()
+
     def do_clear_memory(self, arg):
         """Söylem belleğindeki (Anafora/Zamir) geçmiş bağlamı sıfırlar."""
         self.discourse.clear_memory()
+        self.last_ir = None
         print("[BELLEK] Söylem hafızası sıfırlandı.")
 
     def do_exit(self, arg):
