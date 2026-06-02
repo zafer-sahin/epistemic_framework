@@ -12,6 +12,9 @@ from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
 from schools.taftazani.adab_al_bahth import AdabAlBahthEngine
 from schools.ashari_usul import AshariUsul
 from schools.salafi_usul import SalafiUsul
+from linguistics.tokenizer import EpistemicTokenizer
+from linguistics.sarf_parser import SarfEngine
+from linguistics.nahiv_ast import NahivDependencyCompiler
 
 class TestDialecticsFSM(unittest.TestCase):
     def setUp(self):
@@ -26,6 +29,9 @@ class TestDialecticsFSM(unittest.TestCase):
         self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
         self.orchestrator = EpistemicOrchestrator(self.adapter, self.l1, self.l2, self.l3)
         self.engine = AdabAlBahthEngine(self.solver, self.discourse)
+        self.tokenizer = EpistemicTokenizer()
+        self.sarf = SarfEngine()
+        self.nahiv = NahivDependencyCompiler()
 
     def test_fsm_sequential_integrity(self):
         """[Faz 3] FSM'nin AWAITING_CLAIM -> AWAITING_EVIDENCE -> AWAITING_ATTACK sıralaması ihlali koruması."""
@@ -37,12 +43,8 @@ class TestDialecticsFSM(unittest.TestCase):
 
     def test_curcani_nakz_refutation(self):
         """[Faz 3 Red-Teaming] Sâil'in Nakz hücumunda, öncüller SAT olsa dahi sonucun lüzum bağını kırması testi."""
-        # Mucîb İddiası: "Tüm S'ler P'dir"
         self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
         
-        # Mucîb'in Hatalı Kıyası (Fâsid İstidlâl): Öncüller tutarlı ama sonucu doğurmuyor
-        # Öncül 1: Bazı S'ler M'dir. Öncül 2: Bazı M'ler P'dir.
-        # Bu iki öncül Z3 için SAT döner (tutarlıdır), ancak "Tüm S'ler P'dir" neticesini ZORUNLU kılmaz.
         premises = [
             "Exists([x], And(S(x), M(x)))",
             "Exists([x], And(M(x), P(x)))"
@@ -51,20 +53,31 @@ class TestDialecticsFSM(unittest.TestCase):
         ev_result = self.engine.submit_evidence(premises)
         self.assertEqual(ev_result["status"], "EVIDENCE_LOGGED", "Öncüller kendi içinde çeliştiği için Z3 reddetti. Hatalı mock verisi.")
         
-        # Sâil Nakz (Refutation) ile saldırır
         attack_result = self.engine.attack_evidence(attack_type="Nakz")
         
-        # Beklenen: FSM otonom olarak Nakz saldırısını başarılı ("NAKZ_SUCCESS") bulmalıdır.
         self.assertEqual(attack_result["status"], "NAKZ_SUCCESS", "[DİYALEKTİK ÇÖKÜŞ] Fâsid istidlâl (Hatalı Lüzum Bağı) Z3 tarafından Nakz edilemedi.")
         self.assertEqual(self.engine.current_state, "RESOLVED", "Tartışma bitmesine rağmen FSM durumu açık kaldı.")
 
     def test_cross_school_muaradah_stalemate(self):
-        """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu."""
-        mujib_ir = SemanticStatementIR(active_namespace="Ashari", predicates=[("Cevher", "Cevher", 1)], is_valid_for_z3=True)
-        sail_ir = SemanticStatementIR(active_namespace="Salafi", predicates=[("Cism", "Cism", 1)], is_valid_for_z3=True)
+        """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu ve Leksikon Yeniden Derlemesi."""
+        self.lexicon.register_word("cevher", "Base", "Cevher")
+        self.lexicon.register_word("cism", "Base", "Cism")
+        # [LOGIC FIX]: Leksikon kaydı, Sarf motorunun (-un) tenvinini kestikten sonra üreteceği saf kök forma (zeyd) indirgendi.
+        self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
+        
+        mujib_ir = SemanticStatementIR(
+            active_namespace="Ashari", 
+            predicates=[("Cevher", "Cevher", 1), ("Zeyd_Entity", "Zeyd_Entity", 1), ("Rel_Mubteda_Haber", "Cevher::Zeyd_Entity", 2)], 
+            is_valid_for_z3=True
+        )
+        
+        # [LOGIC FIX]: Sentaktik I'rab (Tenvin -un) eklenerek Câmid İsim Fallback mekanizması tetiklendi.
+        sail_tokens = ["cismun", "zeydun"]
+        sail_morph = self.sarf.derive_lexicon(sail_tokens)
+        sail_deps = self.nahiv.suggest_dependencies(sail_tokens, sail_morph)
         
         result = self.orchestrator.execute_cross_school_muaradah(
-            mujib_ir, AshariUsul(), sail_ir, SalafiUsul()
+            mujib_ir, AshariUsul(), sail_tokens, sail_deps, SalafiUsul(), sail_morph
         )
         
         self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE", "MUARADAH_FAILED"], "[DİYALEKTİK ÇÖKÜŞ] Çapraz ekol çarpışması hatası.")

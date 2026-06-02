@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 # Core Katmanları
-from core.models import OntologyLoader
+from core.models import OntologyLoader, EpistemicEntity, TermModel
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -39,15 +39,28 @@ def execute_healthcheck():
     lexicon = ContextualLexicon()
     discourse = DiscourseRegister()
     
-    # Mock Veri Enjeksiyonu (Kök/Cidr tabanlı)
+    # Mock Veri Enjeksiyonu
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
-    lexicon.register_word("tekvin", "Maturidi", "Tekvin") # Mâtürîdî spesifik düğüm
+    lexicon.register_word("tekvin", "Maturidi", "Tekvin")
     lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
+    lexicon.register_word("cemad", "Base", "Cemad")
+    # [LOGIC FIX]: Leksikon kayıtları, Sarf motorunun (-i ve -un) i'rablarını kestikten sonra üreteceği saf kök forma (nam ve zeyd) indirgendi.
+    lexicon.register_word("nam", "Base", "Nami")
+    lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
 
     adapter = IlmWadAdapter(lexicon, discourse)
     l1 = Layer1HeuristicGraph(ontology)
+    
+    # L1 Graph Entity Map Mocking (Faz 2 uyumluluğu için)
+    l1.entity_map["Wajib_al_Wujud"] = EpistemicEntity(ontologic_id="Wajib_al_Wujud", terms=TermModel(ar="Allah"), modal_status="Wajib", husn_u_mucerred=True)
+    l1.entity_map["Sifat_Yed_Literal"] = EpistemicEntity(ontologic_id="Sifat_Yed_Literal", terms=TermModel(ar="Yed"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Tekvin"] = EpistemicEntity(ontologic_id="Tekvin", terms=TermModel(ar="Tekvin"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Cemad"] = EpistemicEntity(ontologic_id="Cemad", terms=TermModel(ar="Cemad"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Nami"] = EpistemicEntity(ontologic_id="Nami", terms=TermModel(ar="Nami"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Zeyd_Entity"] = EpistemicEntity(ontologic_id="Zeyd_Entity", terms=TermModel(ar="Zeydun"), modal_status="Mumkin", husn_u_mucerred=False)
+
     l2 = Layer2RuleEngine()
     l3 = Layer3SMTCircuitBreaker(solver, timeout_ms=3000)
     
@@ -55,7 +68,6 @@ def execute_healthcheck():
     print("[BAŞARILI] Orkestratör ve tüm alt-motorlar belleğe yüklendi.\n")
 
     # 2. TEST SENARYOLARI
-    # Test Cümlesi 1: İzafet Terkibi (Mudaf Tenvin Düşmesi ve Mecrur)
     sentence_1 = "yadu allahi" 
     tokens_1 = tokenizer.tokenize(sentence_1)
     morph_1 = sarf.derive_lexicon(tokens_1)
@@ -73,7 +85,6 @@ def execute_healthcheck():
     res_ashari = orchestrator.process_statement(tokens_1, ast_1, AshariUsul(), morph_1)
     print(f"Sonuç: [{res_ashari['status']}] (L2 Kararı: {res_ashari.get('l2_context')})\n")
 
-    # Test Cümlesi 2: Maturidi DSL Spesifik Düğüm Blokajı
     sentence_2 = "tekvinu allahi"
     tokens_2 = tokenizer.tokenize(sentence_2)
     morph_2 = sarf.derive_lexicon(tokens_2)
@@ -86,12 +97,20 @@ def execute_healthcheck():
     print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
 
     print("--- SENARYO 4: CÜRCÂNÎ MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
-    # Faz 4 Red-Teaming: Eş'arî (Cemad) ve Selefî (Nami) üzerinden yatay ontolojik çelişki testi
-    # İki argüman da kendi uzaylarında SAT (Tutarlı) döner ancak çapraz sorguda Yatay Dışlama (Sibling Disjointness) nedeniyle UNSAT'a düşer.
-    ir_mujib = SemanticStatementIR(active_namespace="Ashari", predicates=[("Cemad", "test_entity", 1)], is_valid_for_z3=True)
-    ir_sail = SemanticStatementIR(active_namespace="Salafi", predicates=[("Nami", "test_entity", 1)], is_valid_for_z3=True)
+    discourse.clear_memory()
+    ir_mujib = SemanticStatementIR(
+        active_namespace="Ashari", 
+        predicates=[("Cemad", "Cemad", 1), ("Zeyd_Entity", "Zeyd_Entity", 1), ("Rel_Mubteda_Haber", "Cemad::Zeyd_Entity", 2)], 
+        is_valid_for_z3=True
+    )
     
-    res_muaradah = orchestrator.execute_cross_school_muaradah(ir_mujib, AshariUsul(), ir_sail, SalafiUsul())
+    sail_tokens = ["nami", "zeydun"]
+    sail_morph = sarf.derive_lexicon(sail_tokens)
+    sail_ast = nahiv.suggest_dependencies(sail_tokens, sail_morph)
+    
+    res_muaradah = orchestrator.execute_cross_school_muaradah(
+        ir_mujib, AshariUsul(), sail_tokens, sail_ast, SalafiUsul(), sail_morph
+    )
     print(f"Mucîb (Ashari): Cemad | Sâil (Salafi): Nami")
     print(f"Sonuç: [{res_muaradah['status']}] -> {res_muaradah.get('message')}\n")
 

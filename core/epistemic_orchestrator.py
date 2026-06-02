@@ -10,8 +10,8 @@ from schools.base_usul import AbstractSchoolUsul
 class EpistemicOrchestrator:
     """
     Bilişsel Çıkarım Motoru (Pipeline Manager).
-    Faz 4 - Adım 3: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu ve Kâtibî Bağlamı.
-    Rakip iki ekolün (Sâil ve Mucîb) ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
+    Faz 4 - Adım 2: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu ve İlm-i Vaz' Yeniden Derlemesi (Recompilation).
+    Rakip iki ekolün ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
     """
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
         self.adapter = adapter
@@ -70,12 +70,21 @@ class EpistemicOrchestrator:
             
         return execution_result
 
-    def execute_cross_school_muaradah(self, mujib_claim_ir: SemanticStatementIR, mujib_usul: AbstractSchoolUsul, sail_counter_ir: SemanticStatementIR, sail_usul: AbstractSchoolUsul) -> Dict[str, Any]:
+    def execute_cross_school_muaradah(self, 
+                                      mujib_claim_ir: SemanticStatementIR, 
+                                      mujib_usul: AbstractSchoolUsul, 
+                                      sail_tokens: List[str],
+                                      sail_dependencies: List[Tuple[str, str, str, str]],
+                                      sail_usul: AbstractSchoolUsul,
+                                      sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
         """
-        Z3 Push/Pop İzolasyonu ile Çapraz Sorgu.
-        Sâil'in karşı argümanını Mucîb'in Z3 uzayına enjekte ederek diyalektik kilitlenme (Stalemate) arar.
+        Z3 Push/Pop İzolasyonu ile Çapraz Sorgu (Mu'aradah).
+        Faz 4: Sâil'in karşı argümanı, Mucîb'in uzayına zerk edilmeden evvel, 
+        Mucîb'in İlm-i Vaz' kurallarına göre anlık olarak yeniden derlenir (Cross-Injection Compilation).
         """
-        sail_result = sail_usul.execute_dag(sail_counter_ir, self.l1, self.l2, self.l3, current_attempt=0)
+        # 1. Sâil'in argümanı kendi usûlünde geçerli mi?
+        sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon)
+        sail_result = sail_usul.execute_dag(sail_native_ir, self.l1, self.l2, self.l3, current_attempt=0)
 
         if sail_result["status"] not in ["SAT", "FALLBACK_TRIGGERED"]:
             return {
@@ -83,17 +92,17 @@ class EpistemicOrchestrator:
                 "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
             }
 
+        # 2. Sâil'in argümanı Mucîb'in usûlüne göre YENİDEN DERLENİR (Context Sealing / Çapraz Çeviri)
+        cross_injected_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, mujib_usul.namespace, sail_auto_lexicon)
+
         self.l3.core_solver.solver.push()
         try:
-            # 1. Mucîb'in önermesi SAT dönmeli (kendi uzayında tutarlı). 
-            # execute_sat_check içi push/pop olduğu için Mucîb argümanı burada kalıcı enjekte edilmez, sadece doğrulanır.
+            # Mucîb'in kendi argümanı kontrol edilir
             mujib_base_result = self.l3.execute_sat_check(mujib_claim_ir)
             
             if mujib_base_result["status"] != "SAT":
                  return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
 
-            # [LOGIC FIX]: Çapraz-Enjeksiyon zafiyeti onarıldı.
-            # Z3 matrisine Sâil ve Mucîb'in önermeleri *aynı izolasyon katmanında* eşzamanlı olarak yerleştirilmelidir.
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
             
@@ -101,7 +110,7 @@ class EpistemicOrchestrator:
                 z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
                 self.l3.core_solver.solver.add(z3_expr)
                 
-            for item in sail_counter_ir.predicates:
+            for item in cross_injected_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
                 self.l3.core_solver.solver.add(z3_expr)
 
