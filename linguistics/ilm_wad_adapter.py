@@ -57,7 +57,8 @@ class IlmWadAdapter:
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon)
             
             rel_id = f"Rel_{rel_type}"
-            atomic_predicates.append((rel_id, f"{amil_id}::mamul_id", 2))
+            # [HOTFIX]: Sentaktik bağımlılık formatındaki f-string hatası ({mamul_id}) giderildi.
+            atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
             
             atomic_predicates.append((amil_id, amil_id, 1))
             atomic_predicates.append((mamul_id, mamul_id, 1))
