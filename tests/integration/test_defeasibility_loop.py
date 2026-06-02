@@ -1,6 +1,6 @@
 import unittest
 from pathlib import Path
-from core.models import OntologyLoader
+from core.models import OntologyLoader, EpistemicEntity, TermModel
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -38,15 +38,16 @@ class TestDefeasibilityEngine(unittest.TestCase):
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
         self.l1 = Layer1HeuristicGraph(self.ontology)
         
-        # [MOCK L1 GRAPH] Karîne-i Mânia algılanması için sahte ontolojik mesafeler (LCA>3) enjekte edilir
-        self.l1.parent_map["Sifat_Yed_Literal"] = "Cism"
-        self.l1.parent_map["Wajib_al_Wujud"] = "Divine"
-        self.l1.parent_map["Tekvin"] = "Sifat_Action"
-        self.l1.parent_map["Cism"] = "Cevher"
-        self.l1.parent_map["Cevher"] = "Base_Root"
-        self.l1.parent_map["Divine"] = "Absolute_Root"
-        self.l1.parent_map["Sifat_Action"] = "Action_Root"
-        self.l1.parent_map["Action_Root"] = "Absolute_Root"
+        # [MOCK L1 GRAPH] Karîne-i Mânia algılanması için LCA yerine Modal Uyuşmazlık matrisi enjekte edilir
+        self.l1.entity_map["Wajib_al_Wujud"] = EpistemicEntity(
+            ontologic_id="Wajib_al_Wujud", terms=TermModel(ar="Allah"), modal_status="Wajib", husn_u_mucerred=True
+        )
+        self.l1.entity_map["Sifat_Yed_Literal"] = EpistemicEntity(
+            ontologic_id="Sifat_Yed_Literal", terms=TermModel(ar="Yed"), modal_status="Mumkin", husn_u_mucerred=False
+        )
+        self.l1.entity_map["Tekvin"] = EpistemicEntity(
+            ontologic_id="Tekvin", terms=TermModel(ar="Tekvin"), modal_status="Mumkin", husn_u_mucerred=False
+        )
 
         self.l2 = Layer2RuleEngine()
         self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)

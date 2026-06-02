@@ -5,74 +5,75 @@ from core.models import BaseOntology, EpistemicEntity
 class Layer1HeuristicGraph:
     def __init__(self, ontology: BaseOntology):
         self.ontology = ontology
-        self.parent_map: Dict[str, str] = {}
-        self._build_parent_map()
+        self.entity_map: Dict[str, EpistemicEntity] = {}
+        self._build_entity_map()
 
-    def _build_parent_map(self) -> None:
+    def _build_entity_map(self) -> None:
         for root_node in self.ontology.porphyrian_tree.roots.values():
-            self._traverse_and_map(root_node, None)
+            self._traverse_and_map(root_node)
 
-    def _traverse_and_map(self, entity: EpistemicEntity, parent_id: Optional[str]) -> None:
-        if parent_id:
-            self.parent_map[entity.ontologic_id] = parent_id
+    def _traverse_and_map(self, entity: EpistemicEntity) -> None:
+        self.entity_map[entity.ontologic_id] = entity
         for child in entity.children:
-            self._traverse_and_map(child, entity.ontologic_id)
+            self._traverse_and_map(child)
 
-    def _get_distance(self, node_a: str, node_b: str) -> int:
-        if node_a not in self.parent_map and node_a not in self.ontology.porphyrian_tree.roots:
-            return 0 
-        if node_b not in self.parent_map and node_b not in self.ontology.porphyrian_tree.roots:
-            return 0
-
-        path_a = self._get_ancestors(node_a)
-        path_b = self._get_ancestors(node_b)
-
-        lca = None
-        for ancestor in path_a:
-            if ancestor in path_b:
-                lca = ancestor
-                break
+    def _evaluate_modal_conflict(self, amil_entity: EpistemicEntity, mamul_entity: EpistemicEntity) -> float:
+        """
+        İlm-i Beyân prensiplerine göre ontolojik modalite uyuşmazlığını (Karîne-i Mânia) ölçer.
+        Uzaklık (distance) yerine 'Hüsn-ü Mücerred' ve 'Vâcib/Mümkin' statüleri baz alınır.
+        """
+        conflict_score = 0.0
         
-        if not lca:
-            return len(path_a) + len(path_b)
+        # Kural 1: Vâcibu'l-Vücûd (Zorunlu Varlık) ile Mümkin (Hâdis) varlık/araz etkileşimi
+        if (amil_entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"] and mamul_entity.modal_status in ["Mumkin", "Mumkine_i_Amme"]) or \
+           (mamul_entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"] and amil_entity.modal_status in ["Mumkin", "Mumkine_i_Amme"]):
+            conflict_score += 0.6
+            
+        # Kural 2: Hüsn-ü Mücerred (Soyut Mükemmellik) İhlali
+        if amil_entity.husn_u_mucerred and not mamul_entity.husn_u_mucerred:
+            conflict_score += 0.4
+        elif mamul_entity.husn_u_mucerred and not amil_entity.husn_u_mucerred:
+            conflict_score += 0.4
+            
+        # Kural 3: Leksikal Karine Derecesi Çarpanı (Delalet-i Tazammun/İltizam)
+        max_karine = max(amil_entity.karine_derecesi, mamul_entity.karine_derecesi)
+        if max_karine > 0:
+            conflict_score += (max_karine * 0.2)
 
-        return path_a.index(lca) + path_b.index(lca)
-
-    def _get_ancestors(self, node: str) -> List[str]:
-        path = [node]
-        current = node
-        while current in self.parent_map:
-            current = self.parent_map[current]
-            path.append(current)
-        return path
+        return min(conflict_score, 1.0)
 
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
         if not ir_matrix.is_valid_for_z3:
             return {"status": "REJECTED", "metaphor_probability": 0.0, "reason": "İnşâî form"}
 
-        max_distance = 0
+        max_conflict = 0.0
         flagged_predicates = []
 
-        for pred_id, arg_id, arity in ir_matrix.predicates:
-            if arity == 2:
-                try:
-                    # [LOGIC FIX]: Ayrıştırıcı '_' yerine '::' yapıldı.
-                    amil_str, mamul_str = arg_id.split('::', 1)
-                    distance = self._get_distance(amil_str, mamul_str)
-                    
-                    if distance > 3:
-                        max_distance = max(max_distance, distance)
-                        flagged_predicates.append(arg_id)
-                except ValueError:
-                    continue 
+        for item in ir_matrix.predicates:
+            # Sadece atomik yüklemler ve ilişki ağları taranır (Şartiyye Nested operatörler L3 Z3 uzayına bırakılır)
+            if isinstance(item, tuple):
+                pred_id, arg_id, arity = item
+                if arity == 2 and '::' in arg_id:
+                    try:
+                        amil_str, mamul_str = arg_id.split('::', 1)
+                        amil_ent = self.entity_map.get(amil_str)
+                        mamul_ent = self.entity_map.get(mamul_str)
+                        
+                        if amil_ent and mamul_ent:
+                            conflict = self._evaluate_modal_conflict(amil_ent, mamul_ent)
+                            
+                            if conflict >= 0.5:
+                                max_conflict = max(max_conflict, conflict)
+                                flagged_predicates.append(arg_id)
+                    except ValueError:
+                        continue 
 
-        metaphor_score = min((max_distance / 10.0), 1.0) if max_distance > 3 else 0.0
-        is_metaphor_likely = metaphor_score >= 0.5
+        is_metaphor_likely = max_conflict >= 0.5
 
         return {
             "status": "ANALYZED",
             "is_metaphor_likely": is_metaphor_likely,
-            "metaphor_probability": metaphor_score,
-            "max_ontological_distance": max_distance,
+            "metaphor_probability": max_conflict,
+            "max_modal_conflict_score": max_conflict,
             "flagged_elements": flagged_predicates
         }
