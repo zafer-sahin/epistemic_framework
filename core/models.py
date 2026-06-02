@@ -7,7 +7,6 @@ from typing import List, Optional, Literal, Dict, Any
 
 class EpistemicNamespace(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    
     id: str
     parent_namespace: Optional[str] = None
 
@@ -18,7 +17,6 @@ class TermModel(BaseModel):
 
 class RelationalConstraint(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    
     relation_type: str
     target_id: str  
     axiom: str
@@ -31,12 +29,14 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
-    # Faz 2 - Adım 2: eş-Şemsiyye Muvaccehât (Kiplik) belirteçleri eklendi.
-    # Kâtibî'nin Zarûriyye-i Mutlaka, Dâime-i Mutlaka ve Mümkine-i Âmme kiplikleri Z3 uzayına dahil edildi.
     modal_status: Literal[
         "Wajib", "Mumkin", "Mustahil", 
         "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme"
     ] = "Mumkin"
+
+    # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân ve Maksad-ı Şâri' metrikleri
+    husn_u_mucerred: bool = Field(default=False, description="Mutlak ontolojik mükemmellik/noksansızlık kısıtı")
+    karine_derecesi: Literal[0, 1, 2, 3] = Field(default=0, description="0: Yok, 1: Mutabakat, 2: Tazammun, 3: İltizam")
 
     differentia_id: Optional[str] = None
     propria_ids: List[str] = Field(default_factory=list)

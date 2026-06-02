@@ -247,6 +247,7 @@ DOSYA: ./core/__init__.py
 ==================================================
 DOSYA: ./core/epistemic_orchestrator.py
 ==================================================
+import z3
 from typing import Dict, Any, List, Tuple
 import re
 from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
@@ -258,7 +259,7 @@ from schools.base_usul import AbstractSchoolUsul
 class EpistemicOrchestrator:
     """
     Bilişsel Çıkarım Motoru (Pipeline Manager).
-    Faz 4 - Adım 3: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu.
+    Faz 4 - Adım 3: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu ve Kâtibî Bağlamı.
     Rakip iki ekolün (Sâil ve Mucîb) ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
     """
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
@@ -280,9 +281,12 @@ class EpistemicOrchestrator:
         current_attempt = 0
         tevil_flagged_nodes = []
         
+        has_condition = any(t.lower() in ["in", "iza", "law", "amma", "imma", "aw", "ya"] for t in tokens)
+        proposition_type = "Kadiyye-i_Sartiyye" if has_condition else "Kadiyye-i_Hamliyye"
+        
         while current_attempt <= max_tevil_retries:
             ir_matrix = self.adapter.generate_ir(
-                tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_fallback_nodes=tevil_flagged_nodes
+                tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type
             )
             
             if not ir_matrix.is_valid_for_z3:
@@ -320,7 +324,6 @@ class EpistemicOrchestrator:
         Z3 Push/Pop İzolasyonu ile Çapraz Sorgu.
         Sâil'in karşı argümanını Mucîb'in Z3 uzayına enjekte ederek diyalektik kilitlenme (Stalemate) arar.
         """
-        # 1. Sâil'in karşı argümanı kendi usûlünde (DAG) geçerli mi?
         sail_result = sail_usul.execute_dag(sail_counter_ir, self.l1, self.l2, self.l3, current_attempt=0)
 
         if sail_result["status"] not in ["SAT", "FALLBACK_TRIGGERED"]:
@@ -329,20 +332,31 @@ class EpistemicOrchestrator:
                 "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
             }
 
-        # 2. Sâil'in delili geçerliyse, Mucîb'in ontolojisinde mutlak çelişki (UNSAT) yaratıyor mu?
         self.l3.core_solver.solver.push()
         try:
-            # Mucîb'in argüman uzayını (varsayılan doğru) Z3'e zorla
+            # 1. Mucîb'in önermesi SAT dönmeli (kendi uzayında tutarlı). 
+            # execute_sat_check içi push/pop olduğu için Mucîb argümanı burada kalıcı enjekte edilmez, sadece doğrulanır.
             mujib_base_result = self.l3.execute_sat_check(mujib_claim_ir)
             
             if mujib_base_result["status"] != "SAT":
                  return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
 
-            # Sâil'in karşı argümanını aynı matrise bindir (Cross-Injection)
-            cross_result = self.l3.execute_sat_check(sail_counter_ir)
+            # [LOGIC FIX]: Çapraz-Enjeksiyon zafiyeti onarıldı.
+            # Z3 matrisine Sâil ve Mucîb'in önermeleri *aynı izolasyon katmanında* eşzamanlı olarak yerleştirilmelidir.
+            w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
+            t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
+            
+            for item in mujib_claim_ir.predicates:
+                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                self.l3.core_solver.solver.add(z3_expr)
+                
+            for item in sail_counter_ir.predicates:
+                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                self.l3.core_solver.solver.add(z3_expr)
 
-            if cross_result["status"] == "UNSAT":
-                # Ortak Z3 solver patladıysa Sâil başarılıdır. Eşdeğer güçte zıt bir hakikat bulunmuştur.
+            cross_status = self.l3.core_solver.solver.check()
+
+            if cross_status == z3.unsat:
                 return {
                     "status": "MUARADAH_SUCCESS",
                     "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in ({mujib_usul.namespace}) ontolojik uzayında çelişki (UNSAT) yarattı. Diyalektik Stalemate."
@@ -353,7 +367,6 @@ class EpistemicOrchestrator:
                     "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla sentaktik veya semantik bir çelişki yaratmadı (Paralel Gerçeklik)."
                 }
         finally:
-            # Diyalektik çapraz ateş sonrası bellekleri her halükarda temizle
             self.l3.core_solver.solver.pop()
 
 
@@ -509,9 +522,13 @@ from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
 class Layer3SMTCircuitBreaker:
-    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 2000):
+    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
         self.core_solver = solver
+        
         self.core_solver.solver.set("timeout", timeout_ms)
+        self.core_solver.solver.set("smt.mbqi", True)
+        self.core_solver.solver.set("smt.macro_finder", True)
+        
         self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
 
     def _freeze_ir_matrix(self, predicates: list) -> Tuple:
@@ -523,24 +540,30 @@ class Layer3SMTCircuitBreaker:
                 frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
-    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef) -> z3.ExprRef:
+    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, t_const: z3.ExprRef) -> z3.ExprRef:
         if isinstance(item, tuple):
             pred_id, arg_id, arity = item
             if arity == 1:
                 entity_const = z3.Const(arg_id, self.core_solver.builder.EntitySort)
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
-                return predicate(w_const, entity_const)
+                return predicate(w_const, t_const, entity_const)
             elif arity == 2:
-                # [LOGIC FIX]: Ayrıştırıcı '_' yerine '::' yapıldı.
                 amil_str, mamul_str = arg_id.split('::', 1) 
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
+                
+                # [LOGIC FIX]: İzafet (Mudaf) ve Yüklem (Mubteda) ilişkileri, teolojide 
+                # zat ve sıfatın aynı entite üzerinde değerlendirilmesini (Ayniyet) zorunlu kılar.
+                # Eşitlik (amil == mamul) dayatıldığında, disjoint (zıt) kavramlar aynı varlıkta çakışarak UNSAT üretir.
+                if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                    return amil_const == mamul_const
+                
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
-                return predicate(w_const, amil_const, mamul_const)
+                return predicate(w_const, t_const, amil_const, mamul_const)
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
-            args = [self._build_z3_expr(a, w_const) for a in item.args]
+            args = [self._build_z3_expr(a, w_const, t_const) for a in item.args]
             if item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
@@ -562,9 +585,10 @@ class Layer3SMTCircuitBreaker:
         
         try:
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
+            t_base = z3.Const('t_base', self.core_solver.builder.TimeSort)
             
             for item in ir_matrix.predicates:
-                z3_expr = self._build_z3_expr(item, w_base)
+                z3_expr = self._build_z3_expr(item, w_base, t_base)
                 self.core_solver.solver.add(z3_expr)
             
             result = self.core_solver.solver.check()
@@ -616,39 +640,46 @@ class AristotelianSolver:
         predicate = self.builder.get_or_create_predicate(entity.ontologic_id)
         x = z3.Const(f"x_{entity.ontologic_id}", self.builder.EntitySort)
         w = z3.Const(f"w_{entity.ontologic_id}", self.builder.WorldSort)
+        t = z3.Const(f"t_{entity.ontologic_id}", self.builder.TimeSort)
         
-        # KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu
-        if entity.modal_status == "Wajib":
-            # Zorunlu Varlık: Tüm olası dünyalarda mevcudiyeti zorunludur.
-            existence_axiom = z3.ForAll([w], z3.Exists([x], predicate(w, x)))
+        # KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu - eş-Şemsiyye Makroları
+        if entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"]:
+            # Zorunlu Varlık / Zarûriyye-i Mutlaka: Tüm dünyalarda ve tüm zamanlarda aidiyet zorunludur. (∀w, ∀t)
+            existence_axiom = z3.ForAll([w, t], z3.Exists([x], predicate(w, t, x)))
+            
+        elif entity.modal_status == "Daime_i_Mutlaka":
+            # Dâime-i Mutlaka: Varlık mevcut olduğu sürece aktüel aidiyet. (∃w, ∀t)
+            existence_axiom = z3.Exists([w], z3.ForAll([t], z3.Exists([x], predicate(w, t, x))))
+            
         elif entity.modal_status == "Mustahil":
-            # Mümteni' (İmkansız): Hiçbir olası dünyada var olamaz.
-            existence_axiom = z3.ForAll([w], z3.Not(z3.Exists([x], predicate(w, x))))
-        else: # Mumkin
-            # Mümkün Varlık: En az bir olası dünyada varoluşu çelişki yaratmaz.
-            existence_axiom = z3.Exists([w], z3.Exists([x], predicate(w, x)))
+            # Mümteni' (İmkansız): Hiçbir olası dünyada ve zamanda var olamaz.
+            existence_axiom = z3.ForAll([w, t], z3.Not(z3.Exists([x], predicate(w, t, x))))
+            
+        else: # Mumkin veya Mumkine_i_Amme
+            # Mümkine-i Âmme: En az bir olası dünyada ve en az bir zamanda varoluşu çelişki yaratmaz. (∃w, ∃t)
+            existence_axiom = z3.Exists([w, t], z3.Exists([x], predicate(w, t, x)))
             
         self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
         
-        # KURAL 2: Hiyerarşik Geçişlilik (Tüm dünyalarda geçerli mutlak ontolojik yasa)
+        # KURAL 2: Hiyerarşik Geçişlilik (Tüm dünyalarda ve zamanlarda geçerli mutlak ontolojik yasa)
         for child in entity.children:
             child_pred = self.builder.get_or_create_predicate(child.ontologic_id)
             y = z3.Const(f"y_{child.ontologic_id}_trans", self.builder.EntitySort)
             
-            transitivity_axiom = z3.ForAll([w, y], z3.Implies(child_pred(w, y), predicate(w, y)))
+            transitivity_axiom = z3.ForAll([w, t, y], z3.Implies(child_pred(w, t, y), predicate(w, t, y)))
             self.solver.assert_and_track(
                 transitivity_axiom, 
                 f"AXIOM_HIERARCHY_{child.ontologic_id}_IMPLIES_{entity.ontologic_id}"
             )
             
-        # KURAL 3: Yatay Dışlama (Sibling Disjointness - Tüm dünyalarda geçerli)
+        # KURAL 3: Yatay Dışlama (Sibling Disjointness - Tüm dünyalarda ve zamanlarda geçerli)
         if len(entity.children) > 1:
             for child_a, child_b in itertools.combinations(entity.children, 2):
                 pred_a = self.builder.get_or_create_predicate(child_a.ontologic_id)
                 pred_b = self.builder.get_or_create_predicate(child_b.ontologic_id)
                 z_var = z3.Const(f"z_disjoint_{child_a.ontologic_id}_{child_b.ontologic_id}", self.builder.EntitySort)
                 
-                disjoint_axiom = z3.ForAll([w, z_var], z3.Not(z3.And(pred_a(w, z_var), pred_b(w, z_var))))
+                disjoint_axiom = z3.ForAll([w, t, z_var], z3.Not(z3.And(pred_a(w, t, z_var), pred_b(w, t, z_var))))
                 self.solver.assert_and_track(
                     disjoint_axiom,
                     f"AXIOM_DISJOINT_{child_a.ontologic_id}_AND_{child_b.ontologic_id}"
@@ -658,7 +689,7 @@ class AristotelianSolver:
         if entity.differentia_id:
             diff_name = f"Diff_{entity.ontologic_id}_{entity.differentia_id}"
             diff_pred = self.builder.get_or_create_predicate(diff_name)
-            diff_axiom = z3.ForAll([w, x], z3.Implies(predicate(w, x), diff_pred(w, x)))
+            diff_axiom = z3.ForAll([w, t, x], z3.Implies(predicate(w, t, x), diff_pred(w, t, x)))
             self.solver.assert_and_track(diff_axiom, f"AXIOM_DIFFERENTIA_{entity.ontologic_id}")
 
         # KURAL 5: Hâssa (Proprium)
@@ -666,10 +697,10 @@ class AristotelianSolver:
             prop_name = f"Prop_{entity.ontologic_id}_{prop_id}"
             prop_pred = self.builder.get_or_create_predicate(prop_name)
             
-            prop_axiom_forward = z3.ForAll([w, x], z3.Implies(predicate(w, x), prop_pred(w, x)))
+            prop_axiom_forward = z3.ForAll([w, t, x], z3.Implies(predicate(w, t, x), prop_pred(w, t, x)))
             self.solver.assert_and_track(prop_axiom_forward, f"AXIOM_PROP_FWD_{entity.ontologic_id}_{prop_id}")
             
-            prop_axiom_backward = z3.ForAll([w, x], z3.Implies(prop_pred(w, x), predicate(w, x)))
+            prop_axiom_backward = z3.ForAll([w, t, x], z3.Implies(prop_pred(w, t, x), predicate(w, t, x)))
             self.solver.assert_and_track(prop_axiom_backward, f"AXIOM_PROP_BWD_{entity.ontologic_id}_{prop_id}")
 
         # Mutlak Rekürsiyon
@@ -690,7 +721,6 @@ class AristotelianSolver:
         self.solver.push()
         try:
             for premise in premises:
-                # Olası dünyalar parametresi default olarak w_base şeklinde logic_parser içinde enjekte edilmektedir.
                 z3_premise = self.builder.parse(premise)
                 self.solver.add(z3_premise)
             
@@ -715,11 +745,12 @@ class Z3ExpressionBuilder:
     """
     Sadece belirlenmiş ontolojik ID'ler ve FOL kuralları dahilinde
     Z3 ifadelerine (z3.ExprRef) dönüşüm yapan güvenlik duvarlı ve derinlik limitli AST derleyicisi.
-    Faz 2 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve WorldSort eklentisi.
+    Faz 2 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve Zaman Düzlemi (TimeSort) eklentisi.
     """
     def __init__(self, max_depth: int = 15):
         self.EntitySort = z3.DeclareSort('Entity')
         self.WorldSort = z3.DeclareSort('World') # Kripke Olası Dünyalar Uzayı
+        self.TimeSort = z3.DeclareSort('Time')   # Şemsiyye Kiplikleri İçin Zaman Düzlemi
         self.predicates: Dict[str, z3.FuncDeclRef] = {}
         
         # Modal Erişim Bağıntısı (Accessibility Relation: R(w1, w2))
@@ -733,24 +764,26 @@ class Z3ExpressionBuilder:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz ontolojik sembol: '{name}'. Sadece ASCII/Transliterasyon desteklenir.")
 
         if name not in self.predicates:
-            # Muvaccehât: Her yüklem artık N ariteye ek olarak bir "Dünya" (w) parametresi alır.
-            domains = [self.WorldSort] + [self.EntitySort] * arity
+            # Muvaccehât: Her yüklem artık N ariteye ek olarak "Dünya" (w) ve "Zaman" (t) parametresi alır.
+            domains = [self.WorldSort, self.TimeSort] + [self.EntitySort] * arity
             self.predicates[name] = z3.Function(name, *domains, z3.BoolSort())
         else:
-            # Mevcut arite, WorldSort eklendiği için +1 olarak kontrol edilir
+            # Mevcut arite, WorldSort ve TimeSort eklendiği için +2 olarak kontrol edilir
             existing_arity = self.predicates[name].arity()
-            if existing_arity != arity + 1:
+            if existing_arity != arity + 2:
                 raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması.")
                 
         return self.predicates[name]
 
-    def parse(self, expr_str: str, current_world: z3.ExprRef = None) -> z3.ExprRef:
+    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time: z3.ExprRef = None) -> z3.ExprRef:
         try:
             if current_world is None:
                 current_world = z3.Const('w_base', self.WorldSort)
+            if current_time is None:
+                current_time = z3.Const('t_base', self.TimeSort)
             tree = ast.parse(expr_str, mode='eval').body
-            # Kök ayrıştırmada World (w) parametresi bound_vars içerisine gömülür
-            return self._eval_node(tree, {'__world__': current_world}, current_depth=0)
+            # Kök ayrıştırmada World (w) ve Time (t) parametresi bound_vars içerisine gömülür
+            return self._eval_node(tree, {'__world__': current_world, '__time__': current_time}, current_depth=0)
         except SyntaxError as e:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz FOL/Modal ifadesi derlenemez: {e}")
 
@@ -759,6 +792,7 @@ class Z3ExpressionBuilder:
             raise RecursionError(f"[ÇÖKÜŞ] AST Derinlik Limiti ({self.max_depth}) aşıldı.\nCombinatorial Explosion engellendi.")
 
         current_w = bound_vars.get('__world__')
+        current_t = bound_vars.get('__time__')
 
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
@@ -779,7 +813,7 @@ class Z3ExpressionBuilder:
             elif func_name == 'Luzumi':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
-                existential_vars = [v for k, v in bound_vars.items() if k != '__world__']
+                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time__')]
                 if existential_vars:
                     return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
@@ -813,9 +847,8 @@ class Z3ExpressionBuilder:
                     return z3.Exists(z3_vars, body_expr)
             
             else:
-                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) parametresi enjekte edilir
-                args = [current_w] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
-                # Arite hesabı, World (w) eklendiği için node.args üzerinden hesaplanır
+                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) ve Time (t) parametresi enjekte edilir
+                args = [current_w, current_t] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
                 arity = len(node.args)
                 predicate = self.get_or_create_predicate(func_name, arity)
                 return predicate(*args)
@@ -865,9 +898,12 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
-    # Faz 2 - Adım 2: Muvaccehât (Kiplik) belirteci eklendi.
-    # Varsayılan ontolojik statü "Mumkin" (Caiz/Contingent) olarak kabul edilir.
-    modal_status: Literal["Wajib", "Mumkin", "Mustahil"] = "Mumkin"
+    # Faz 2 - Adım 2: eş-Şemsiyye Muvaccehât (Kiplik) belirteçleri eklendi.
+    # Kâtibî'nin Zarûriyye-i Mutlaka, Dâime-i Mutlaka ve Mümkine-i Âmme kiplikleri Z3 uzayına dahil edildi.
+    modal_status: Literal[
+        "Wajib", "Mumkin", "Mustahil", 
+        "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme"
+    ] = "Mumkin"
 
     differentia_id: Optional[str] = None
     propria_ids: List[str] = Field(default_factory=list)
@@ -1307,11 +1343,11 @@ class IlmWadAdapter:
         self.lexicon = lexicon
         self.discourse = discourse
         self.pragmatics = PragmaticsFilter()
-        self.conditional_particles = {"in", "iza", "law", "amma"}
+        self.luzumi_particles = {"in", "iza", "law", "amma"}
+        self.inadi_particles = {"imma", "aw", "ya"} 
         self.current_tevil_targets: List[str] = []
 
-    # [LOGIC FIX]: 'tevil_fallback_nodes' parametresi eklendi
-    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None) -> SemanticStatementIR:
+    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye") -> SemanticStatementIR:
         if auto_lexicon is None:
             auto_lexicon = {}
         if tevil_fallback_nodes is None:
@@ -1325,14 +1361,17 @@ class IlmWadAdapter:
         ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         
-        has_condition = any(t.lower() in self.conditional_particles for t in tokens)
+        has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
+        has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
 
         for amil, mamul, rel_type, _ in dependencies:
-            if amil.lower() in self.conditional_particles or mamul.lower() in self.conditional_particles:
+            if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
+                continue
+            if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
                 continue
 
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type)
             
             rel_id = f"Rel_{rel_type}"
             atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
@@ -1340,7 +1379,13 @@ class IlmWadAdapter:
             atomic_predicates.append((amil_id, amil_id, 1))
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
-        if has_condition:
+        if has_inadi:
+            nested_logic = NestedPredicate(
+                operator="Inadi",
+                args=atomic_predicates
+            )
+            ir_predicates.append(nested_logic)
+        elif has_luzumi:
             nested_logic = NestedPredicate(
                 operator="Luzumi",
                 args=atomic_predicates
@@ -1351,7 +1396,7 @@ class IlmWadAdapter:
 
         return SemanticStatementIR(active_namespace=active_namespace, predicates=ir_predicates, is_valid_for_z3=True)
         
-    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> str:
+    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str) -> str:
         pronoun_res = self.discourse.resolve_pronoun(word)
         if pronoun_res:
             return pronoun_res
@@ -1361,10 +1406,9 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        # Varsayılan literal bağlam çekilir
-        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Kadiyye-i_Hamliyye")
+        # Faz 4: Dinamik Önerme Tipi Aktarımı (Kadiyye-i Hamliyye veya Kadiyye-i Şartiyye)
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type)
         
-        # [LOGIC FIX]: Te'vil hedefleri Z3'ten UNSAT dönmüşse Leksikon Tensöründe mecaz anlama düş (Fallback)
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
                 ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback")
@@ -1375,7 +1419,7 @@ class IlmWadAdapter:
         
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_"):
             self.discourse.add_mention(word, ontologic_id)
-        
+            
         return ontologic_id
 
 
@@ -1848,7 +1892,7 @@ from linguistics.sarf_parser import SarfEngine
 from linguistics.nahiv_ast import NahivDependencyCompiler
 from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.discourse_state import DiscourseRegister
-from linguistics.ilm_wad_adapter import IlmWadAdapter
+from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
 
 # Ekol (Usûl) Profilleri
 from schools.salafi_usul import SalafiUsul
@@ -1917,6 +1961,16 @@ def execute_healthcheck():
     discourse.clear_memory()
     res_maturidi = orchestrator.process_statement(tokens_2, ast_2, MaturidiUsul(), morph_2)
     print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
+
+    print("--- SENARYO 4: CÜRCÂNÎ MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
+    # Faz 4 Red-Teaming: Eş'arî (Cemad) ve Selefî (Nami) üzerinden yatay ontolojik çelişki testi
+    # İki argüman da kendi uzaylarında SAT (Tutarlı) döner ancak çapraz sorguda Yatay Dışlama (Sibling Disjointness) nedeniyle UNSAT'a düşer.
+    ir_mujib = SemanticStatementIR(active_namespace="Ashari", predicates=[("Cemad", "test_entity", 1)], is_valid_for_z3=True)
+    ir_sail = SemanticStatementIR(active_namespace="Salafi", predicates=[("Nami", "test_entity", 1)], is_valid_for_z3=True)
+    
+    res_muaradah = orchestrator.execute_cross_school_muaradah(ir_mujib, AshariUsul(), ir_sail, SalafiUsul())
+    print(f"Mucîb (Ashari): Cemad | Sâil (Salafi): Nami")
+    print(f"Sonuç: [{res_muaradah['status']}] -> {res_muaradah.get('message')}\n")
 
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 
@@ -2213,9 +2267,13 @@ class AdabAlBahthEngine:
             if not target_premise or target_premise not in self.active_premises:
                 return {"status": "INVALID_ATTACK", "message": "Men' saldırısı için hedef öncül belirtilmelidir."}
             
+            # [LOGIC FIX]: Olası Memory Leak tıkandı. FSM AWAITING_EVIDENCE'a dönmeden önce reddedilen kapsam temizlenmelidir.
+            self.solver.solver.pop()
+            self.discourse.set_agent("Mujib")
+            self.discourse.pop_scope()
+            
             # Sâil öncülü reddettiği için FSM tekrar Mucîb'in ispat durumuna döner
             self.current_state = "AWAITING_EVIDENCE"
-            self.discourse.set_agent("Mujib")
             return {"status": "MEN_ON_PREMISE", "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti. Mucîb bu öncülü ara-iddia olarak ispatlamalıdır."}
             
         elif attack_type == "Nakz":
@@ -2223,7 +2281,9 @@ class AdabAlBahthEngine:
             is_valid = self.solver.verify_syllogism(self.active_premises, self.active_claim)
             
             # Test bittiği için varsayımsal kapsamları bellekten düşür
+            # [LOGIC FIX]: Pop işlemi yığıtı (frame) açan Mucîb aktörü üzerinden yürütülmelidir (Stack Underflow çözümü).
             self.solver.solver.pop()
+            self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
             self.current_state = "RESOLVED"
             
@@ -2242,6 +2302,7 @@ class AdabAlBahthEngine:
         """Diyalektik oturumu (Session) sıfırlar ve bellekleri temizler."""
         if self.current_state == "AWAITING_ATTACK":
             self.solver.solver.pop()
+            self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
             
         self.current_state = "AWAITING_CLAIM"
@@ -2295,12 +2356,35 @@ class TestDialecticsFSM(unittest.TestCase):
         self.engine = AdabAlBahthEngine(self.solver, self.discourse)
 
     def test_fsm_sequential_integrity(self):
-        """[Faz 4.2] FSM'nin AWAITING_CLAIM -> AWAITING_EVIDENCE -> AWAITING_ATTACK sıralaması ihlali koruması."""
+        """[Faz 3] FSM'nin AWAITING_CLAIM -> AWAITING_EVIDENCE -> AWAITING_ATTACK sıralaması ihlali koruması."""
         with self.assertRaises(ValueError):
             self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
             
         self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
         self.assertEqual(self.engine.current_state, "AWAITING_EVIDENCE", "FSM durum geçişi başarısız.")
+
+    def test_curcani_nakz_refutation(self):
+        """[Faz 3 Red-Teaming] Sâil'in Nakz hücumunda, öncüller SAT olsa dahi sonucun lüzum bağını kırması testi."""
+        # Mucîb İddiası: "Tüm S'ler P'dir"
+        self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
+        
+        # Mucîb'in Hatalı Kıyası (Fâsid İstidlâl): Öncüller tutarlı ama sonucu doğurmuyor
+        # Öncül 1: Bazı S'ler M'dir. Öncül 2: Bazı M'ler P'dir.
+        # Bu iki öncül Z3 için SAT döner (tutarlıdır), ancak "Tüm S'ler P'dir" neticesini ZORUNLU kılmaz.
+        premises = [
+            "Exists([x], And(S(x), M(x)))",
+            "Exists([x], And(M(x), P(x)))"
+        ]
+        
+        ev_result = self.engine.submit_evidence(premises)
+        self.assertEqual(ev_result["status"], "EVIDENCE_LOGGED", "Öncüller kendi içinde çeliştiği için Z3 reddetti. Hatalı mock verisi.")
+        
+        # Sâil Nakz (Refutation) ile saldırır
+        attack_result = self.engine.attack_evidence(attack_type="Nakz")
+        
+        # Beklenen: FSM otonom olarak Nakz saldırısını başarılı ("NAKZ_SUCCESS") bulmalıdır.
+        self.assertEqual(attack_result["status"], "NAKZ_SUCCESS", "[DİYALEKTİK ÇÖKÜŞ] Fâsid istidlâl (Hatalı Lüzum Bağı) Z3 tarafından Nakz edilemedi.")
+        self.assertEqual(self.engine.current_state, "RESOLVED", "Tartışma bitmesine rağmen FSM durumu açık kaldı.")
 
     def test_cross_school_muaradah_stalemate(self):
         """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu."""
@@ -2522,31 +2606,58 @@ class TestModalLogicEngine(unittest.TestCase):
         self.builder = Z3ExpressionBuilder()
         self.solver = z3.Solver()
 
-    def test_kripke_semantics_world_injection(self):
-        """[Faz 2.1] N-Ary yüklemlere otonom olarak 'WorldSort' parametresi enjeksiyonu."""
+    def test_kripke_semantics_world_and_time_injection(self):
+        """[Faz 1] N-Ary yüklemlere otonom olarak 'WorldSort' ve 'TimeSort' parametresi enjeksiyonu."""
         expr_str = "Forall([x], Insan(x))"
         z3_ast = self.builder.parse(expr_str)
-        # Oluşan AST'de 'Insan' yükleminin aritesi (w_base, x) olarak 2 olmalıdır.
-        self.assertTrue("w_base" in str(z3_ast), "[MODAL ÇÖKÜŞ] Olası Dünyalar (WorldSort) Z3 değişkenine zerk edilemedi.")
+        ast_str = str(z3_ast)
+        self.assertTrue("w_base" in ast_str, "[MODAL ÇÖKÜŞ] Olası Dünyalar (WorldSort) Z3 değişkenine zerk edilemedi.")
+        self.assertTrue("t_base" in ast_str, "[MODAL ÇÖKÜŞ] Zaman Düzlemi (TimeSort) Z3 değişkenine zerk edilemedi.")
+
+    def test_temporal_modal_consistency(self):
+        """[Faz 1 Red-Teaming] Zeyd aynı dünyada farklı zaman dilimlerinde zıt eylemler yapabilir (SAT), ancak aynı anda yapamaz (UNSAT)."""
+        w1 = z3.Const('w1', self.builder.WorldSort)
+        t1 = z3.Const('t1', self.builder.TimeSort)
+        t2 = z3.Const('t2', self.builder.TimeSort)
+        zeyd = z3.Const('Zeyd', self.builder.EntitySort)
+        
+        Kaim = self.builder.get_or_create_predicate('Kaim', 1)
+        Celisik_Kaim = self.builder.get_or_create_predicate('Celisik_Kaim', 1)
+        
+        # Yatay Dışlama Kuralı (Aynı dünyada ve zamanda hem Kaim hem Celisik_Kaim olunamaz)
+        w_var = z3.Const('w_var', self.builder.WorldSort)
+        t_var = z3.Const('t_var', self.builder.TimeSort)
+        x_var = z3.Const('x_var', self.builder.EntitySort)
+        disjoint_axiom = z3.ForAll([w_var, t_var, x_var], 
+                                   z3.Not(z3.And(Kaim(w_var, t_var, x_var), Celisik_Kaim(w_var, t_var, x_var))))
+        self.solver.add(disjoint_axiom)
+
+        # Senaryo 1: Farklı zamanlarda (t1, t2) zıt eylemler -> SAT beklenir
+        self.solver.push()
+        self.solver.add(Kaim(w1, t1, zeyd))
+        self.solver.add(Celisik_Kaim(w1, t2, zeyd))
+        self.assertEqual(self.solver.check(), z3.sat, "Farklı zaman dilimlerinde (t1, t2) tutarlı olan ontolojik durum SAT dönmelidir.")
+        self.solver.pop()
+
+        # Senaryo 2: Aynı zamanda (t1) zıt eylemler -> UNSAT (Çelişki) beklenir
+        self.solver.push()
+        self.solver.add(Kaim(w1, t1, zeyd))
+        self.solver.add(Celisik_Kaim(w1, t1, zeyd))
+        self.assertEqual(self.solver.check(), z3.unsat, "Aynı zaman diliminde (t1) zıt eylemler araz kuralları gereği anında UNSAT dönmelidir.")
+        self.solver.pop()
 
     def test_inadi_mutually_exclusive_operator(self):
         """[Faz 1.1] İnadi Şartiyye (Hulüvv ve Cem'i Mânia) XOR mantıksal operatörü."""
-        # [DÜZELTME]: 'x' değişkeni Forall niceleyicisi (Quantifier) ile scope içine alınarak bağlı değişken (Bound Variable) yapıldı.
         expr_str = "Forall([x], Inadi(Fail_Muhtar(x), Mecbur(x)))"
         z3_ast = self.builder.parse(expr_str)
         self.solver.add(z3_ast)
         
-        # [Z3 ASSERTION]: İnadi (XOR) şartına göre bir varlığın aynı anda hem Fail_Muhtar hem Mecbur olması 
-        # (Zıtların Cem'i) ontolojik olarak imkansızdır (Müstahil).
+        # İnadi (XOR) şartına göre bir varlığın aynı anda hem Fail_Muhtar hem Mecbur olması ontolojik olarak imkansızdır (Müstahil).
         conflict_expr = self.builder.parse("Exists([y], And(Fail_Muhtar(y), Mecbur(y)))")
         self.solver.add(conflict_expr)
         
-        # Testin UNSAT dönmesi, Z3 motorunun İnadi (XOR) operatörünü başarılı şekilde işlediğini kanıtlar.
         result = self.solver.check()
         self.assertEqual(result, z3.unsat, "[ZAFİYET] İnadi Şartiyye (Cem'i Mânia) ihlali Z3 tarafından engellenemedi.")
-
-if __name__ == '__main__':
-    unittest.main()
 
 
 ==================================================
