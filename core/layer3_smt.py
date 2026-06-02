@@ -34,9 +34,6 @@ class Layer3SMTCircuitBreaker:
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                 
-                # [LOGIC FIX]: İzafet (Mudaf) ve Yüklem (Mubteda) ilişkileri, teolojide 
-                # zat ve sıfatın aynı entite üzerinde değerlendirilmesini (Ayniyet) zorunlu kılar.
-                # Eşitlik (amil == mamul) dayatıldığında, disjoint (zıt) kavramlar aynı varlıkta çakışarak UNSAT üretir.
                 if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
                     return amil_const == mamul_const
                 
@@ -54,6 +51,14 @@ class Layer3SMTCircuitBreaker:
                 if len(args) == 2:
                     return z3.And(z3.Or(args[0], args[1]), z3.Not(z3.And(args[0], args[1])))
                 return z3.Or(args)
+            elif item.operator == "Wajib_Fiqh":
+                # Fıkhî Emir (Deontic Necessity -> Kripke ForAll)
+                body = args[0] if len(args) == 1 else z3.And(args)
+                return z3.ForAll([w_const, t_const], body)
+            elif item.operator == "Haram_Fiqh":
+                # Fıkhî Nehiy (Deontic Impossibility -> Not Exists)
+                body = args[0] if len(args) == 1 else z3.And(args)
+                return z3.Not(z3.Exists([w_const, t_const], body))
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 
