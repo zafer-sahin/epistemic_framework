@@ -7,11 +7,12 @@ class Z3ExpressionBuilder:
     """
     Sadece belirlenmiş ontolojik ID'ler ve FOL kuralları dahilinde
     Z3 ifadelerine (z3.ExprRef) dönüşüm yapan güvenlik duvarlı ve derinlik limitli AST derleyicisi.
-    Faz 2 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve WorldSort eklentisi.
+    Faz 2 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve Zaman Düzlemi (TimeSort) eklentisi.
     """
     def __init__(self, max_depth: int = 15):
         self.EntitySort = z3.DeclareSort('Entity')
         self.WorldSort = z3.DeclareSort('World') # Kripke Olası Dünyalar Uzayı
+        self.TimeSort = z3.DeclareSort('Time')   # Şemsiyye Kiplikleri İçin Zaman Düzlemi
         self.predicates: Dict[str, z3.FuncDeclRef] = {}
         
         # Modal Erişim Bağıntısı (Accessibility Relation: R(w1, w2))
@@ -25,24 +26,26 @@ class Z3ExpressionBuilder:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz ontolojik sembol: '{name}'. Sadece ASCII/Transliterasyon desteklenir.")
 
         if name not in self.predicates:
-            # Muvaccehât: Her yüklem artık N ariteye ek olarak bir "Dünya" (w) parametresi alır.
-            domains = [self.WorldSort] + [self.EntitySort] * arity
+            # Muvaccehât: Her yüklem artık N ariteye ek olarak "Dünya" (w) ve "Zaman" (t) parametresi alır.
+            domains = [self.WorldSort, self.TimeSort] + [self.EntitySort] * arity
             self.predicates[name] = z3.Function(name, *domains, z3.BoolSort())
         else:
-            # Mevcut arite, WorldSort eklendiği için +1 olarak kontrol edilir
+            # Mevcut arite, WorldSort ve TimeSort eklendiği için +2 olarak kontrol edilir
             existing_arity = self.predicates[name].arity()
-            if existing_arity != arity + 1:
+            if existing_arity != arity + 2:
                 raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması.")
                 
         return self.predicates[name]
 
-    def parse(self, expr_str: str, current_world: z3.ExprRef = None) -> z3.ExprRef:
+    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time: z3.ExprRef = None) -> z3.ExprRef:
         try:
             if current_world is None:
                 current_world = z3.Const('w_base', self.WorldSort)
+            if current_time is None:
+                current_time = z3.Const('t_base', self.TimeSort)
             tree = ast.parse(expr_str, mode='eval').body
-            # Kök ayrıştırmada World (w) parametresi bound_vars içerisine gömülür
-            return self._eval_node(tree, {'__world__': current_world}, current_depth=0)
+            # Kök ayrıştırmada World (w) ve Time (t) parametresi bound_vars içerisine gömülür
+            return self._eval_node(tree, {'__world__': current_world, '__time__': current_time}, current_depth=0)
         except SyntaxError as e:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz FOL/Modal ifadesi derlenemez: {e}")
 
@@ -51,6 +54,7 @@ class Z3ExpressionBuilder:
             raise RecursionError(f"[ÇÖKÜŞ] AST Derinlik Limiti ({self.max_depth}) aşıldı.\nCombinatorial Explosion engellendi.")
 
         current_w = bound_vars.get('__world__')
+        current_t = bound_vars.get('__time__')
 
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
@@ -71,7 +75,7 @@ class Z3ExpressionBuilder:
             elif func_name == 'Luzumi':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
-                existential_vars = [v for k, v in bound_vars.items() if k != '__world__']
+                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time__')]
                 if existential_vars:
                     return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
@@ -105,9 +109,8 @@ class Z3ExpressionBuilder:
                     return z3.Exists(z3_vars, body_expr)
             
             else:
-                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) parametresi enjekte edilir
-                args = [current_w] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
-                # Arite hesabı, World (w) eklendiği için node.args üzerinden hesaplanır
+                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) ve Time (t) parametresi enjekte edilir
+                args = [current_w, current_t] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
                 arity = len(node.args)
                 predicate = self.get_or_create_predicate(func_name, arity)
                 return predicate(*args)

@@ -18,24 +18,24 @@ class Layer3SMTCircuitBreaker:
                 frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
-    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef) -> z3.ExprRef:
+    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, t_const: z3.ExprRef) -> z3.ExprRef:
         if isinstance(item, tuple):
             pred_id, arg_id, arity = item
             if arity == 1:
                 entity_const = z3.Const(arg_id, self.core_solver.builder.EntitySort)
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
-                return predicate(w_const, entity_const)
+                return predicate(w_const, t_const, entity_const)
             elif arity == 2:
                 # [LOGIC FIX]: Ayrıştırıcı '_' yerine '::' yapıldı.
                 amil_str, mamul_str = arg_id.split('::', 1) 
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
-                return predicate(w_const, amil_const, mamul_const)
+                return predicate(w_const, t_const, amil_const, mamul_const)
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
-            args = [self._build_z3_expr(a, w_const) for a in item.args]
+            args = [self._build_z3_expr(a, w_const, t_const) for a in item.args]
             if item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
@@ -57,9 +57,10 @@ class Layer3SMTCircuitBreaker:
         
         try:
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
+            t_base = z3.Const('t_base', self.core_solver.builder.TimeSort)
             
             for item in ir_matrix.predicates:
-                z3_expr = self._build_z3_expr(item, w_base)
+                z3_expr = self._build_z3_expr(item, w_base, t_base)
                 self.core_solver.solver.add(z3_expr)
             
             result = self.core_solver.solver.check()
