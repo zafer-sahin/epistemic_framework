@@ -25,13 +25,13 @@ class Layer3SMTCircuitBreaker:
                 frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
-    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, t_const: z3.ExprRef) -> z3.ExprRef:
+    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, tz_const: z3.ExprRef, tv_const: z3.ExprRef) -> z3.ExprRef:
         if isinstance(item, tuple):
             pred_id, arg_id, arity = item
             if arity == 1:
                 entity_const = z3.Const(arg_id, self.core_solver.builder.EntitySort)
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
-                return predicate(w_const, t_const, entity_const)
+                return predicate(w_const, tz_const, tv_const, entity_const)
             elif arity == 2:
                 amil_str, mamul_str = arg_id.split('::', 1) 
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
@@ -41,11 +41,11 @@ class Layer3SMTCircuitBreaker:
                     return amil_const == mamul_const
                 
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
-                return predicate(w_const, t_const, amil_const, mamul_const)
+                return predicate(w_const, tz_const, tv_const, amil_const, mamul_const)
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
-            args = [self._build_z3_expr(a, w_const, t_const) for a in item.args]
+            args = [self._build_z3_expr(a, w_const, tz_const, tv_const) for a in item.args]
             if item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
@@ -56,19 +56,20 @@ class Layer3SMTCircuitBreaker:
                 return z3.Or(args)
             elif item.operator == "Wajib_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.ForAll([w_const, t_const], body)
+                return z3.ForAll([w_const, tz_const, tv_const], body)
             elif item.operator == "Haram_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.Not(z3.Exists([w_const, t_const], body))
+                return z3.Not(z3.Exists([w_const, tz_const, tv_const], body))
             elif item.operator == "Istifham_Inkari":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.ForAll([w_const, t_const], z3.Not(body))
+                return z3.ForAll([w_const, tz_const, tv_const], z3.Not(body))
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 
     def _inject_structural_axioms(self) -> None:
         w_var = z3.Const('w_vaz', self.core_solver.builder.WorldSort)
-        t_var = z3.Const('t_vaz', self.core_solver.builder.TimeSort)
+        tz_var = z3.Const('tz_vaz', self.core_solver.builder.TimeSortZati)
+        tv_var = z3.Const('tv_vaz', self.core_solver.builder.TimeSortVasfi)
         x_var = z3.Const('x_var', self.core_solver.builder.EntitySort)
         y_var = z3.Const('y_var', self.core_solver.builder.EntitySort)
 
@@ -77,19 +78,19 @@ class Layer3SMTCircuitBreaker:
         role_action = self.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
 
         agent_axiom = z3.ForAll(
-            [w_var, t_var, x_var],
+            [w_var, tz_var, tv_var, x_var],
             z3.Implies(
-                role_agent(w_var, t_var, x_var),
-                z3.Exists([y_var], role_action(w_var, t_var, y_var))
+                role_agent(w_var, tz_var, tv_var, x_var),
+                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, y_var))
             )
         )
         self.core_solver.solver.add(agent_axiom)
 
         patient_axiom = z3.ForAll(
-            [w_var, t_var, x_var],
+            [w_var, tz_var, tv_var, x_var],
             z3.Implies(
-                role_patient(w_var, t_var, x_var),
-                z3.Exists([y_var], role_action(w_var, t_var, y_var))
+                role_patient(w_var, tz_var, tv_var, x_var),
+                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, y_var))
             )
         )
         self.core_solver.solver.add(patient_axiom)
@@ -99,7 +100,8 @@ class Layer3SMTCircuitBreaker:
             return False
 
         w_var = z3.Const('w_beyan', self.core_solver.builder.WorldSort)
-        t_var = z3.Const('t_beyan', self.core_solver.builder.TimeSort)
+        tz_var = z3.Const('tz_beyan', self.core_solver.builder.TimeSortZati)
+        tv_var = z3.Const('tv_beyan', self.core_solver.builder.TimeSortVasfi)
         x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
 
         for i in range(len(chain) - 1):
@@ -115,11 +117,10 @@ class Layer3SMTCircuitBreaker:
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
 
             bridge_axiom = z3.ForAll(
-                [w_var, t_var, x_var],
-                z3.Implies(source_pred(w_var, t_var, x_var), target_pred(w_var, t_var, x_var))
+                [w_var, tz_var, tv_var, x_var],
+                z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))
             )
             
-            # Aksiyomlar doğrudan global track yerine lokal listeye eklenir
             self._active_bridge_axioms.append(bridge_axiom)
             self._proven_bridges.add(bridge_id)
             
@@ -140,10 +141,11 @@ class Layer3SMTCircuitBreaker:
                 self.core_solver.solver.add(b_axiom)
 
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
-            t_base = z3.Const('t_base', self.core_solver.builder.TimeSort)
+            tz_base = z3.Const('tz_base', self.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.core_solver.builder.TimeSortVasfi)
             
             for item in ir_matrix.predicates:
-                z3_expr = self._build_z3_expr(item, w_base, t_base)
+                z3_expr = self._build_z3_expr(item, w_base, tz_base, tv_base)
                 self.core_solver.solver.add(z3_expr)
             
             result = self.core_solver.solver.check()

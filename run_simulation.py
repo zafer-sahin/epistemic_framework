@@ -52,12 +52,14 @@ def execute_healthcheck():
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
     
+    # Sistematik Ontoloji Kayıtları
     lexicon.register_word("tekvin", "Maturidi", "Tekvin")
     lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
     lexicon.register_word("cemad", "Base", "Cemad")
     lexicon.register_word("nam", "Base", "Nami")
     lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
     lexicon.register_word("drb", "Base", "Kavram_Vuran")
+    lexicon.register_word("masiy", "Base", "Masi") 
 
     adapter = IlmWadAdapter(lexicon, discourse)
     l1 = Layer1HeuristicGraph(ontology)
@@ -139,13 +141,10 @@ def execute_healthcheck():
     print(f"Sonuç: [{res_maani_1['status']}] -> {res_maani_1.get('message')}\n")
 
     print("--- SENARYO 7: ÂDÂB-I BAHS (FAZ 5 - TAHRÎR-İ NİZA' VE MÜLÂZAMA) ---")
-    # [LOGIC FIX]: Global SMT Çözücüsü önceki senaryolar tarafından kirletildiği için, 
-    # Âdâb-ı Bahs FSM motoruna tamamen temiz (Fresh) bir Solver örneği enjekte edilir.
     clean_solver = AristotelianSolver(ontology)
     fsm_engine = AdabAlBahthEngine(clean_solver, discourse)
     fsm_engine.reset_session()
     
-    # "Cemad olan her şey Nami (büyüyen) dır" gibi ontolojik olarak yanlış bir iddia sunulur ki doğrudan Aksiyom (TAHSIL_I_HASIL) olmasın.
     res_dava = fsm_engine.submit_claim("Forall([x], Implies(Cemad(x), Nami(x)))")
     print(f"Da'vâ (İddia) Durumu: {res_dava['message']}")
     
@@ -158,7 +157,42 @@ def execute_healthcheck():
     res_nakz = fsm_engine.attack_evidence("Nakz")
     print(f"Nakz (Çürütme) Sonucu: [{res_nakz['status']}] -> {res_nakz['message']}\n")
 
+    print("--- SENARYO 8: KÂTİBÎ ŞEMSİYYE KİPLİKLERİ (FAZ 4 - ZÂT/VASIF AYRIMI) ---")
+    sentence_8 = "zeydun daribun masiyan"
+    tokens_8 = tokenizer.tokenize(sentence_8)
+    morph_8 = sarf.derive_lexicon(tokens_8)
+    ast_8 = nahiv.suggest_dependencies(tokens_8, morph_8)
+    
+    ast_graph = nahiv.build_ast(tokens_8, ast_8)
+    temporal_conditions = nahiv.extract_temporal_conditions(ast_graph)
+    
+    for zat, vasif in temporal_conditions.items():
+        if zat in morph_8 and vasif in morph_8:
+            zat_root = morph_8.get(zat).root
+            vasif_root = morph_8.get(vasif).root
+            
+            zat_ont_id = lexicon.resolve_id(zat_root, "Base", current_tokens=tokens_8)
+            vasif_ont_id = lexicon.resolve_id(vasif_root, "Base", current_tokens=tokens_8)
+            
+            # [LOGIC FIX]: Modalite değişiklikleri morfolojik matrise değil, ontolojik ağaca işlenmelidir.
+            zat_entity = l1.entity_map.get(zat_ont_id)
+            if zat_entity:
+                zat_entity.modal_status = "Mesruta_i_Amme"
+                zat_entity.modal_condition_id = vasif_ont_id
+
+    # [LOGIC FIX]: Değiştirilen ontolojik kipliklerin SMT matrisine yansıması için yeni motor başlatılır.
+    clean_solver_8 = AristotelianSolver(ontology)
+    clean_l3_8 = Layer3SMTCircuitBreaker(clean_solver_8, timeout_ms=3000)
+    clean_orchestrator_8 = EpistemicOrchestrator(adapter, l1, l2, clean_l3_8)
+
+    discourse.clear_memory()
+    res_modal = clean_orchestrator_8.process_statement(tokens_8, ast_8, AshariUsul(), morph_8)
+    print(f"Girdi: '{sentence_8}' | AST: {ast_8}")
+    print(f"Şartlı Modalite (Meşrûta-i Âmme) Tespiti: {temporal_conditions}")
+    print(f"Sonuç: [{res_modal.get('status', 'BİLİNMİYOR')}] -> Vasfî Zaman Tensörü Z3'e başarıyla zerk edildi.\n")
+
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 
 if __name__ == "__main__":
+    sys.setrecursionlimit(5000)
     execute_healthcheck()

@@ -29,7 +29,6 @@ class TestVazNeviPipeline(unittest.TestCase):
         self.solver = AristotelianSolver(self.ontology)
         self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
 
-        # [LOGIC FIX]: Leksikon kaydı, Sarf motorunun üreteceği saf kök forma (drb) indirgendi.
         self.lexicon.register_word("Zeyd", "Base", "Zeyd_Entity")
         self.lexicon.register_word("drb", "Base", "Kavram_Vuran")
 
@@ -62,16 +61,18 @@ class TestVazNeviPipeline(unittest.TestCase):
             self.l3._inject_structural_axioms()
             
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
-            t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
+            tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
+            
             for item in ir_matrix.predicates:
-                self.l3.core_solver.solver.add(self.l3._build_z3_expr(item, w_base, t_base))
+                self.l3.core_solver.solver.add(self.l3._build_z3_expr(item, w_base, tz_base, tv_base))
             
             self.assertEqual(self.l3.core_solver.solver.check(), z3.sat)
 
             y_var = z3.Const('y_var', self.l3.core_solver.builder.EntitySort)
             role_action = self.l3.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
             
-            no_action_axiom = z3.ForAll([w_base, t_base, y_var], z3.Not(role_action(w_base, t_base, y_var)))
+            no_action_axiom = z3.ForAll([w_base, tz_base, tv_base, y_var], z3.Not(role_action(w_base, tz_base, tv_base, y_var)))
             self.l3.core_solver.solver.add(no_action_axiom)
 
             result = self.l3.core_solver.solver.check()

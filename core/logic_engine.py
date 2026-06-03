@@ -20,69 +20,90 @@ class AristotelianSolver:
             
         root_entity = self.ontology.porphyrian_tree.roots[self.active_namespace]
         self._traverse_and_assert(root_entity)
+        self._inject_kalamic_causality()
+
+    def _inject_kalamic_causality(self) -> None:
+        """
+        [FAZ 4 - Tamamlama] İmkân ve Nedensellik (Kalamic Causality)
+        SMT motorunun olasılık çöküşü yaşamaması için, Kripke uzayındaki her Mümkin varlık Zorunlu varlığa bağlanır.
+        """
+        try:
+            wajib_pred = self.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
+            mumkin_pred = self.builder.get_or_create_predicate("Mumkin_al_Wujud", arity=1)
+            
+            w = z3.Const('w_causality', self.builder.WorldSort)
+            tz = z3.Const('tz_causality', self.builder.TimeSortZati)
+            tv = z3.Const('tv_causality', self.builder.TimeSortVasfi)
+            x_mumkin = z3.Const('x_mumkin', self.builder.EntitySort)
+            y_wajib = z3.Const('y_wajib', self.builder.EntitySort)
+
+            # Her mümkün varlık, en az bir zorunlu varlığın (Wajib_al_Wujud) aynı dünyada ve zâtî zamanda var olmasını gerektirir.
+            causality_axiom = z3.ForAll([w, tz, tv, x_mumkin],
+                z3.Implies(
+                    mumkin_pred(w, tz, tv, x_mumkin),
+                    z3.Exists([y_wajib], wajib_pred(w, tz, tv, y_wajib))
+                )
+            )
+            self.solver.assert_and_track(causality_axiom, "AXIOM_KALAMIC_CAUSALITY_DEPENDENCE")
+        except ValueError:
+            pass # Çalışılan namespace (örn. daraltılmış test uzayları) bu düğümleri içermiyorsa yoksay
 
     def _traverse_and_assert(self, entity: EpistemicEntity) -> None:
         predicate = self.builder.get_or_create_predicate(entity.ontologic_id)
         x = z3.Const(f"x_{entity.ontologic_id}", self.builder.EntitySort)
         w = z3.Const(f"w_{entity.ontologic_id}", self.builder.WorldSort)
-        t = z3.Const(f"t_{entity.ontologic_id}", self.builder.TimeSort)
+        tz = z3.Const(f"tz_{entity.ontologic_id}", self.builder.TimeSortZati)
+        tv = z3.Const(f"tv_{entity.ontologic_id}", self.builder.TimeSortVasfi)
         
-        # [FAZ 4] KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu - eş-Şemsiyye Makroları
+        # [FAZ 4] KURAL 1: Çift Katmanlı Varlık ve Kiplik (Modal Status) Entegrasyonu
         if entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"]:
-            # Zorunlu Varlık / Zarûriyye-i Mutlaka: Zât sabittir, her dünya ve zamanda O vardır. (Skolem patlamasını önler)
-            existence_axiom = z3.Exists([x], z3.ForAll([w, t], predicate(w, t, x)))
+            existence_axiom = z3.Exists([x], z3.ForAll([w, tz, tv], predicate(w, tz, tv, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Daime_i_Mutlaka":
-            # Dâime-i Mutlaka: Zât var olduğu sürece mutlak süreklilik.
-            existence_axiom = z3.Exists([w, x], z3.ForAll([t], predicate(w, t, x)))
+            existence_axiom = z3.Exists([w, x], z3.ForAll([tz, tv], predicate(w, tz, tv, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Mustahil":
-            # Mümteni' (İmkansız): Hiçbir olası dünyada ve zamanda var olamaz.
-            existence_axiom = z3.ForAll([w, t, x], z3.Not(predicate(w, t, x)))
+            existence_axiom = z3.ForAll([w, tz, tv, x], z3.Not(predicate(w, tz, tv, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Mesruta_i_Amme" and entity.modal_condition_id:
-            # Meşrûta-i Âmme: Zorunluluk Zât'a değil, geçici Vasıf'a (şarta) bağlıdır.
             condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
-            existence_axiom = z3.ForAll([w, t, x], 
-                z3.Implies(condition_pred(w, t, x), predicate(w, t, x))
+            existence_axiom = z3.ForAll([w, tz, tv, x], 
+                z3.Implies(condition_pred(w, tz, tv, x), predicate(w, tz, tv, x))
             )
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Orfiyye_i_Amme" and entity.modal_condition_id:
-            # Örfiyye-i Âmme: Süreklilik Zât'a değil, geçici Vasıf'a bağlıdır.
             condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
-            existence_axiom = z3.Exists([w], z3.ForAll([t, x], 
-                z3.Implies(condition_pred(w, t, x), predicate(w, t, x))
+            existence_axiom = z3.Exists([w], z3.ForAll([tz, tv, x], 
+                z3.Implies(condition_pred(w, tz, tv, x), predicate(w, tz, tv, x))
             ))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         else:
-            # Mümkine-i Âmme: En az bir olası dünyada ve en az bir zamanda varoluşu çelişki yaratmaz.
-            # Otonom Skolem Skalasyonunu (Combinatorial Explosion) engellemek için SMT'ye mecburi varlık zorlaması yapılmaz.
             pass
         
-        # KURAL 2: Hiyerarşik Geçişlilik (Tüm dünyalarda ve zamanlarda geçerli mutlak ontolojik yasa)
+        # KURAL 2: Hiyerarşik Geçişlilik
         for child in entity.children:
             child_pred = self.builder.get_or_create_predicate(child.ontologic_id)
             y = z3.Const(f"y_{child.ontologic_id}_trans", self.builder.EntitySort)
             
-            transitivity_axiom = z3.ForAll([w, t, y], z3.Implies(child_pred(w, t, y), predicate(w, t, y)))
+            transitivity_axiom = z3.ForAll([w, tz, tv, y], z3.Implies(child_pred(w, tz, tv, y), predicate(w, tz, tv, y)))
             self.solver.assert_and_track(
                 transitivity_axiom, 
                 f"AXIOM_HIERARCHY_{child.ontologic_id}_IMPLIES_{entity.ontologic_id}"
             )
             
-        # KURAL 3: Yatay Dışlama (Sibling Disjointness - Tüm dünyalarda ve zamanlarda geçerli)
+        # KURAL 3: Yatay Dışlama (Sibling Disjointness)
         if len(entity.children) > 1:
             for child_a, child_b in itertools.combinations(entity.children, 2):
                 pred_a = self.builder.get_or_create_predicate(child_a.ontologic_id)
                 pred_b = self.builder.get_or_create_predicate(child_b.ontologic_id)
                 z_var = z3.Const(f"z_disjoint_{child_a.ontologic_id}_{child_b.ontologic_id}", self.builder.EntitySort)
                 
-                disjoint_axiom = z3.ForAll([w, t, z_var], z3.Not(z3.And(pred_a(w, t, z_var), pred_b(w, t, z_var))))
+                disjoint_axiom = z3.ForAll([w, tz, tv, z_var], z3.Not(z3.And(pred_a(w, tz, tv, z_var), pred_b(w, tz, tv, z_var))))
                 self.solver.assert_and_track(
                     disjoint_axiom,
                     f"AXIOM_DISJOINT_{child_a.ontologic_id}_AND_{child_b.ontologic_id}"
@@ -92,7 +113,7 @@ class AristotelianSolver:
         if entity.differentia_id:
             diff_name = f"Diff_{entity.ontologic_id}_{entity.differentia_id}"
             diff_pred = self.builder.get_or_create_predicate(diff_name)
-            diff_axiom = z3.ForAll([w, t, x], z3.Implies(predicate(w, t, x), diff_pred(w, t, x)))
+            diff_axiom = z3.ForAll([w, tz, tv, x], z3.Implies(predicate(w, tz, tv, x), diff_pred(w, tz, tv, x)))
             self.solver.assert_and_track(diff_axiom, f"AXIOM_DIFFERENTIA_{entity.ontologic_id}")
 
         # KURAL 5: Hâssa (Proprium)
@@ -100,10 +121,10 @@ class AristotelianSolver:
             prop_name = f"Prop_{entity.ontologic_id}_{prop_id}"
             prop_pred = self.builder.get_or_create_predicate(prop_name)
             
-            prop_axiom_forward = z3.ForAll([w, t, x], z3.Implies(predicate(w, t, x), prop_pred(w, t, x)))
+            prop_axiom_forward = z3.ForAll([w, tz, tv, x], z3.Implies(predicate(w, tz, tv, x), prop_pred(w, tz, tv, x)))
             self.solver.assert_and_track(prop_axiom_forward, f"AXIOM_PROP_FWD_{entity.ontologic_id}_{prop_id}")
             
-            prop_axiom_backward = z3.ForAll([w, t, x], z3.Implies(prop_pred(w, t, x), predicate(w, t, x)))
+            prop_axiom_backward = z3.ForAll([w, tz, tv, x], z3.Implies(prop_pred(w, tz, tv, x), predicate(w, tz, tv, x)))
             self.solver.assert_and_track(prop_axiom_backward, f"AXIOM_PROP_BWD_{entity.ontologic_id}_{prop_id}")
 
         # Mutlak Rekürsiyon

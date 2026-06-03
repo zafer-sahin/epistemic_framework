@@ -36,7 +36,9 @@ class EpistemicEntity(BaseModel):
         "Mesruta_i_Amme", "Orfiyye_i_Amme"
     ] = "Mumkin"
     
-    modal_condition_id: Optional[str] = Field(default=None, description="Meşrûta ve Örfiyye kiplikleri için şarta bağlı vasıf ID'si")
+    # Meşrûta ve Örfiyye kipliklerinde, mutlak Zâtî Zaman (t_zati) yerine 
+    # geçici Vasfî Zaman'ı (t_vasfi) tetikleyecek şart/nitelik ID'si.
+    modal_condition_id: Optional[str] = Field(default=None, description="Şarta bağlı De dicto kiplikler için ontolojik vasıf ID'si")
 
     # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân ve Maksad-ı Şâri' metrikleri
     husn_u_mucerred: bool = Field(default=False, description="Mutlak ontolojik mükemmellik/noksansızlık kısıtı")

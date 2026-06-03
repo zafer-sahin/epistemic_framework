@@ -299,8 +299,6 @@ class EpistemicOrchestrator:
                     unsat_core_str = str(execution_result.get("unsat_core", ""))
                     conflicts = self._extract_conflict_nodes_from_core(unsat_core_str)
                     
-                    # [LOGIC FIX]: Z3 motorunun soyutlanmış UNSAT çekirdeği (Örn: Mumkin_al_Wujud ihlali) 
-                    # spesifik Literal düğümleri maskeleyebilir. Literal düğümler otonom olarak fallback zincirine dahil edilir.
                     for item in ir_matrix.predicates:
                         if isinstance(item, tuple) and len(item) == 3:
                             args = item[1].split("::")
@@ -316,7 +314,7 @@ class EpistemicOrchestrator:
                                 if chain:
                                     if self.l3.prove_metaphorical_bridge(chain):
                                         bridge_messages.append(f"İlm-i Beyân Çıkarımı: {chain} ardışık lüzumiyeti Z3'e ispatlatıldı.")
-                                        
+                                    
                         tevil_flagged_nodes.extend(conflicts)
                         current_attempt += 1
                         continue
@@ -362,14 +360,15 @@ class EpistemicOrchestrator:
                  return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
 
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
-            t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
+            tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
             
             for item in mujib_claim_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 self.l3.core_solver.solver.add(z3_expr)
                 
             for item in cross_injected_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 self.l3.core_solver.solver.add(z3_expr)
 
             cross_status = self.l3.core_solver.solver.check()
@@ -599,13 +598,13 @@ class Layer3SMTCircuitBreaker:
                 frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
-    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, t_const: z3.ExprRef) -> z3.ExprRef:
+    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, tz_const: z3.ExprRef, tv_const: z3.ExprRef) -> z3.ExprRef:
         if isinstance(item, tuple):
             pred_id, arg_id, arity = item
             if arity == 1:
                 entity_const = z3.Const(arg_id, self.core_solver.builder.EntitySort)
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
-                return predicate(w_const, t_const, entity_const)
+                return predicate(w_const, tz_const, tv_const, entity_const)
             elif arity == 2:
                 amil_str, mamul_str = arg_id.split('::', 1) 
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
@@ -615,11 +614,11 @@ class Layer3SMTCircuitBreaker:
                     return amil_const == mamul_const
                 
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
-                return predicate(w_const, t_const, amil_const, mamul_const)
+                return predicate(w_const, tz_const, tv_const, amil_const, mamul_const)
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
-            args = [self._build_z3_expr(a, w_const, t_const) for a in item.args]
+            args = [self._build_z3_expr(a, w_const, tz_const, tv_const) for a in item.args]
             if item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
@@ -630,19 +629,20 @@ class Layer3SMTCircuitBreaker:
                 return z3.Or(args)
             elif item.operator == "Wajib_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.ForAll([w_const, t_const], body)
+                return z3.ForAll([w_const, tz_const, tv_const], body)
             elif item.operator == "Haram_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.Not(z3.Exists([w_const, t_const], body))
+                return z3.Not(z3.Exists([w_const, tz_const, tv_const], body))
             elif item.operator == "Istifham_Inkari":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.ForAll([w_const, t_const], z3.Not(body))
+                return z3.ForAll([w_const, tz_const, tv_const], z3.Not(body))
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 
     def _inject_structural_axioms(self) -> None:
         w_var = z3.Const('w_vaz', self.core_solver.builder.WorldSort)
-        t_var = z3.Const('t_vaz', self.core_solver.builder.TimeSort)
+        tz_var = z3.Const('tz_vaz', self.core_solver.builder.TimeSortZati)
+        tv_var = z3.Const('tv_vaz', self.core_solver.builder.TimeSortVasfi)
         x_var = z3.Const('x_var', self.core_solver.builder.EntitySort)
         y_var = z3.Const('y_var', self.core_solver.builder.EntitySort)
 
@@ -651,19 +651,19 @@ class Layer3SMTCircuitBreaker:
         role_action = self.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
 
         agent_axiom = z3.ForAll(
-            [w_var, t_var, x_var],
+            [w_var, tz_var, tv_var, x_var],
             z3.Implies(
-                role_agent(w_var, t_var, x_var),
-                z3.Exists([y_var], role_action(w_var, t_var, y_var))
+                role_agent(w_var, tz_var, tv_var, x_var),
+                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, y_var))
             )
         )
         self.core_solver.solver.add(agent_axiom)
 
         patient_axiom = z3.ForAll(
-            [w_var, t_var, x_var],
+            [w_var, tz_var, tv_var, x_var],
             z3.Implies(
-                role_patient(w_var, t_var, x_var),
-                z3.Exists([y_var], role_action(w_var, t_var, y_var))
+                role_patient(w_var, tz_var, tv_var, x_var),
+                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, y_var))
             )
         )
         self.core_solver.solver.add(patient_axiom)
@@ -673,7 +673,8 @@ class Layer3SMTCircuitBreaker:
             return False
 
         w_var = z3.Const('w_beyan', self.core_solver.builder.WorldSort)
-        t_var = z3.Const('t_beyan', self.core_solver.builder.TimeSort)
+        tz_var = z3.Const('tz_beyan', self.core_solver.builder.TimeSortZati)
+        tv_var = z3.Const('tv_beyan', self.core_solver.builder.TimeSortVasfi)
         x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
 
         for i in range(len(chain) - 1):
@@ -689,11 +690,10 @@ class Layer3SMTCircuitBreaker:
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
 
             bridge_axiom = z3.ForAll(
-                [w_var, t_var, x_var],
-                z3.Implies(source_pred(w_var, t_var, x_var), target_pred(w_var, t_var, x_var))
+                [w_var, tz_var, tv_var, x_var],
+                z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))
             )
             
-            # Aksiyomlar doğrudan global track yerine lokal listeye eklenir
             self._active_bridge_axioms.append(bridge_axiom)
             self._proven_bridges.add(bridge_id)
             
@@ -714,10 +714,11 @@ class Layer3SMTCircuitBreaker:
                 self.core_solver.solver.add(b_axiom)
 
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
-            t_base = z3.Const('t_base', self.core_solver.builder.TimeSort)
+            tz_base = z3.Const('tz_base', self.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.core_solver.builder.TimeSortVasfi)
             
             for item in ir_matrix.predicates:
-                z3_expr = self._build_z3_expr(item, w_base, t_base)
+                z3_expr = self._build_z3_expr(item, w_base, tz_base, tv_base)
                 self.core_solver.solver.add(z3_expr)
             
             result = self.core_solver.solver.check()
@@ -764,69 +765,90 @@ class AristotelianSolver:
             
         root_entity = self.ontology.porphyrian_tree.roots[self.active_namespace]
         self._traverse_and_assert(root_entity)
+        self._inject_kalamic_causality()
+
+    def _inject_kalamic_causality(self) -> None:
+        """
+        [FAZ 4 - Tamamlama] İmkân ve Nedensellik (Kalamic Causality)
+        SMT motorunun olasılık çöküşü yaşamaması için, Kripke uzayındaki her Mümkin varlık Zorunlu varlığa bağlanır.
+        """
+        try:
+            wajib_pred = self.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
+            mumkin_pred = self.builder.get_or_create_predicate("Mumkin_al_Wujud", arity=1)
+            
+            w = z3.Const('w_causality', self.builder.WorldSort)
+            tz = z3.Const('tz_causality', self.builder.TimeSortZati)
+            tv = z3.Const('tv_causality', self.builder.TimeSortVasfi)
+            x_mumkin = z3.Const('x_mumkin', self.builder.EntitySort)
+            y_wajib = z3.Const('y_wajib', self.builder.EntitySort)
+
+            # Her mümkün varlık, en az bir zorunlu varlığın (Wajib_al_Wujud) aynı dünyada ve zâtî zamanda var olmasını gerektirir.
+            causality_axiom = z3.ForAll([w, tz, tv, x_mumkin],
+                z3.Implies(
+                    mumkin_pred(w, tz, tv, x_mumkin),
+                    z3.Exists([y_wajib], wajib_pred(w, tz, tv, y_wajib))
+                )
+            )
+            self.solver.assert_and_track(causality_axiom, "AXIOM_KALAMIC_CAUSALITY_DEPENDENCE")
+        except ValueError:
+            pass # Çalışılan namespace (örn. daraltılmış test uzayları) bu düğümleri içermiyorsa yoksay
 
     def _traverse_and_assert(self, entity: EpistemicEntity) -> None:
         predicate = self.builder.get_or_create_predicate(entity.ontologic_id)
         x = z3.Const(f"x_{entity.ontologic_id}", self.builder.EntitySort)
         w = z3.Const(f"w_{entity.ontologic_id}", self.builder.WorldSort)
-        t = z3.Const(f"t_{entity.ontologic_id}", self.builder.TimeSort)
+        tz = z3.Const(f"tz_{entity.ontologic_id}", self.builder.TimeSortZati)
+        tv = z3.Const(f"tv_{entity.ontologic_id}", self.builder.TimeSortVasfi)
         
-        # [FAZ 4] KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu - eş-Şemsiyye Makroları
+        # [FAZ 4] KURAL 1: Çift Katmanlı Varlık ve Kiplik (Modal Status) Entegrasyonu
         if entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"]:
-            # Zorunlu Varlık / Zarûriyye-i Mutlaka: Zât sabittir, her dünya ve zamanda O vardır. (Skolem patlamasını önler)
-            existence_axiom = z3.Exists([x], z3.ForAll([w, t], predicate(w, t, x)))
+            existence_axiom = z3.Exists([x], z3.ForAll([w, tz, tv], predicate(w, tz, tv, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Daime_i_Mutlaka":
-            # Dâime-i Mutlaka: Zât var olduğu sürece mutlak süreklilik.
-            existence_axiom = z3.Exists([w, x], z3.ForAll([t], predicate(w, t, x)))
+            existence_axiom = z3.Exists([w, x], z3.ForAll([tz, tv], predicate(w, tz, tv, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Mustahil":
-            # Mümteni' (İmkansız): Hiçbir olası dünyada ve zamanda var olamaz.
-            existence_axiom = z3.ForAll([w, t, x], z3.Not(predicate(w, t, x)))
+            existence_axiom = z3.ForAll([w, tz, tv, x], z3.Not(predicate(w, tz, tv, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Mesruta_i_Amme" and entity.modal_condition_id:
-            # Meşrûta-i Âmme: Zorunluluk Zât'a değil, geçici Vasıf'a (şarta) bağlıdır.
             condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
-            existence_axiom = z3.ForAll([w, t, x], 
-                z3.Implies(condition_pred(w, t, x), predicate(w, t, x))
+            existence_axiom = z3.ForAll([w, tz, tv, x], 
+                z3.Implies(condition_pred(w, tz, tv, x), predicate(w, tz, tv, x))
             )
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Orfiyye_i_Amme" and entity.modal_condition_id:
-            # Örfiyye-i Âmme: Süreklilik Zât'a değil, geçici Vasıf'a bağlıdır.
             condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
-            existence_axiom = z3.Exists([w], z3.ForAll([t, x], 
-                z3.Implies(condition_pred(w, t, x), predicate(w, t, x))
+            existence_axiom = z3.Exists([w], z3.ForAll([tz, tv, x], 
+                z3.Implies(condition_pred(w, tz, tv, x), predicate(w, tz, tv, x))
             ))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         else:
-            # Mümkine-i Âmme: En az bir olası dünyada ve en az bir zamanda varoluşu çelişki yaratmaz.
-            # Otonom Skolem Skalasyonunu (Combinatorial Explosion) engellemek için SMT'ye mecburi varlık zorlaması yapılmaz.
             pass
         
-        # KURAL 2: Hiyerarşik Geçişlilik (Tüm dünyalarda ve zamanlarda geçerli mutlak ontolojik yasa)
+        # KURAL 2: Hiyerarşik Geçişlilik
         for child in entity.children:
             child_pred = self.builder.get_or_create_predicate(child.ontologic_id)
             y = z3.Const(f"y_{child.ontologic_id}_trans", self.builder.EntitySort)
             
-            transitivity_axiom = z3.ForAll([w, t, y], z3.Implies(child_pred(w, t, y), predicate(w, t, y)))
+            transitivity_axiom = z3.ForAll([w, tz, tv, y], z3.Implies(child_pred(w, tz, tv, y), predicate(w, tz, tv, y)))
             self.solver.assert_and_track(
                 transitivity_axiom, 
                 f"AXIOM_HIERARCHY_{child.ontologic_id}_IMPLIES_{entity.ontologic_id}"
             )
             
-        # KURAL 3: Yatay Dışlama (Sibling Disjointness - Tüm dünyalarda ve zamanlarda geçerli)
+        # KURAL 3: Yatay Dışlama (Sibling Disjointness)
         if len(entity.children) > 1:
             for child_a, child_b in itertools.combinations(entity.children, 2):
                 pred_a = self.builder.get_or_create_predicate(child_a.ontologic_id)
                 pred_b = self.builder.get_or_create_predicate(child_b.ontologic_id)
                 z_var = z3.Const(f"z_disjoint_{child_a.ontologic_id}_{child_b.ontologic_id}", self.builder.EntitySort)
                 
-                disjoint_axiom = z3.ForAll([w, t, z_var], z3.Not(z3.And(pred_a(w, t, z_var), pred_b(w, t, z_var))))
+                disjoint_axiom = z3.ForAll([w, tz, tv, z_var], z3.Not(z3.And(pred_a(w, tz, tv, z_var), pred_b(w, tz, tv, z_var))))
                 self.solver.assert_and_track(
                     disjoint_axiom,
                     f"AXIOM_DISJOINT_{child_a.ontologic_id}_AND_{child_b.ontologic_id}"
@@ -836,7 +858,7 @@ class AristotelianSolver:
         if entity.differentia_id:
             diff_name = f"Diff_{entity.ontologic_id}_{entity.differentia_id}"
             diff_pred = self.builder.get_or_create_predicate(diff_name)
-            diff_axiom = z3.ForAll([w, t, x], z3.Implies(predicate(w, t, x), diff_pred(w, t, x)))
+            diff_axiom = z3.ForAll([w, tz, tv, x], z3.Implies(predicate(w, tz, tv, x), diff_pred(w, tz, tv, x)))
             self.solver.assert_and_track(diff_axiom, f"AXIOM_DIFFERENTIA_{entity.ontologic_id}")
 
         # KURAL 5: Hâssa (Proprium)
@@ -844,10 +866,10 @@ class AristotelianSolver:
             prop_name = f"Prop_{entity.ontologic_id}_{prop_id}"
             prop_pred = self.builder.get_or_create_predicate(prop_name)
             
-            prop_axiom_forward = z3.ForAll([w, t, x], z3.Implies(predicate(w, t, x), prop_pred(w, t, x)))
+            prop_axiom_forward = z3.ForAll([w, tz, tv, x], z3.Implies(predicate(w, tz, tv, x), prop_pred(w, tz, tv, x)))
             self.solver.assert_and_track(prop_axiom_forward, f"AXIOM_PROP_FWD_{entity.ontologic_id}_{prop_id}")
             
-            prop_axiom_backward = z3.ForAll([w, t, x], z3.Implies(prop_pred(w, t, x), predicate(w, t, x)))
+            prop_axiom_backward = z3.ForAll([w, tz, tv, x], z3.Implies(prop_pred(w, tz, tv, x), predicate(w, tz, tv, x)))
             self.solver.assert_and_track(prop_axiom_backward, f"AXIOM_PROP_BWD_{entity.ontologic_id}_{prop_id}")
 
         # Mutlak Rekürsiyon
@@ -892,12 +914,13 @@ class Z3ExpressionBuilder:
     """
     Sadece belirlenmiş ontolojik ID'ler ve FOL kuralları dahilinde
     Z3 ifadelerine (z3.ExprRef) dönüşüm yapan güvenlik duvarlı ve derinlik limitli AST derleyicisi.
-    Faz 2 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve Zaman Düzlemi (TimeSort) eklentisi.
+    Faz 4 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve Çift Katmanlı Zaman Düzlemi (Zâtî ve Vasfî) eklentisi.
     """
     def __init__(self, max_depth: int = 15):
         self.EntitySort = z3.DeclareSort('Entity')
         self.WorldSort = z3.DeclareSort('World') # Kripke Olası Dünyalar Uzayı
-        self.TimeSort = z3.DeclareSort('Time')   # Şemsiyye Kiplikleri İçin Zaman Düzlemi
+        self.TimeSortZati = z3.DeclareSort('TimeZati')   # Şemsiyye Kiplikleri İçin Zâtî Zaman (De re)
+        self.TimeSortVasfi = z3.DeclareSort('TimeVasfi') # Şemsiyye Kiplikleri İçin Vasfî Zaman (De dicto)
         self.predicates: Dict[str, z3.FuncDeclRef] = {}
         
         # Modal Erişim Bağıntısı (Accessibility Relation: R(w1, w2))
@@ -911,26 +934,33 @@ class Z3ExpressionBuilder:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz ontolojik sembol: '{name}'. Sadece ASCII/Transliterasyon desteklenir.")
 
         if name not in self.predicates:
-            # Muvaccehât: Her yüklem artık N ariteye ek olarak "Dünya" (w) ve "Zaman" (t) parametresi alır.
-            domains = [self.WorldSort, self.TimeSort] + [self.EntitySort] * arity
+            # Muvaccehât: Her yüklem artık N ariteye ek olarak "Dünya" (w), "Zâtî Zaman" (t_zati) ve "Vasfî Zaman" (t_vasfi) alır.
+            domains = [self.WorldSort, self.TimeSortZati, self.TimeSortVasfi] + [self.EntitySort] * arity
             self.predicates[name] = z3.Function(name, *domains, z3.BoolSort())
         else:
-            # Mevcut arite, WorldSort ve TimeSort eklendiği için +2 olarak kontrol edilir
+            # Mevcut arite, WorldSort, TimeSortZati ve TimeSortVasfi eklendiği için +3 olarak kontrol edilir
             existing_arity = self.predicates[name].arity()
-            if existing_arity != arity + 2:
+            if existing_arity != arity + 3:
                 raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması.")
                 
         return self.predicates[name]
 
-    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time: z3.ExprRef = None) -> z3.ExprRef:
+    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time_zati: z3.ExprRef = None, current_time_vasfi: z3.ExprRef = None) -> z3.ExprRef:
         try:
             if current_world is None:
                 current_world = z3.Const('w_base', self.WorldSort)
-            if current_time is None:
-                current_time = z3.Const('t_base', self.TimeSort)
+            if current_time_zati is None:
+                current_time_zati = z3.Const('t_zati_base', self.TimeSortZati)
+            if current_time_vasfi is None:
+                current_time_vasfi = z3.Const('t_vasfi_base', self.TimeSortVasfi)
+                
             tree = ast.parse(expr_str, mode='eval').body
-            # Kök ayrıştırmada World (w) ve Time (t) parametresi bound_vars içerisine gömülür
-            return self._eval_node(tree, {'__world__': current_world, '__time__': current_time}, current_depth=0)
+            # Kök ayrıştırmada World (w) ve Time (t_zati, t_vasfi) parametreleri bound_vars içerisine gömülür
+            return self._eval_node(tree, {
+                '__world__': current_world, 
+                '__time_zati__': current_time_zati, 
+                '__time_vasfi__': current_time_vasfi
+            }, current_depth=0)
         except SyntaxError as e:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz FOL/Modal ifadesi derlenemez: {e}")
 
@@ -939,7 +969,8 @@ class Z3ExpressionBuilder:
             raise RecursionError(f"[ÇÖKÜŞ] AST Derinlik Limiti ({self.max_depth}) aşıldı.\nCombinatorial Explosion engellendi.")
 
         current_w = bound_vars.get('__world__')
-        current_t = bound_vars.get('__time__')
+        current_t_zati = bound_vars.get('__time_zati__')
+        current_t_vasfi = bound_vars.get('__time_vasfi__')
 
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
@@ -960,7 +991,7 @@ class Z3ExpressionBuilder:
             elif func_name == 'Luzumi':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
-                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time__')]
+                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time_zati__', '__time_vasfi__')]
                 if existential_vars:
                     return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
@@ -994,8 +1025,8 @@ class Z3ExpressionBuilder:
                     return z3.Exists(z3_vars, body_expr)
             
             else:
-                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) ve Time (t) parametresi enjekte edilir
-                args = [current_w, current_t] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
+                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) ve Çift Zaman (t_zati, t_vasfi) parametreleri enjekte edilir
+                args = [current_w, current_t_zati, current_t_vasfi] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
                 arity = len(node.args)
                 predicate = self.get_or_create_predicate(func_name, arity)
                 return predicate(*args)
@@ -1050,7 +1081,9 @@ class EpistemicEntity(BaseModel):
         "Mesruta_i_Amme", "Orfiyye_i_Amme"
     ] = "Mumkin"
     
-    modal_condition_id: Optional[str] = Field(default=None, description="Meşrûta ve Örfiyye kiplikleri için şarta bağlı vasıf ID'si")
+    # Meşrûta ve Örfiyye kipliklerinde, mutlak Zâtî Zaman (t_zati) yerine 
+    # geçici Vasfî Zaman'ı (t_vasfi) tetikleyecek şart/nitelik ID'si.
+    modal_condition_id: Optional[str] = Field(default=None, description="Şarta bağlı De dicto kiplikler için ontolojik vasıf ID'si")
 
     # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân ve Maksad-ı Şâri' metrikleri
     husn_u_mucerred: bool = Field(default=False, description="Mutlak ontolojik mükemmellik/noksansızlık kısıtı")
@@ -3336,7 +3369,6 @@ class TestVazNeviPipeline(unittest.TestCase):
         self.solver = AristotelianSolver(self.ontology)
         self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
 
-        # [LOGIC FIX]: Leksikon kaydı, Sarf motorunun üreteceği saf kök forma (drb) indirgendi.
         self.lexicon.register_word("Zeyd", "Base", "Zeyd_Entity")
         self.lexicon.register_word("drb", "Base", "Kavram_Vuran")
 
@@ -3369,16 +3401,18 @@ class TestVazNeviPipeline(unittest.TestCase):
             self.l3._inject_structural_axioms()
             
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
-            t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
+            tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
+            
             for item in ir_matrix.predicates:
-                self.l3.core_solver.solver.add(self.l3._build_z3_expr(item, w_base, t_base))
+                self.l3.core_solver.solver.add(self.l3._build_z3_expr(item, w_base, tz_base, tv_base))
             
             self.assertEqual(self.l3.core_solver.solver.check(), z3.sat)
 
             y_var = z3.Const('y_var', self.l3.core_solver.builder.EntitySort)
             role_action = self.l3.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
             
-            no_action_axiom = z3.ForAll([w_base, t_base, y_var], z3.Not(role_action(w_base, t_base, y_var)))
+            no_action_axiom = z3.ForAll([w_base, tz_base, tv_base, y_var], z3.Not(role_action(w_base, tz_base, tv_base, y_var)))
             self.l3.core_solver.solver.add(no_action_axiom)
 
             result = self.l3.core_solver.solver.check()
@@ -3413,43 +3447,47 @@ class TestModalLogicEngine(unittest.TestCase):
         self.solver = z3.Solver()
 
     def test_kripke_semantics_world_and_time_injection(self):
-        """[Faz 1] N-Ary yüklemlere otonom olarak 'WorldSort' ve 'TimeSort' parametresi enjeksiyonu."""
+        """[Faz 4] N-Ary yüklemlere otonom olarak 'WorldSort', 'TimeSortZati' ve 'TimeSortVasfi' parametresi enjeksiyonu."""
         expr_str = "Forall([x], Insan(x))"
         z3_ast = self.builder.parse(expr_str)
         ast_str = str(z3_ast)
         self.assertTrue("w_base" in ast_str, "[MODAL ÇÖKÜŞ] Olası Dünyalar (WorldSort) Z3 değişkenine zerk edilemedi.")
-        self.assertTrue("t_base" in ast_str, "[MODAL ÇÖKÜŞ] Zaman Düzlemi (TimeSort) Z3 değişkenine zerk edilemedi.")
+        self.assertTrue("t_zati_base" in ast_str, "[MODAL ÇÖKÜŞ] Zâtî Zaman Düzlemi (TimeSortZati) Z3 değişkenine zerk edilemedi.")
+        self.assertTrue("t_vasfi_base" in ast_str, "[MODAL ÇÖKÜŞ] Vasfî Zaman Düzlemi (TimeSortVasfi) Z3 değişkenine zerk edilemedi.")
 
     def test_temporal_modal_consistency(self):
-        """[Faz 1 Red-Teaming] Zeyd aynı dünyada farklı zaman dilimlerinde zıt eylemler yapabilir (SAT), ancak aynı anda yapamaz (UNSAT)."""
+        """[Faz 4 Red-Teaming] Zeyd aynı dünyada ve zâtî zamanda, farklı vasfî zaman dilimlerinde zıt eylemler yapabilir (SAT), ancak aynı vasfî anda yapamaz (UNSAT)."""
         w1 = z3.Const('w1', self.builder.WorldSort)
-        t1 = z3.Const('t1', self.builder.TimeSort)
-        t2 = z3.Const('t2', self.builder.TimeSort)
+        tz1 = z3.Const('tz1', self.builder.TimeSortZati)
+        tv1 = z3.Const('tv1', self.builder.TimeSortVasfi)
+        tv2 = z3.Const('tv2', self.builder.TimeSortVasfi)
         zeyd = z3.Const('Zeyd', self.builder.EntitySort)
         
         Kaim = self.builder.get_or_create_predicate('Kaim', 1)
         Celisik_Kaim = self.builder.get_or_create_predicate('Celisik_Kaim', 1)
         
-        # Yatay Dışlama Kuralı (Aynı dünyada ve zamanda hem Kaim hem Celisik_Kaim olunamaz)
+        # Yatay Dışlama Kuralı (Aynı dünyada, aynı zâtî ve vasfî zamanda hem Kaim hem Celisik_Kaim olunamaz)
         w_var = z3.Const('w_var', self.builder.WorldSort)
-        t_var = z3.Const('t_var', self.builder.TimeSort)
+        tz_var = z3.Const('tz_var', self.builder.TimeSortZati)
+        tv_var = z3.Const('tv_var', self.builder.TimeSortVasfi)
         x_var = z3.Const('x_var', self.builder.EntitySort)
-        disjoint_axiom = z3.ForAll([w_var, t_var, x_var], 
-                                   z3.Not(z3.And(Kaim(w_var, t_var, x_var), Celisik_Kaim(w_var, t_var, x_var))))
+        
+        disjoint_axiom = z3.ForAll([w_var, tz_var, tv_var, x_var], 
+                                   z3.Not(z3.And(Kaim(w_var, tz_var, tv_var, x_var), Celisik_Kaim(w_var, tz_var, tv_var, x_var))))
         self.solver.add(disjoint_axiom)
 
-        # Senaryo 1: Farklı zamanlarda (t1, t2) zıt eylemler -> SAT beklenir
+        # Senaryo 1: Farklı vasfî zamanlarda (tv1, tv2) zıt arazlar -> SAT beklenir
         self.solver.push()
-        self.solver.add(Kaim(w1, t1, zeyd))
-        self.solver.add(Celisik_Kaim(w1, t2, zeyd))
-        self.assertEqual(self.solver.check(), z3.sat, "Farklı zaman dilimlerinde (t1, t2) tutarlı olan ontolojik durum SAT dönmelidir.")
+        self.solver.add(Kaim(w1, tz1, tv1, zeyd))
+        self.solver.add(Celisik_Kaim(w1, tz1, tv2, zeyd))
+        self.assertEqual(self.solver.check(), z3.sat, "Farklı vasfî zaman dilimlerinde (tv1, tv2) tutarlı olan ontolojik durum SAT dönmelidir.")
         self.solver.pop()
 
-        # Senaryo 2: Aynı zamanda (t1) zıt eylemler -> UNSAT (Çelişki) beklenir
+        # Senaryo 2: Aynı vasfî zamanda (tv1) zıt arazlar -> UNSAT (Çelişki) beklenir
         self.solver.push()
-        self.solver.add(Kaim(w1, t1, zeyd))
-        self.solver.add(Celisik_Kaim(w1, t1, zeyd))
-        self.assertEqual(self.solver.check(), z3.unsat, "Aynı zaman diliminde (t1) zıt eylemler araz kuralları gereği anında UNSAT dönmelidir.")
+        self.solver.add(Kaim(w1, tz1, tv1, zeyd))
+        self.solver.add(Celisik_Kaim(w1, tz1, tv1, zeyd))
+        self.assertEqual(self.solver.check(), z3.unsat, "Aynı vasfî zaman diliminde (tv1) zıt eylemler araz kuralları gereği anında UNSAT dönmelidir.")
         self.solver.pop()
 
     def test_inadi_mutually_exclusive_operator(self):
@@ -3458,7 +3496,6 @@ class TestModalLogicEngine(unittest.TestCase):
         z3_ast = self.builder.parse(expr_str)
         self.solver.add(z3_ast)
         
-        # İnadi (XOR) şartına göre bir varlığın aynı anda hem Fail_Muhtar hem Mecbur olması ontolojik olarak imkansızdır (Müstahil).
         conflict_expr = self.builder.parse("Exists([y], And(Fail_Muhtar(y), Mecbur(y)))")
         self.solver.add(conflict_expr)
         

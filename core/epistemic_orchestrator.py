@@ -49,8 +49,6 @@ class EpistemicOrchestrator:
                     unsat_core_str = str(execution_result.get("unsat_core", ""))
                     conflicts = self._extract_conflict_nodes_from_core(unsat_core_str)
                     
-                    # [LOGIC FIX]: Z3 motorunun soyutlanmış UNSAT çekirdeği (Örn: Mumkin_al_Wujud ihlali) 
-                    # spesifik Literal düğümleri maskeleyebilir. Literal düğümler otonom olarak fallback zincirine dahil edilir.
                     for item in ir_matrix.predicates:
                         if isinstance(item, tuple) and len(item) == 3:
                             args = item[1].split("::")
@@ -66,7 +64,7 @@ class EpistemicOrchestrator:
                                 if chain:
                                     if self.l3.prove_metaphorical_bridge(chain):
                                         bridge_messages.append(f"İlm-i Beyân Çıkarımı: {chain} ardışık lüzumiyeti Z3'e ispatlatıldı.")
-                                        
+                                    
                         tevil_flagged_nodes.extend(conflicts)
                         current_attempt += 1
                         continue
@@ -112,14 +110,15 @@ class EpistemicOrchestrator:
                  return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
 
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
-            t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
+            tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
             
             for item in mujib_claim_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 self.l3.core_solver.solver.add(z3_expr)
                 
             for item in cross_injected_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 self.l3.core_solver.solver.add(z3_expr)
 
             cross_status = self.l3.core_solver.solver.check()
