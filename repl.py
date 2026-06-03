@@ -58,13 +58,16 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             self.lexicon = ContextualLexicon()
             self.discourse = DiscourseRegister()
             
-            # [FAZ 6] İbn Teymiyye Node Relocation Leksikon Yapılandırması
+            # [FAZ 6] İbn Teymiyye AST Tabanlı Node Relocation Leksikon Yapılandırması
             self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
             self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
             
             # [FAZ 3] Ma'nâ el-Ma'nâ Leksikon Yapılandırması
-            self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
-            self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
+            self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
+            self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
+            self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
+            self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
+            
             self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
             self.lexicon.register_word("tekvin", "Maturidi", "Tekvin")
             self.lexicon.register_word("nam", "Base", "Nami")

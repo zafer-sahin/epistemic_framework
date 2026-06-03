@@ -84,6 +84,21 @@ class TestSemanticPipeline(unittest.TestCase):
         predicates = ir_matrix.predicates
         self.assertEqual(predicates[0][0], "Rel_Fail")
         self.assertEqual(predicates[0][1], "Fiil_Daraba::Zeyd_Entity")
+        
+    def test_ast_based_sibak_trigger(self):
+        """[Faz 6] İbn Teymiyye Node Relocation'ın AST yapısal doğrulaması."""
+        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
+        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
+        
+        # Senaryo 1: Rastgele token yan yanalığı, gramatikal bağ yok (Bila_Kayf Tetiklenmemeli)
+        deps_random = [("Daraba", "allahu", "Fail", "Marfu"), ("Daraba", "yad", "Meful", "Mansub")]
+        res_random = self.lexicon.resolve_id("yad", "Salafi", dependencies=deps_random)
+        self.assertEqual(res_random, "Sifat_Yed_Literal", "[İHLAL] Rastgele yan yanalık (False-Positive) AST baypas edilerek düğüm taşıması yaptı.")
+        
+        # Senaryo 2: Geçerli AST lüzum bağı (Mudaf_MudafIlayh) (Bila_Kayf Tetiklenmeli)
+        deps_linked = [("yad", "allahi", "Mudaf_MudafIlayh", "Majrur")]
+        res_linked = self.lexicon.resolve_id("yad", "Salafi", dependencies=deps_linked)
+        self.assertEqual(res_linked, "Sifat_Yed_Bila_Kayf", "[İHLAL] Yapısal AST bağı algılanamadı, hakikat taşınması başarısız oldu.")
 
 if __name__ == '__main__':
     unittest.main()

@@ -62,9 +62,8 @@ class IlmWadAdapter:
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
                 continue
 
-            # [LOGIC FIX]: İleriye dönük bağlam (Lookahead) için 'tokens' dizisi _resolve_entity'ye aktarıldı
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, tokens)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, tokens)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies)
             
             if rel_type == 'Tevkid_Modifier':
                 continue
@@ -115,7 +114,7 @@ class IlmWadAdapter:
 
         return SemanticStatementIR(active_namespace=active_namespace, predicates=unique_predicates, is_valid_for_z3=True)
         
-    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, current_tokens: List[str]) -> str:
+    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]]) -> str:
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
             return pronoun_res
@@ -128,11 +127,11 @@ class IlmWadAdapter:
         if morph_data and morph_data.ontologic_type == "Harf_Tevkid":
             return f"GrammarNode_{search_key.capitalize()}"
 
-        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, current_tokens)
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies)
         
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
-                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, current_tokens)
+                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies)
             except ValueError:
                 ontologic_id = base_ontologic_id
         else:

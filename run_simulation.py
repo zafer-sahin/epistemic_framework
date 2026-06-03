@@ -75,7 +75,7 @@ def execute_healthcheck():
     morph_1 = sarf.derive_lexicon(tokens_1)
     ast_1 = nahiv.suggest_dependencies(tokens_1, morph_1)
     
-    print("--- SENARYO 1: SELEFÎ USÛLÜ (FAZ 6 - İBN TEYMİYYE HAKİKAT TAŞINMASI) ---")
+    print("--- SENARYO 1: SELEFÎ USÛLÜ (FAZ 6 - İBN TEYMİYYE AST TABANLI HAKİKAT TAŞINMASI) ---")
     print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
     discourse.clear_memory()
     res_salafi = orchestrator.process_statement(tokens_1, ast_1, SalafiUsul(), morph_1)
@@ -171,16 +171,15 @@ def execute_healthcheck():
             zat_root = morph_8.get(zat).root
             vasif_root = morph_8.get(vasif).root
             
-            zat_ont_id = lexicon.resolve_id(zat_root, "Base", current_tokens=tokens_8)
-            vasif_ont_id = lexicon.resolve_id(vasif_root, "Base", current_tokens=tokens_8)
+            # [FAZ 6 FİX] current_tokens imza uyumsuzluğu dependencies olarak güncellenmiştir
+            zat_ont_id = lexicon.resolve_id(zat_root, "Base", dependencies=ast_8)
+            vasif_ont_id = lexicon.resolve_id(vasif_root, "Base", dependencies=ast_8)
             
-            # [LOGIC FIX]: Modalite değişiklikleri morfolojik matrise değil, ontolojik ağaca işlenmelidir.
             zat_entity = l1.entity_map.get(zat_ont_id)
             if zat_entity:
                 zat_entity.modal_status = "Mesruta_i_Amme"
                 zat_entity.modal_condition_id = vasif_ont_id
 
-    # [LOGIC FIX]: Değiştirilen ontolojik kipliklerin SMT matrisine yansıması için yeni motor başlatılır.
     clean_solver_8 = AristotelianSolver(ontology)
     clean_l3_8 = Layer3SMTCircuitBreaker(clean_solver_8, timeout_ms=3000)
     clean_orchestrator_8 = EpistemicOrchestrator(adapter, l1, l2, clean_l3_8)

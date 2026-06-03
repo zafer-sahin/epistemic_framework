@@ -27,7 +27,7 @@ class TestDefeasibilityEngine(unittest.TestCase):
         self.lexicon = ContextualLexicon()
         self.discourse = DiscourseRegister()
         
-        # [FAZ 6] İbn Teymiyye Node Relocation Leksikon Yapılandırması
+        # [FAZ 6] İbn Teymiyye AST Tabanlı Node Relocation Leksikon Yapılandırması
         self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
         self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
         
@@ -73,7 +73,7 @@ class TestDefeasibilityEngine(unittest.TestCase):
         self.assertEqual(result["status"], "REJECTED_BY_USUL", "[OTORİTE İHLALİ] Yasaklı düğüm te'vile uğradı.")
         
     def test_ibn_teymiyye_bila_kayf_relocation(self):
-        """[Faz 6] Selefî Usulü'nün (allow_tevil=False) Bila-Kayf hakikat taşıması kuralı."""
+        """[Faz 6] Selefî Usulü'nün (allow_tevil=False) AST tabanlı Bila-Kayf hakikat taşıması kuralı."""
         self.discourse.clear_memory()
         result = self.orchestrator.process_statement(self.tokens, self.ast, SalafiUsul(), self.morph)
         

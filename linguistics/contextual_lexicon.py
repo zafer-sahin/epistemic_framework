@@ -1,11 +1,13 @@
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple
 from linguistics.discourse_state import DiscourseRegister
 
 class ContextualLexicon:
     """
     N-boyutlu Leksikon Tensörü: (word -> namespace -> proposition_type -> {default, context_triggers})
     'İlm-i Vaz adaptasyonunu destekler.
-    Faz 3 - Adım 1: Siyak-Sibak (Bağlam Avcısı) Genişletmesi.
+    Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
+    Kelimelerin sadece yan yana gelmesi (lookahead) değil, doğrudan yapısal (AST) 
+    olarak birbirlerine bağlanması (Mudaf_MudafIlayh vb.) denetlenir.
     """
     def __init__(self):
         self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
@@ -24,29 +26,33 @@ class ContextualLexicon:
         else:
             self._tensor[word_lower][namespace][proposition_type]["default"] = ontologic_id
 
-    def _scan_discourse_for_sibak(self, discourse: DiscourseRegister, triggers: Dict[str, str], current_tokens: List[str] = None) -> Optional[str]:
-        # [LOGIC FIX]: İleriye Dönük Bağlam (Lookahead) ve İ'rab yaması (Substring/Root match).
-        # Örneğin tetikleyici "allah" iken, token "allahi" geldiğinde de bağlam yakalanmalıdır.
-        if current_tokens:
-            for token in current_tokens:
-                tok_lower = token.lower()
-                for trigger, ont_id in triggers.items():
-                    if trigger in tok_lower:
-                        return ont_id
-                    
-        if not discourse or not triggers:
+    def _scan_ast_for_sibak(self, target_word: str, triggers: Dict[str, str], dependencies: List[Tuple[str, str, str, str]] = None) -> Optional[str]:
+        """
+        İbn Teymiyye'nin Hakikat felsefesine uygun olarak (Faz 6), 
+        kelimenin hedef uzaya (Bila_Kayf) taşınabilmesi için rastgele bir 
+        aynı-cümle (token) beraberliği değil, kesin bir İzafet (Mudaf) 
+        veya Yüklem (Haber) AST bağıntısı aranır.
+        """
+        if not dependencies or not triggers:
             return None
+            
+        target_lower = target_word.lower()
         
-        frames = discourse.mujib_frames if discourse.active_agent == "Mujib" else discourse.sail_frames
-        for frame in reversed(frames):
-            for mention in reversed(frame):
-                ment_lower = mention.word.lower()
-                for trigger, ont_id in triggers.items():
-                    if trigger in ment_lower:
+        for amil, mamul, rel_type, irab in dependencies:
+            amil_lower = amil.lower()
+            mamul_lower = mamul.lower()
+            
+            for trigger, ont_id in triggers.items():
+                valid_relations = ["Mudaf_MudafIlayh", "Mubteda_Haber", "Fail", "Meful", "Sifat_Mevsuf"]
+                
+                if rel_type in valid_relations:
+                    if (target_lower in amil_lower and trigger in mamul_lower) or \
+                       (target_lower in mamul_lower and trigger in amil_lower):
                         return ont_id
+                        
         return None
 
-    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, current_tokens: List[str] = None) -> str:
+    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None) -> str:
         word_lower = word.lower()
         if word_lower not in self._tensor:
             raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' tensörde kayıtlı değil.")
@@ -65,9 +71,10 @@ class ContextualLexicon:
                 target_map = prop_map["Kadiyye-i_Hamliyye"]
             
             if target_map:
-                context_id = self._scan_discourse_for_sibak(discourse, target_map.get("context_triggers", {}), current_tokens)
+                context_id = self._scan_ast_for_sibak(word, target_map.get("context_triggers", {}), dependencies)
                 if context_id:
                     return context_id
+                
                 return target_map.get("default")
             return None
 

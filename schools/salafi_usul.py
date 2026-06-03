@@ -1,8 +1,14 @@
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 from schools.base_usul import AbstractSchoolUsul
 from linguistics.ilm_wad_adapter import SemanticStatementIR
 
 class SalafiUsul(AbstractSchoolUsul):
+    """
+    İbn Teymiyye Semantiği (Selefî Epistemolojisi) Otorite Motoru.
+    Faz 6: Hakikat Taşınması (Node Relocation) ve Sıfır-Transformasyon Kısıtı.
+    Mecazı (Te'vil) mutlak surette reddeder, ancak kelimenin bağlama göre 
+    kendi 'Hakikatini' (Bila-Kayf) yaratmasını ontolojik olarak destekler.
+    """
     @property
     def namespace(self) -> str:
         return "Salafi"
@@ -18,13 +24,23 @@ class SalafiUsul(AbstractSchoolUsul):
     def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
-        # [FAZ 6] Bila-Kayf Node Relocation (Düğüm Taşınması) Denetimi
-        # İbn Teymiyye'nin Hakikat Felsefesine göre, eğer kelime "Bila_Kayf" düğümüne taşındıysa, 
-        # ontolojik mesafe (L1) ihlali ortadan kalkar ve Mecaz riski (is_metaphor_likely) düşer.
-        is_bila_kayf = any("Bila_Kayf" in str(pred) for pred in ir_matrix.predicates)
+        # [FAZ 6] Bila-Kayf Node Relocation (Yapısal Hakikat Taşınması) Denetimi
+        # String kontrolü yerine IR matrisinin yapısal (Tuple) analizi yapılır.
+        is_bila_kayf = False
+        for item in ir_matrix.predicates:
+            if isinstance(item, tuple):
+                pred_id = item[0]
+                arg_id = item[1]
+                if "Bila_Kayf" in pred_id or "Bila_Kayf" in arg_id:
+                    is_bila_kayf = True
+                    break
+        
+        # Eğer kelime Bilâ-Keyf uzayına otonom olarak (İzafet ile) taşındıysa, 
+        # ontolojik mesafe (L1) ihlali (Mecaz şüphesi) sıfırlanır.
+        adjusted_metaphor_likelihood = l1_analysis.get("is_metaphor_likely", False) and not is_bila_kayf
         
         l2_decision = l2_engine.enforce_rules(
-            is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False) and not is_bila_kayf, 
+            is_metaphor_likely=adjusted_metaphor_likelihood, 
             ruleset=self.dsl_ruleset, 
             flagged_elements=l1_analysis.get("flagged_elements", []),
             current_attempt=current_attempt
@@ -41,7 +57,7 @@ class SalafiUsul(AbstractSchoolUsul):
         if l3_result["status"] == "UNSAT":
             return {
                 "status": "NAKZ",
-                "message": f"Z3 Çelişkisi kesin çürütme (Nakz) kabul edildi. {l3_result['message']}"
+                "message": f"Z3 Çelişkisi kesin çürütme (Nakz) kabul edildi. Gerekçe: Usûl kuralları te'vili mutlak reddeder. {l3_result['message']}"
             }
             
         if l3_result["status"] == "SAT" and is_bila_kayf:
