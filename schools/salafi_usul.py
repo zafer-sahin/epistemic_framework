@@ -15,12 +15,16 @@ class SalafiUsul(AbstractSchoolUsul):
             "blocked_nodes": ["ALL"] 
         }
 
-    # [LOGIC FIX]: İmza uyumluluğu ve parametre aktarımı sağlandı.
     def execute_dag(self, ir_matrix: SemanticStatementIR, l1_engine, l2_engine, l3_engine, current_attempt: int = 0) -> Dict[str, Any]:
         l1_analysis = l1_engine.analyze_ir(ir_matrix)
         
+        # [FAZ 6] Bila-Kayf Node Relocation (Düğüm Taşınması) Denetimi
+        # İbn Teymiyye'nin Hakikat Felsefesine göre, eğer kelime "Bila_Kayf" düğümüne taşındıysa, 
+        # ontolojik mesafe (L1) ihlali ortadan kalkar ve Mecaz riski (is_metaphor_likely) düşer.
+        is_bila_kayf = any("Bila_Kayf" in str(pred) for pred in ir_matrix.predicates)
+        
         l2_decision = l2_engine.enforce_rules(
-            is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False), 
+            is_metaphor_likely=l1_analysis.get("is_metaphor_likely", False) and not is_bila_kayf, 
             ruleset=self.dsl_ruleset, 
             flagged_elements=l1_analysis.get("flagged_elements", []),
             current_attempt=current_attempt
@@ -38,6 +42,13 @@ class SalafiUsul(AbstractSchoolUsul):
             return {
                 "status": "NAKZ",
                 "message": f"Z3 Çelişkisi kesin çürütme (Nakz) kabul edildi. {l3_result['message']}"
+            }
+            
+        if l3_result["status"] == "SAT" and is_bila_kayf:
+            return {
+                "status": "SAT_BILA_KAYF",
+                "message": "İbn Teymiyye Semantiği: Kelime literal (Cism) ontolojisinden koparılıp yepyeni bir Hakikat (Bilâ-Keyf) olarak Zorunlu Varlık'a bağlandı. Ontolojik uyum sağlandı.",
+                "l2_context": "BILA_KAYF_NODE_RELOCATION"
             }
             
         return {**l3_result, "l2_context": l2_decision["action"]}

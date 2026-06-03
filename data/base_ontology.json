@@ -46,7 +46,66 @@
                         "propria_ids": ["Ezeliyyet", "Ebediyyet"],
                         "accidents_ids": [],
                         "relations": [],
-                        "children": []
+                        "children": [
+                            {
+                                "ontologic_id": "Bila_Kayf_Sifat",
+                                "namespace": "Salafi",
+                                "terms": { "ar": "Sıfât-ı İlâhiyye (Bilâ-Keyf)" },
+                                "level": 2,
+                                "modal_status": "Zaruriyye_i_Mutlaka",
+                                "husn_u_mucerred": true,
+                                "karine_derecesi": 0,
+                                "differentia_id": "La_Yusbeh",
+                                "propria_ids": [],
+                                "accidents_ids": [],
+                                "relations": [],
+                                "children": [
+                                    {
+                                        "ontologic_id": "Sifat_Yed_Bila_Kayf",
+                                        "namespace": "Salafi",
+                                        "terms": { "ar": "Yed (Mahiyeti Meçhul Eşsiz Hakikat)" },
+                                        "level": 3,
+                                        "modal_status": "Zaruriyye_i_Mutlaka",
+                                        "husn_u_mucerred": true,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    }
+                                ]
+                            },
+                            {
+                                "ontologic_id": "Kudret",
+                                "namespace": "Base",
+                                "terms": { "ar": "Kudret (İlâhi Güç)" },
+                                "level": 2,
+                                "modal_status": "Zaruriyye_i_Mutlaka",
+                                "husn_u_mucerred": true,
+                                "karine_derecesi": 0,
+                                "differentia_id": null,
+                                "propria_ids": [],
+                                "accidents_ids": [],
+                                "relations": [],
+                                "children": [
+                                    {
+                                        "ontologic_id": "Sifat_Yed_Metaphor",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Yed (Mecaz-Kudret)" },
+                                        "level": 3,
+                                        "modal_status": "Zaruriyye_i_Mutlaka",
+                                        "husn_u_mucerred": true,
+                                        "karine_derecesi": 3,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    }
+                                ]
+                            }
+                        ]
                     },
                     {
                         "ontologic_id": "Mumkin_al_Wujud",
@@ -187,7 +246,33 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
-                                        "relations": [],
+                                        "relations": [
+                                            {
+                                                "relation_type": "Luzum_Araz",
+                                                "target_id": "Bats",
+                                                "axiom": "Implies"
+                                            }
+                                        ],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Bats",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Batş (Kavrama/Eylem)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [
+                                            {
+                                                "relation_type": "Luzum_Zati",
+                                                "target_id": "Kudret",
+                                                "axiom": "Implies"
+                                            }
+                                        ],
                                         "children": []
                                     },
                                     {
@@ -203,6 +288,36 @@
                                         "accidents_ids": [],
                                         "relations": [],
                                         "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Masi",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "el-Maşî (Yürüyen)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": [
+                                            {
+                                                "ontologic_id": "Mutaharrik",
+                                                "namespace": "Base",
+                                                "terms": { "ar": "el-Müteharrik (Hareket Eden)" },
+                                                "level": 4,
+                                                "modal_status": "Mesruta_i_Amme",
+                                                "modal_condition_id": "Masi",
+                                                "husn_u_mucerred": false,
+                                                "karine_derecesi": 0,
+                                                "differentia_id": null,
+                                                "propria_ids": [],
+                                                "accidents_ids": [],
+                                                "relations": [],
+                                                "children": []
+                                            }
+                                        ]
                                     }
                                 ]
                             }

@@ -27,24 +27,42 @@ class AristotelianSolver:
         w = z3.Const(f"w_{entity.ontologic_id}", self.builder.WorldSort)
         t = z3.Const(f"t_{entity.ontologic_id}", self.builder.TimeSort)
         
-        # KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu - eş-Şemsiyye Makroları
+        # [FAZ 4] KURAL 1: Varlık ve Kiplik (Modal Status) Entegrasyonu - eş-Şemsiyye Makroları
         if entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"]:
-            # Zorunlu Varlık / Zarûriyye-i Mutlaka: Tüm dünyalarda ve tüm zamanlarda aidiyet zorunludur. (∀w, ∀t)
-            existence_axiom = z3.ForAll([w, t], z3.Exists([x], predicate(w, t, x)))
+            # Zorunlu Varlık / Zarûriyye-i Mutlaka: Zât sabittir, her dünya ve zamanda O vardır. (Skolem patlamasını önler)
+            existence_axiom = z3.Exists([x], z3.ForAll([w, t], predicate(w, t, x)))
+            self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Daime_i_Mutlaka":
-            # Dâime-i Mutlaka: Varlık mevcut olduğu sürece aktüel aidiyet. (∃w, ∀t)
-            existence_axiom = z3.Exists([w], z3.ForAll([t], z3.Exists([x], predicate(w, t, x))))
+            # Dâime-i Mutlaka: Zât var olduğu sürece mutlak süreklilik.
+            existence_axiom = z3.Exists([w, x], z3.ForAll([t], predicate(w, t, x)))
+            self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Mustahil":
             # Mümteni' (İmkansız): Hiçbir olası dünyada ve zamanda var olamaz.
-            existence_axiom = z3.ForAll([w, t], z3.Not(z3.Exists([x], predicate(w, t, x))))
+            existence_axiom = z3.ForAll([w, t, x], z3.Not(predicate(w, t, x)))
+            self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
-        else: # Mumkin veya Mumkine_i_Amme
-            # Mümkine-i Âmme: En az bir olası dünyada ve en az bir zamanda varoluşu çelişki yaratmaz. (∃w, ∃t)
-            existence_axiom = z3.Exists([w, t], z3.Exists([x], predicate(w, t, x)))
+        elif entity.modal_status == "Mesruta_i_Amme" and entity.modal_condition_id:
+            # Meşrûta-i Âmme: Zorunluluk Zât'a değil, geçici Vasıf'a (şarta) bağlıdır.
+            condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
+            existence_axiom = z3.ForAll([w, t, x], 
+                z3.Implies(condition_pred(w, t, x), predicate(w, t, x))
+            )
+            self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
-        self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
+        elif entity.modal_status == "Orfiyye_i_Amme" and entity.modal_condition_id:
+            # Örfiyye-i Âmme: Süreklilik Zât'a değil, geçici Vasıf'a bağlıdır.
+            condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
+            existence_axiom = z3.Exists([w], z3.ForAll([t, x], 
+                z3.Implies(condition_pred(w, t, x), predicate(w, t, x))
+            ))
+            self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
+            
+        else:
+            # Mümkine-i Âmme: En az bir olası dünyada ve en az bir zamanda varoluşu çelişki yaratmaz.
+            # Otonom Skolem Skalasyonunu (Combinatorial Explosion) engellemek için SMT'ye mecburi varlık zorlaması yapılmaz.
+            pass
         
         # KURAL 2: Hiyerarşik Geçişlilik (Tüm dünyalarda ve zamanlarda geçerli mutlak ontolojik yasa)
         for child in entity.children:

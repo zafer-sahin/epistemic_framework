@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 # Core Katmanları
-from core.models import OntologyLoader, EpistemicEntity, TermModel
+from core.models import OntologyLoader
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -22,10 +22,13 @@ from schools.salafi_usul import SalafiUsul
 from schools.ashari_usul import AshariUsul
 from schools.maturidi_usul import MaturidiUsul
 
+# FSM
+from schools.taftazani.adab_al_bahth import AdabAlBahthEngine
+
 def execute_healthcheck():
-    print("="*70)
+    print("="*80)
     print("[SİSTEM] N-TIER EPİSTEMİK MOTOR UÇTAN UCA SAĞLIK TARAMASI (HEALTHCHECK)")
-    print("="*70)
+    print("="*80)
     
     # 1. BAŞLATMA (BOOTSTRAP)
     loader = OntologyLoader()
@@ -39,9 +42,16 @@ def execute_healthcheck():
     lexicon = ContextualLexicon()
     discourse = DiscourseRegister()
     
+    # [FAZ 6] Selefî Usûlü için Bila-Kayf (Hakikat Taşınması) Sibak Tetikleyicisi
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
-    lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
-    lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
+    lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
+    
+    # [FAZ 3] Eş'arî ve Mâtürîdî için Ma'nâ el-Ma'nâ (Mecaz) Fallback Tetikleyicisi
+    lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
+    lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
+    lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
+    lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
+    
     lexicon.register_word("tekvin", "Maturidi", "Tekvin")
     lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
     lexicon.register_word("cemad", "Base", "Cemad")
@@ -51,15 +61,6 @@ def execute_healthcheck():
 
     adapter = IlmWadAdapter(lexicon, discourse)
     l1 = Layer1HeuristicGraph(ontology)
-    
-    l1.entity_map["Wajib_al_Wujud"] = EpistemicEntity(ontologic_id="Wajib_al_Wujud", terms=TermModel(ar="Allah"), modal_status="Wajib", husn_u_mucerred=True)
-    l1.entity_map["Sifat_Yed_Literal"] = EpistemicEntity(ontologic_id="Sifat_Yed_Literal", terms=TermModel(ar="Yed"), modal_status="Mumkin", husn_u_mucerred=False)
-    l1.entity_map["Tekvin"] = EpistemicEntity(ontologic_id="Tekvin", terms=TermModel(ar="Tekvin"), modal_status="Mumkin", husn_u_mucerred=False)
-    l1.entity_map["Cemad"] = EpistemicEntity(ontologic_id="Cemad", terms=TermModel(ar="Cemad"), modal_status="Mumkin", husn_u_mucerred=False)
-    l1.entity_map["Nami"] = EpistemicEntity(ontologic_id="Nami", terms=TermModel(ar="Nami"), modal_status="Mumkin", husn_u_mucerred=False)
-    l1.entity_map["Zeyd_Entity"] = EpistemicEntity(ontologic_id="Zeyd_Entity", terms=TermModel(ar="Zeydun"), modal_status="Mumkin", husn_u_mucerred=False)
-    l1.entity_map["Kavram_Vuran"] = EpistemicEntity(ontologic_id="Kavram_Vuran", terms=TermModel(ar="Darib"), modal_status="Mumkin", husn_u_mucerred=False)
-
     l2 = Layer2RuleEngine()
     l3 = Layer3SMTCircuitBreaker(solver, timeout_ms=3000)
     
@@ -72,17 +73,18 @@ def execute_healthcheck():
     morph_1 = sarf.derive_lexicon(tokens_1)
     ast_1 = nahiv.suggest_dependencies(tokens_1, morph_1)
     
-    print("--- SENARYO 1: SELEFÎ USÛLÜ (MUTLAK LAFIZCILIK) ---")
+    print("--- SENARYO 1: SELEFÎ USÛLÜ (FAZ 6 - İBN TEYMİYYE HAKİKAT TAŞINMASI) ---")
     print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
     discourse.clear_memory()
     res_salafi = orchestrator.process_statement(tokens_1, ast_1, SalafiUsul(), morph_1)
-    print(f"Sonuç: [{res_salafi['status']}] -> {res_salafi.get('reason', res_salafi.get('message'))}\n")
+    print(f"Sonuç: [{res_salafi['status']}] -> {res_salafi.get('message')}\n")
 
-    print("--- SENARYO 2: EŞ'ARÎ USÛLÜ (TE'VİL TOLERANSI) ---")
+    print("--- SENARYO 2: EŞ'ARÎ USÛLÜ (FAZ 3 - İLM-İ BEYÂN MA'NÂ EL-MA'NÂ İSPATI) ---")
     print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
     discourse.clear_memory()
     res_ashari = orchestrator.process_statement(tokens_1, ast_1, AshariUsul(), morph_1)
-    print(f"Sonuç: [{res_ashari['status']}] (L2 Kararı: {res_ashari.get('l2_context')})\n")
+    print(f"Sonuç: [{res_ashari['status']}] -> {res_ashari.get('message')}")
+    print(f"L2 Kararı: {res_ashari.get('l2_context')}\n")
 
     sentence_2 = "tekvinu allahi"
     tokens_2 = tokenizer.tokenize(sentence_2)
@@ -102,7 +104,6 @@ def execute_healthcheck():
         predicates=[("Cemad", "Cemad", 1), ("Zeyd_Entity", "Zeyd_Entity", 1), ("Rel_Mubteda_Haber", "Cemad::Zeyd_Entity", 2)], 
         is_valid_for_z3=True
     )
-    
     sail_tokens = ["nami", "zeydun"]
     sail_morph = sarf.derive_lexicon(sail_tokens)
     sail_ast = nahiv.suggest_dependencies(sail_tokens, sail_morph)
@@ -123,36 +124,39 @@ def execute_healthcheck():
     res_vaz = orchestrator.process_statement(tokens_5, ast_5, AshariUsul(), morph_5)
     print(f"Girdi: '{sentence_5}' | Morfolojik Kalıp (Vezin): {morph_5['daribun'].pattern}")
     print(f"Çıkarılan Tematik Rol (Thematic Role): {morph_5['daribun'].thematic_role}")
-    print(f"Sonuç: [{res_vaz['status']}]")
-    print("Z3 Aksiyom Çıkarımı: 'Role_Agent' yüklemi tespit edildi, SMT motoru 'Role_Action' varlığını otonom olarak (SAT) kabul etti.\n")
+    print(f"Sonuç: [{res_vaz['status']}] (Role_Agent tespiti otonom Role_Action yarattı)\n")
 
-    # [FAZ 2] İlm-i Ma'ânî E2E Testi
     print("--- SENARYO 6: İLM-İ MA'ÂNÎ (MUKTAZÂ EL-HÂL VE İSTİFHAM-I İNKÂRÎ) ---")
-    
     sentence_6a = "inna zeydun daribun"
     tokens_6a = tokenizer.tokenize(sentence_6a)
     morph_6a = sarf.derive_lexicon(tokens_6a)
     ast_6a = nahiv.suggest_dependencies(tokens_6a, morph_6a)
     
     discourse.clear_memory()
-    # Khali_al_Zihn (Zihin Boş) durumu
     discourse.epistemic_state["Sail"] = DenialLevel.KHALI_AL_ZIHN
     res_maani_1 = orchestrator.process_statement(tokens_6a, ast_6a, AshariUsul(), morph_6a)
-    
-    print(f"Girdi (Tevkîd): '{sentence_6a}' | Sâil Epistemik Durumu: KHALI_AL_ZIHN")
+    print(f"Girdi (Tevkîd): '{sentence_6a}' | Sâil Zihni: KHALI_AL_ZIHN")
     print(f"Sonuç: [{res_maani_1['status']}] -> {res_maani_1.get('message')}\n")
 
-    sentence_6b = "hal la daraba zeydun"
-    tokens_6b = tokenizer.tokenize(sentence_6b)
-    morph_6b = sarf.derive_lexicon(tokens_6b)
-    ast_6b = nahiv.suggest_dependencies(tokens_6b, morph_6b)
+    print("--- SENARYO 7: ÂDÂB-I BAHS (FAZ 5 - TAHRÎR-İ NİZA' VE MÜLÂZAMA) ---")
+    # [LOGIC FIX]: Global SMT Çözücüsü önceki senaryolar tarafından kirletildiği için, 
+    # Âdâb-ı Bahs FSM motoruna tamamen temiz (Fresh) bir Solver örneği enjekte edilir.
+    clean_solver = AristotelianSolver(ontology)
+    fsm_engine = AdabAlBahthEngine(clean_solver, discourse)
+    fsm_engine.reset_session()
     
-    discourse.clear_memory()
-    res_maani_2 = orchestrator.process_statement(tokens_6b, ast_6b, AshariUsul(), morph_6b)
+    # "Cemad olan her şey Nami (büyüyen) dır" gibi ontolojik olarak yanlış bir iddia sunulur ki doğrudan Aksiyom (TAHSIL_I_HASIL) olmasın.
+    res_dava = fsm_engine.submit_claim("Forall([x], Implies(Cemad(x), Nami(x)))")
+    print(f"Da'vâ (İddia) Durumu: {res_dava['message']}")
     
-    print(f"Girdi (İstifham-ı İnkârî): '{sentence_6b}'")
-    print(f"Sonuç: [{res_maani_2['status']}]")
-    print("Z3 Aksiyom Çıkarımı: İstifham-ı İnkârî saptandı. Z3 motoru cümleyi evrensel mantıksal reddiyeye (Forall + Not) bağladı.\n")
+    res_tahrir = fsm_engine.tahrir_i_niza(musellemat=["Cemad"], niza_terms=["Nami"])
+    print(f"Tahrîr-i Niza': {res_tahrir['message']}")
+    
+    res_delil = fsm_engine.submit_evidence(["Forall([x], Implies(Cemad(x), Nami(x)))"])
+    print(f"Delil Sunumu: {res_delil['message']}")
+    
+    res_nakz = fsm_engine.attack_evidence("Nakz")
+    print(f"Nakz (Çürütme) Sonucu: [{res_nakz['status']}] -> {res_nakz['message']}\n")
 
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 

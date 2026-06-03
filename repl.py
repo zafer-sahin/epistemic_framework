@@ -3,7 +3,6 @@ import sys
 import traceback
 from pathlib import Path
 
-# Core & Yürütme Katmanları
 from core.models import OntologyLoader
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
@@ -11,7 +10,6 @@ from core.layer2_rules import Layer2RuleEngine
 from core.layer3_smt import Layer3SMTCircuitBreaker
 from core.epistemic_orchestrator import EpistemicOrchestrator
 
-# Dilbilim ve Semantik Katmanları
 from linguistics.tokenizer import EpistemicTokenizer
 from linguistics.sarf_parser import SarfEngine
 from linguistics.nahiv_ast import NahivDependencyCompiler
@@ -19,7 +17,6 @@ from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.discourse_state import DiscourseRegister
 from linguistics.ilm_wad_adapter import IlmWadAdapter
 
-# Polimorfik Ekol (Usûl) Profilleri
 from schools.salafi_usul import SalafiUsul
 from schools.ashari_usul import AshariUsul
 from schools.maturidi_usul import MaturidiUsul
@@ -53,14 +50,17 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             self.solver = AristotelianSolver(self.ontology)
             
             self.tokenizer = EpistemicTokenizer()
-            self.sarf_engine = SarfEngine()
-            self.nahiv_parser = NahivDependencyCompiler()
+            self.sarf = SarfEngine()
+            self.nahiv = NahivDependencyCompiler()
             
             self.lexicon = ContextualLexicon()
             self.discourse = DiscourseRegister()
             
-            # Dinamik Leksikon Eşleştirmeleri (Ontoloji JSON ile uyumlu)
-            self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
+            # [FAZ 6] İbn Teymiyye Epistemolojisi: Bila-Kayf Düğüm Taşınması (Node Relocation)
+            # Selefî uzayında kelimenin "Allah" ile bir sibak/izafet bağı varsa, kelime literalden (Cism) koparılır.
+            self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal") # Varsayılan (Default) Atama
+            self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
+            
             self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
             self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
             self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
@@ -83,10 +83,7 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             sys.exit(1)
 
     def do_set_usul(self, arg):
-        """
-        Aktif diyalektik ekolü (Usûl) değiştirir.
-        Kullanım: set_usul salafi | set_usul ashari
-        """
+        """Aktif diyalektik ekolü (Usûl) değiştirir."""
         target = arg.strip().lower()
         if target in self.available_schools:
             self.active_usul = self.available_schools[target]
@@ -98,10 +95,7 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             print(f"[RED] Tanımsız Usûl. Mevcut seçenekler: {list(self.available_schools.keys())}")
 
     def do_parse_sentence(self, arg):
-        """
-        Ham metni Mucîb (Savunucu) kimliğiyle sisteme sunar ve mantıksal geçerliliğini test eder.
-        Kullanım: parse_sentence yadu allahi
-        """
+        """Ham metni Mucîb (Savunucu) kimliğiyle sisteme sunar ve test eder."""
         if not arg:
             print("[HATA] Analiz edilecek cümleyi girin.")
             return
@@ -114,7 +108,6 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             print(f"\n[SENTAKS] Üretilen Bağımlılık Ağacı (AST): {ast_dependencies}")
             print(f"[YÜRÜTME] Orkestratör Aktif Profil ({self.active_usul.namespace}) ile tetikleniyor...\n")
             
-            # SemanticStatementIR matrisi mu'aradah çapraz sorgusu için belleğe alınır
             self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon)
             result = self.orchestrator.process_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
 
@@ -131,10 +124,7 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             traceback.print_exc()
 
     def do_muaradah(self, arg):
-        """
-        Sâil (İtirazcı) kimliğiyle, Mucîb'in son sunduğu argümana çapraz-ekol saldırısı (Muaradah) yapar.
-        Kullanım: muaradah <rakip_ekol> <karşı_cümle> (Örn: muaradah salafi namun zeydun)
-        """
+        """Sâil kimliğiyle, Mucîb'in argümanına çapraz-ekol saldırısı (Muaradah) yapar."""
         args = arg.split(maxsplit=1)
         if len(args) < 2:
             print("[HATA] Rakip usûl ve karşı cümleyi eksiksiz girin. Örn: muaradah salafi namun zeydun")
@@ -171,13 +161,11 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             traceback.print_exc()
 
     def do_clear_memory(self, arg):
-        """Söylem belleğindeki (Anafora/Zamir) geçmiş bağlamı sıfırlar."""
         self.discourse.clear_memory()
         self.last_ir = None
         print("[BELLEK] Söylem hafızası sıfırlandı.")
 
     def do_exit(self, arg):
-        """Sistemi kapatır."""
         print("[SİSTEM] Kapatılıyor.")
         return True
 

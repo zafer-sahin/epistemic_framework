@@ -41,6 +41,43 @@ class Layer1HeuristicGraph:
             conflict_score += (max_karine * 0.2)
 
         return min(conflict_score, 1.0)
+        
+    def find_mana_el_mana_chain(self, source_id: str, target_id: str) -> List[str]:
+        """
+        [FAZ 3] Cürcânî'nin Nazm ve Ma'nâ el-Ma'nâ (İlm-i Beyân) algoritması.
+        Literal anlamdan (Ma'nâ) mecaz anlama (Ma'nâ el-Ma'nâ) giden nedensellik ve araz zincirini (Alâka) bulur.
+        BFS (Breadth-First Search) ile relation_type izleri takip edilir.
+        """
+        queue = [[source_id]]
+        visited = set([source_id])
+
+        while queue:
+            path = queue.pop(0)
+            current_node = path[-1]
+
+            if current_node == target_id:
+                return path
+
+            entity = self.entity_map.get(current_node)
+            if not entity:
+                continue
+
+            for rel in entity.relations:
+                if rel.target_id not in visited:
+                    visited.add(rel.target_id)
+                    new_path = list(path)
+                    new_path.append(rel.target_id)
+                    queue.append(new_path)
+                    
+            # Ana hedef hiyerarşik bir alt türevse (Örn: Kudret -> Sifat_Yed_Metaphor) aşağıya doğru da ara
+            for child in entity.children:
+                if child.ontologic_id not in visited:
+                    visited.add(child.ontologic_id)
+                    new_path = list(path)
+                    new_path.append(child.ontologic_id)
+                    queue.append(new_path)
+                    
+        return []
 
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
         if not ir_matrix.is_valid_for_z3:

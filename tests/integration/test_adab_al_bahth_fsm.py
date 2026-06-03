@@ -34,16 +34,24 @@ class TestDialecticsFSM(unittest.TestCase):
         self.nahiv = NahivDependencyCompiler()
 
     def test_fsm_sequential_integrity(self):
-        """[Faz 3] FSM'nin AWAITING_CLAIM -> AWAITING_EVIDENCE -> AWAITING_ATTACK sıralaması ihlali koruması."""
+        """[Faz 5] FSM'nin AWAITING_CLAIM -> ISOLATING_CONTENTION -> AWAITING_EVIDENCE sıralaması ihlali koruması."""
         with self.assertRaises(ValueError):
             self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
             
         self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
-        self.assertEqual(self.engine.current_state, "AWAITING_EVIDENCE", "FSM durum geçişi başarısız.")
+        self.assertEqual(self.engine.current_state, "ISOLATING_CONTENTION", "Tahrîr-i Niza' aşaması atlandı.")
+        
+        # [FAZ 5] Tahrîr-i Niza' (Kavramsal Senkronizasyon) uygulanmadan delile geçilemez
+        with self.assertRaises(ValueError):
+            self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
+            
+        self.engine.tahrir_i_niza(musellemat=["S"], niza_terms=["P"])
+        self.assertEqual(self.engine.current_state, "AWAITING_EVIDENCE", "Tahrîr-i Niza' sonrası delil aşamasına geçiş başarısız.")
 
     def test_curcani_nakz_refutation(self):
-        """[Faz 3 Red-Teaming] Sâil'in Nakz hücumunda, öncüller SAT olsa dahi sonucun lüzum bağını kırması testi."""
+        """[Faz 3 & 5 Red-Teaming] Sâil'in Nakz hücumunda, Mülâzama (Lüzum Bağı) çöküşü testi."""
         self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
+        self.engine.tahrir_i_niza(musellemat=["S", "M"], niza_terms=["P"]) # Faz 5 Senkronizasyonu
         
         premises = [
             "Exists([x], And(S(x), M(x)))",
@@ -55,14 +63,13 @@ class TestDialecticsFSM(unittest.TestCase):
         
         attack_result = self.engine.attack_evidence(attack_type="Nakz")
         
-        self.assertEqual(attack_result["status"], "NAKZ_SUCCESS", "[DİYALEKTİK ÇÖKÜŞ] Fâsid istidlâl (Hatalı Lüzum Bağı) Z3 tarafından Nakz edilemedi.")
+        self.assertEqual(attack_result["status"], "NAKZ_SUCCESS", "[DİYALEKTİK ÇÖKÜŞ] Fâsid istidlâl (Hatalı Mülâzama) Z3 tarafından Nakz edilemedi.")
         self.assertEqual(self.engine.current_state, "RESOLVED", "Tartışma bitmesine rağmen FSM durumu açık kaldı.")
 
     def test_cross_school_muaradah_stalemate(self):
         """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu ve Leksikon Yeniden Derlemesi."""
         self.lexicon.register_word("cevher", "Base", "Cevher")
         self.lexicon.register_word("cism", "Base", "Cism")
-        # [LOGIC FIX]: Leksikon kaydı, Sarf motorunun (-un) tenvinini kestikten sonra üreteceği saf kök forma (zeyd) indirgendi.
         self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
         
         mujib_ir = SemanticStatementIR(
@@ -71,7 +78,6 @@ class TestDialecticsFSM(unittest.TestCase):
             is_valid_for_z3=True
         )
         
-        # [LOGIC FIX]: Sentaktik I'rab (Tenvin -un) eklenerek Câmid İsim Fallback mekanizması tetiklendi.
         sail_tokens = ["cismun", "zeydun"]
         sail_morph = self.sarf.derive_lexicon(sail_tokens)
         sail_deps = self.nahiv.suggest_dependencies(sail_tokens, sail_morph)

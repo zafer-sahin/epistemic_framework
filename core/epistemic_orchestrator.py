@@ -8,12 +8,6 @@ from core.layer2_rules import Layer2RuleEngine
 from schools.base_usul import AbstractSchoolUsul
 
 class EpistemicOrchestrator:
-    """
-    Bilişsel Çıkarım Motoru (Pipeline Manager).
-    Faz 4 - Adım 2: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu.
-    Faz 2 - Adım 2.5: İlm-i Ma'ânî (Muktazâ el-Hâl) ihlallerinin loglanması.
-    Rakip iki ekolün ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
-    """
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
         self.adapter = adapter
         self.l1 = l1
@@ -32,6 +26,7 @@ class EpistemicOrchestrator:
         max_tevil_retries = usul_profile.dsl_ruleset.get("max_tevil_retries", 1)
         current_attempt = 0
         tevil_flagged_nodes = []
+        bridge_messages = []
         
         has_condition = any(t.lower() in ["in", "iza", "law", "amma", "imma", "aw", "ya"] for t in tokens)
         proposition_type = "Kadiyye-i_Sartiyye" if has_condition else "Kadiyye-i_Hamliyye"
@@ -41,7 +36,6 @@ class EpistemicOrchestrator:
                 tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type
             )
             
-            # [FAZ 2.5] PragmaticsFilter yerine MaaniSpeechActAnalyzer reddi yakalanır
             if not ir_matrix.is_valid_for_z3:
                 return {
                     "status": "PRAGMATICS_REJECT", 
@@ -55,7 +49,24 @@ class EpistemicOrchestrator:
                     unsat_core_str = str(execution_result.get("unsat_core", ""))
                     conflicts = self._extract_conflict_nodes_from_core(unsat_core_str)
                     
+                    # [LOGIC FIX]: Z3 motorunun soyutlanmış UNSAT çekirdeği (Örn: Mumkin_al_Wujud ihlali) 
+                    # spesifik Literal düğümleri maskeleyebilir. Literal düğümler otonom olarak fallback zincirine dahil edilir.
+                    for item in ir_matrix.predicates:
+                        if isinstance(item, tuple) and len(item) == 3:
+                            args = item[1].split("::")
+                            for arg in args:
+                                if "Literal" in arg and arg not in conflicts:
+                                    conflicts.append(arg)
+                    
                     if conflicts:
+                        for conflict_node in conflicts:
+                            if "Literal" in conflict_node:
+                                target_metaphor = conflict_node.replace("Literal", "Metaphor")
+                                chain = self.l1.find_mana_el_mana_chain(conflict_node, target_metaphor)
+                                if chain:
+                                    if self.l3.prove_metaphorical_bridge(chain):
+                                        bridge_messages.append(f"İlm-i Beyân Çıkarımı: {chain} ardışık lüzumiyeti Z3'e ispatlatıldı.")
+                                        
                         tevil_flagged_nodes.extend(conflicts)
                         current_attempt += 1
                         continue
@@ -66,7 +77,10 @@ class EpistemicOrchestrator:
 
             if current_attempt > 0 and execution_result.get("status") == "SAT":
                 execution_result["tevil_applied"] = True
-                execution_result["message"] += f" (Te'vil uygulandı: {tevil_flagged_nodes})"
+                msg_append = f" (Te'vil uygulandı: {tevil_flagged_nodes})"
+                if bridge_messages:
+                    msg_append += " | " + " | ".join(bridge_messages)
+                execution_result["message"] += msg_append
                 
             return execution_result
             
@@ -79,7 +93,6 @@ class EpistemicOrchestrator:
                                       sail_dependencies: List[Tuple[str, str, str, str]],
                                       sail_usul: AbstractSchoolUsul,
                                       sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
-        """Z3 Push/Pop İzolasyonu ile Çapraz Sorgu (Mu'aradah)."""
         sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon)
         sail_result = sail_usul.execute_dag(sail_native_ir, self.l1, self.l2, self.l3, current_attempt=0)
 

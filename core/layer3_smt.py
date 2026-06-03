@@ -1,5 +1,5 @@
 import z3
-from typing import Dict, Any, Tuple, Union
+from typing import Dict, Any, Tuple, Union, List
 from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
@@ -12,6 +12,9 @@ class Layer3SMTCircuitBreaker:
         self.core_solver.solver.set("smt.macro_finder", True)
         
         self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
+        # Global bağlam zehirlenmesini ve z3 named assertion çökmelerini engellemek için lokal köprü önbelleği
+        self._proven_bridges = set()
+        self._active_bridge_axioms = []
 
     def _freeze_ir_matrix(self, predicates: list) -> Tuple:
         frozen_elements = []
@@ -27,7 +30,6 @@ class Layer3SMTCircuitBreaker:
             pred_id, arg_id, arity = item
             if arity == 1:
                 entity_const = z3.Const(arg_id, self.core_solver.builder.EntitySort)
-                # [FAZ 1.4] Vaz' Nev'î Role yüklemlerinin dinamik oluşturulması
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
                 return predicate(w_const, t_const, entity_const)
             elif arity == 2:
@@ -59,18 +61,12 @@ class Layer3SMTCircuitBreaker:
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.Not(z3.Exists([w_const, t_const], body))
             elif item.operator == "Istifham_Inkari":
-                # [FAZ 2.4] İstifham-ı İnkârî: Tüm dünyalarda ve zamanlarda içeriğin mantıksal reddi
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, t_const], z3.Not(body))
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 
     def _inject_structural_axioms(self) -> None:
-        """
-        [FAZ 1.4] İlm-i Vaz' Lüzumiyet Aksiyomları.
-        Bir cümlede Fâ'il (Agent) veya Mef'ûl (Patient) kalıbı varsa,
-        bu durum ontolojik olarak bir Eylemin (Action) varlığını zorunlu kılar.
-        """
         w_var = z3.Const('w_vaz', self.core_solver.builder.WorldSort)
         t_var = z3.Const('t_vaz', self.core_solver.builder.TimeSort)
         x_var = z3.Const('x_var', self.core_solver.builder.EntitySort)
@@ -80,7 +76,6 @@ class Layer3SMTCircuitBreaker:
         role_patient = self.core_solver.builder.get_or_create_predicate("Role_Patient", arity=1)
         role_action = self.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
 
-        # Aksiyom 1: Agent(x) => Exists(y) Action(y)
         agent_axiom = z3.ForAll(
             [w_var, t_var, x_var],
             z3.Implies(
@@ -88,9 +83,8 @@ class Layer3SMTCircuitBreaker:
                 z3.Exists([y_var], role_action(w_var, t_var, y_var))
             )
         )
-        self.core_solver.solver.assert_and_track(agent_axiom, "AXIOM_VAZ_NEVI_AGENT_REQUIRES_ACTION")
+        self.core_solver.solver.add(agent_axiom)
 
-        # Aksiyom 2: Patient(x) => Exists(y) Action(y)
         patient_axiom = z3.ForAll(
             [w_var, t_var, x_var],
             z3.Implies(
@@ -98,7 +92,38 @@ class Layer3SMTCircuitBreaker:
                 z3.Exists([y_var], role_action(w_var, t_var, y_var))
             )
         )
-        self.core_solver.solver.assert_and_track(patient_axiom, "AXIOM_VAZ_NEVI_PATIENT_REQUIRES_ACTION")
+        self.core_solver.solver.add(patient_axiom)
+        
+    def prove_metaphorical_bridge(self, chain: List[str]) -> bool:
+        if not chain or len(chain) < 2:
+            return False
+
+        w_var = z3.Const('w_beyan', self.core_solver.builder.WorldSort)
+        t_var = z3.Const('t_beyan', self.core_solver.builder.TimeSort)
+        x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
+
+        for i in range(len(chain) - 1):
+            source_id = chain[i]
+            target_id = chain[i+1]
+            
+            bridge_id = f"AXIOM_MANA_EL_MANA_{source_id}_TO_{target_id}"
+            
+            if bridge_id in self._proven_bridges:
+                continue
+
+            source_pred = self.core_solver.builder.get_or_create_predicate(source_id, arity=1)
+            target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
+
+            bridge_axiom = z3.ForAll(
+                [w_var, t_var, x_var],
+                z3.Implies(source_pred(w_var, t_var, x_var), target_pred(w_var, t_var, x_var))
+            )
+            
+            # Aksiyomlar doğrudan global track yerine lokal listeye eklenir
+            self._active_bridge_axioms.append(bridge_axiom)
+            self._proven_bridges.add(bridge_id)
+            
+        return True
 
     def execute_sat_check(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
         matrix_signature = self._freeze_ir_matrix(ir_matrix.predicates)
@@ -109,8 +134,10 @@ class Layer3SMTCircuitBreaker:
         self.core_solver.solver.push()
         
         try:
-            # [FAZ 1.4] Yapısal Aksiyomların Çözücüye Zerk Edilmesi
             self._inject_structural_axioms()
+            
+            for b_axiom in self._active_bridge_axioms:
+                self.core_solver.solver.add(b_axiom)
 
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
             t_base = z3.Const('t_base', self.core_solver.builder.TimeSort)

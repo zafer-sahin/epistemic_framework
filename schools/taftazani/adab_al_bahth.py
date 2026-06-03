@@ -5,18 +5,21 @@ from linguistics.discourse_state import DiscourseRegister
 
 class AdabAlBahthEngine:
     """
-    Taftâzânî ve Cürcânî temelli Münazara Sonlu Durum Makinesi (FSM).
-    Faz 4 - Adım 2: Statik otomat yapısı, karşılıklı etkileşimli ve durum izoleli (Stateful)
-    bir diyalektik protokole dönüştürülmüştür.
+    Taftâzânî, Cürcânî ve Gelenbevî temelli Münazara Sonlu Durum Makinesi (FSM).
+    Faz 5: Tahrîr-i Mahall-i Niza' (Kavramsal Senkronizasyon) ve Mülâzama testleri eklendi.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
         self.discourse = discourse
         
         # FSM Durum Değişkenleri
-        self.current_state: Literal["AWAITING_CLAIM", "AWAITING_EVIDENCE", "AWAITING_ATTACK", "RESOLVED"] = "AWAITING_CLAIM"
+        self.current_state: Literal["AWAITING_CLAIM", "ISOLATING_CONTENTION", "AWAITING_EVIDENCE", "AWAITING_ATTACK", "RESOLVED"] = "AWAITING_CLAIM"
         self.active_claim: Optional[str] = None
         self.active_premises: List[str] = []
+        
+        # [FAZ 5] Kavramsal Senkronizasyon Kayıtları
+        self.musellemat: List[str] = [] # Ortak kabul edilen terimler (Agreed Terms)
+        self.niza_terms: List[str] = [] # Üzerinde tartışılan ihtilaflı terimler (Contested Terms)
 
     def submit_claim(self, claim: str) -> Dict[str, Any]:
         """Mucîb tarafından iddia (Da'vâ) sunumu."""
@@ -33,20 +36,43 @@ class AdabAlBahthEngine:
             return {"status": "TAHSIL_I_HASIL", "message": "İddia ontolojik bir aksiyomdur (Tahsîl-i Hâsıl), ispat gerektirmez."}
         
         self.active_claim = claim
-        self.current_state = "AWAITING_EVIDENCE"
         
-        # Sâil otomatik olarak varsayılan iddiayı reddeder (Men')
-        self.discourse.set_agent("Sail")
-        return {"status": "MEN_ACCEPTED", "message": "Sâil iddiayı kabul etmedi (Men'). Mucîb delil getirmelidir."}
+        # [FAZ 5] Doğrudan delil aşamasına atlamak yerine Tahrîr-i Niza' (Kavramsal Senkronizasyon) aşamasına geçilir
+        self.current_state = "ISOLATING_CONTENTION"
+        self.discourse.set_agent("Sail") # Senkronizasyon için Sâil'in onayı/reddi gerekir
+        
+        return {
+            "status": "AWAITING_TAHRIR", 
+            "message": "İddia alındı. Delil sunulmadan önce Tahrîr-i Mahall-i Niza' (Kavramsal Senkronizasyon) aşamasına geçiliyor."
+        }
+
+    def tahrir_i_niza(self, musellemat: List[str], niza_terms: List[str]) -> Dict[str, Any]:
+        """[FAZ 5] Tahrîr-i Mahall-i Niza' (Kavramsal Senkronizasyon) Aşaması."""
+        if self.current_state != "ISOLATING_CONTENTION":
+            raise ValueError(f"[DİYALEKTİK İHLAL] Tahrîr-i Niza' yalnızca 'ISOLATING_CONTENTION' aşamasında yapılabilir.")
+            
+        if not niza_terms:
+            self.current_state = "RESOLVED"
+            return {"status": "NO_CONTENTION", "message": "Tartışılacak (Niza') hiçbir kavram bildirilmedi, uyuşmazlık yoktur."}
+
+        self.musellemat = musellemat
+        self.niza_terms = niza_terms
+        
+        self.current_state = "AWAITING_EVIDENCE"
+        self.discourse.set_agent("Mujib") # Delil getirme yükümlülüğü Mucîb'e geri döner
+        
+        return {
+            "status": "CONTENTION_ISOLATED", 
+            "message": f"Müsellemât (Kabul): {musellemat} | Niza' (İhtilaf): {niza_terms}. Sâil iddiayı sınırlandırdı, Mucîb delil getirmelidir."
+        }
 
     def submit_evidence(self, premises: List[str]) -> Dict[str, Any]:
         """Mucîb tarafından delil (İstidlal) sunumu."""
         if self.current_state != "AWAITING_EVIDENCE":
-            raise ValueError("[DİYALEKTİK İHLAL] Şu an delil sunma aşamasında değilsiniz.")
+            raise ValueError("[DİYALEKTİK İHLAL] Şu an delil sunma aşamasında değilsiniz. (Tahrîr-i Niza' yapılmamış olabilir)")
         
         self.discourse.set_agent("Mujib")
         
-        # Mantıksal ve Dilbilimsel uzayda eşzamanlı Mucîb kapsamı (Frame) açılışı
         self.solver.solver.push()
         self.discourse.push_scope()
         
@@ -67,7 +93,7 @@ class AdabAlBahthEngine:
             
         self.active_premises = premises
         self.current_state = "AWAITING_ATTACK"
-        self.discourse.set_agent("Sail") # Hamle sırası Sâil'e geçti
+        self.discourse.set_agent("Sail")
         
         return {"status": "EVIDENCE_LOGGED", "message": "Delil kendi içinde tutarlı. Sâil'in diyalektik saldırısı bekleniyor."}
 
@@ -82,41 +108,40 @@ class AdabAlBahthEngine:
             if not target_premise or target_premise not in self.active_premises:
                 return {"status": "INVALID_ATTACK", "message": "Men' saldırısı için hedef öncül belirtilmelidir."}
             
-            # [FAZ 2.1] Sâil 'Men' (kanıtsız ret) yaptığında epistemik durumu 'Mutareddit' (Şüphe) seviyesine çıkar.
             from linguistics.discourse_state import DenialLevel
             self.discourse.update_epistemic_state("Sail", DenialLevel.MUTAREDDIT)
 
-            # [LOGIC FIX]: Olası Memory Leak tıkandı. FSM AWAITING_EVIDENCE'a dönmeden önce reddedilen kapsam temizlenmelidir.
             self.solver.solver.pop()
             self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
             
-            # Sâil öncülü reddettiği için FSM tekrar Mucîb'in ispat durumuna döner
             self.current_state = "AWAITING_EVIDENCE"
             return {"status": "MEN_ON_PREMISE", "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti (Mutareddit). Mucîb bu öncülü ara-iddia olarak ispatlamalıdır."}
             
         elif attack_type == "Nakz":
-            # [FAZ 2.1] Sâil 'Nakz' (Fâsid İstidlâl kanıtı) yaptığında epistemik durumu 'Munkir' (Kesin İnkar) seviyesine çıkar.
             from linguistics.discourse_state import DenialLevel
             self.discourse.update_epistemic_state("Sail", DenialLevel.MUNKIR)
 
-            # Nakz: Mucîb'in öncülleri doğru kabul edilse dahi, kıyasın neticeyi vermediğinin (Lüzum Bağı/Hadd-i Evsat hatası) ispatı
+            # [FAZ 5] Mülâzama (Zaruri İçerme Bağı) Denetimi. Gelenbevî'nin Nakz koşulu.
             is_valid = self.solver.verify_syllogism(self.active_premises, self.active_claim)
             
-            # Test bittiği için varsayımsal kapsamları bellekten düşür
-            # [LOGIC FIX]: Pop işlemi yığıtı (frame) açan Mucîb aktörü üzerinden yürütülmelidir (Stack Underflow çözümü).
             self.solver.solver.pop()
             self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
             self.current_state = "RESOLVED"
             
             if is_valid:
-                return {"status": "ILZAM", "message": "Sâil'in Nakz girişimi başarısız. Lüzum bağı ontolojik olarak geçerli. Mucîb kazandı (İlzam)."}
+                return {
+                    "status": "ILZAM", 
+                    "message": "Sâil'in Nakz girişimi başarısız. Mülâzama (Lüzum bağı) ontolojik olarak geçerli. Öncüller zorunlu olarak neticeyi veriyor. Mucîb kazandı (İlzam)."
+                }
             else:
-                return {"status": "NAKZ_SUCCESS", "message": "Fasid İstidlal kanıtlandı. Öncüller sonucu doğurmuyor (Nakz). Sâil kazandı."}
+                return {
+                    "status": "NAKZ_SUCCESS", 
+                    "message": "Fasid İstidlal kanıtlandı. Mülâzama (Lüzum bağı) koptu, öncüller neticeyi doğurmuyor (Nakz). Sâil kazandı."
+                }
                 
         elif attack_type == "Muaradah":
-            # Muaradah (Cross-School çatışması) Faz 4 - Adım 3'te orkestratör üzerinden yönetilecektir.
             return {"status": "PENDING_CROSS_SCHOOL", "message": "Mu'aradah saldırısı için çift usûllü izolasyon motoru tetiklenmelidir."}
         else:
             return {"status": "ERROR", "message": "Geçersiz Âdâb-ı Bahs saldırı tipi."}
@@ -131,4 +156,6 @@ class AdabAlBahthEngine:
         self.current_state = "AWAITING_CLAIM"
         self.active_claim = None
         self.active_premises = []
+        self.musellemat = []
+        self.niza_terms = []
         self.discourse.clear_memory()

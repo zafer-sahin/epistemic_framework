@@ -29,10 +29,14 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
+    # [FAZ 4 ENTEGRASYONU]: Şemsiyye Kiplikleri (Kâtibî'nin 13 Kipliği - Zât ve Vasıf Ayrımı)
     modal_status: Literal[
         "Wajib", "Mumkin", "Mustahil", 
-        "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme"
+        "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme",
+        "Mesruta_i_Amme", "Orfiyye_i_Amme"
     ] = "Mumkin"
+    
+    modal_condition_id: Optional[str] = Field(default=None, description="Meşrûta ve Örfiyye kiplikleri için şarta bağlı vasıf ID'si")
 
     # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân ve Maksad-ı Şâri' metrikleri
     husn_u_mucerred: bool = Field(default=False, description="Mutlak ontolojik mükemmellik/noksansızlık kısıtı")
