@@ -259,8 +259,8 @@ from schools.base_usul import AbstractSchoolUsul
 class EpistemicOrchestrator:
     """
     Bilişsel Çıkarım Motoru (Pipeline Manager).
-    Faz 4 - Adım 3: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu ve Kâtibî Bağlamı.
-    Rakip iki ekolün (Sâil ve Mucîb) ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
+    Faz 4 - Adım 2: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu ve İlm-i Vaz' Yeniden Derlemesi (Recompilation).
+    Rakip iki ekolün ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
     """
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
         self.adapter = adapter
@@ -319,12 +319,21 @@ class EpistemicOrchestrator:
             
         return execution_result
 
-    def execute_cross_school_muaradah(self, mujib_claim_ir: SemanticStatementIR, mujib_usul: AbstractSchoolUsul, sail_counter_ir: SemanticStatementIR, sail_usul: AbstractSchoolUsul) -> Dict[str, Any]:
+    def execute_cross_school_muaradah(self, 
+                                      mujib_claim_ir: SemanticStatementIR, 
+                                      mujib_usul: AbstractSchoolUsul, 
+                                      sail_tokens: List[str],
+                                      sail_dependencies: List[Tuple[str, str, str, str]],
+                                      sail_usul: AbstractSchoolUsul,
+                                      sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
         """
-        Z3 Push/Pop İzolasyonu ile Çapraz Sorgu.
-        Sâil'in karşı argümanını Mucîb'in Z3 uzayına enjekte ederek diyalektik kilitlenme (Stalemate) arar.
+        Z3 Push/Pop İzolasyonu ile Çapraz Sorgu (Mu'aradah).
+        Faz 4: Sâil'in karşı argümanı, Mucîb'in uzayına zerk edilmeden evvel, 
+        Mucîb'in İlm-i Vaz' kurallarına göre anlık olarak yeniden derlenir (Cross-Injection Compilation).
         """
-        sail_result = sail_usul.execute_dag(sail_counter_ir, self.l1, self.l2, self.l3, current_attempt=0)
+        # 1. Sâil'in argümanı kendi usûlünde geçerli mi?
+        sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon)
+        sail_result = sail_usul.execute_dag(sail_native_ir, self.l1, self.l2, self.l3, current_attempt=0)
 
         if sail_result["status"] not in ["SAT", "FALLBACK_TRIGGERED"]:
             return {
@@ -332,17 +341,17 @@ class EpistemicOrchestrator:
                 "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
             }
 
+        # 2. Sâil'in argümanı Mucîb'in usûlüne göre YENİDEN DERLENİR (Context Sealing / Çapraz Çeviri)
+        cross_injected_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, mujib_usul.namespace, sail_auto_lexicon)
+
         self.l3.core_solver.solver.push()
         try:
-            # 1. Mucîb'in önermesi SAT dönmeli (kendi uzayında tutarlı). 
-            # execute_sat_check içi push/pop olduğu için Mucîb argümanı burada kalıcı enjekte edilmez, sadece doğrulanır.
+            # Mucîb'in kendi argümanı kontrol edilir
             mujib_base_result = self.l3.execute_sat_check(mujib_claim_ir)
             
             if mujib_base_result["status"] != "SAT":
                  return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
 
-            # [LOGIC FIX]: Çapraz-Enjeksiyon zafiyeti onarıldı.
-            # Z3 matrisine Sâil ve Mucîb'in önermeleri *aynı izolasyon katmanında* eşzamanlı olarak yerleştirilmelidir.
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             t_base = z3.Const('t_base', self.l3.core_solver.builder.TimeSort)
             
@@ -350,7 +359,7 @@ class EpistemicOrchestrator:
                 z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
                 self.l3.core_solver.solver.add(z3_expr)
                 
-            for item in sail_counter_ir.predicates:
+            for item in cross_injected_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, t_base)
                 self.l3.core_solver.solver.add(z3_expr)
 
@@ -386,75 +395,76 @@ from core.models import BaseOntology, EpistemicEntity
 class Layer1HeuristicGraph:
     def __init__(self, ontology: BaseOntology):
         self.ontology = ontology
-        self.parent_map: Dict[str, str] = {}
-        self._build_parent_map()
+        self.entity_map: Dict[str, EpistemicEntity] = {}
+        self._build_entity_map()
 
-    def _build_parent_map(self) -> None:
+    def _build_entity_map(self) -> None:
         for root_node in self.ontology.porphyrian_tree.roots.values():
-            self._traverse_and_map(root_node, None)
+            self._traverse_and_map(root_node)
 
-    def _traverse_and_map(self, entity: EpistemicEntity, parent_id: Optional[str]) -> None:
-        if parent_id:
-            self.parent_map[entity.ontologic_id] = parent_id
+    def _traverse_and_map(self, entity: EpistemicEntity) -> None:
+        self.entity_map[entity.ontologic_id] = entity
         for child in entity.children:
-            self._traverse_and_map(child, entity.ontologic_id)
+            self._traverse_and_map(child)
 
-    def _get_distance(self, node_a: str, node_b: str) -> int:
-        if node_a not in self.parent_map and node_a not in self.ontology.porphyrian_tree.roots:
-            return 0 
-        if node_b not in self.parent_map and node_b not in self.ontology.porphyrian_tree.roots:
-            return 0
-
-        path_a = self._get_ancestors(node_a)
-        path_b = self._get_ancestors(node_b)
-
-        lca = None
-        for ancestor in path_a:
-            if ancestor in path_b:
-                lca = ancestor
-                break
+    def _evaluate_modal_conflict(self, amil_entity: EpistemicEntity, mamul_entity: EpistemicEntity) -> float:
+        """
+        İlm-i Beyân prensiplerine göre ontolojik modalite uyuşmazlığını (Karîne-i Mânia) ölçer.
+        Uzaklık (distance) yerine 'Hüsn-ü Mücerred' ve 'Vâcib/Mümkin' statüleri baz alınır.
+        """
+        conflict_score = 0.0
         
-        if not lca:
-            return len(path_a) + len(path_b)
+        # Kural 1: Vâcibu'l-Vücûd (Zorunlu Varlık) ile Mümkin (Hâdis) varlık/araz etkileşimi
+        if (amil_entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"] and mamul_entity.modal_status in ["Mumkin", "Mumkine_i_Amme"]) or \
+           (mamul_entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"] and amil_entity.modal_status in ["Mumkin", "Mumkine_i_Amme"]):
+            conflict_score += 0.6
+            
+        # Kural 2: Hüsn-ü Mücerred (Soyut Mükemmellik) İhlali
+        if amil_entity.husn_u_mucerred and not mamul_entity.husn_u_mucerred:
+            conflict_score += 0.4
+        elif mamul_entity.husn_u_mucerred and not amil_entity.husn_u_mucerred:
+            conflict_score += 0.4
+            
+        # Kural 3: Leksikal Karine Derecesi Çarpanı (Delalet-i Tazammun/İltizam)
+        max_karine = max(amil_entity.karine_derecesi, mamul_entity.karine_derecesi)
+        if max_karine > 0:
+            conflict_score += (max_karine * 0.2)
 
-        return path_a.index(lca) + path_b.index(lca)
-
-    def _get_ancestors(self, node: str) -> List[str]:
-        path = [node]
-        current = node
-        while current in self.parent_map:
-            current = self.parent_map[current]
-            path.append(current)
-        return path
+        return min(conflict_score, 1.0)
 
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
         if not ir_matrix.is_valid_for_z3:
             return {"status": "REJECTED", "metaphor_probability": 0.0, "reason": "İnşâî form"}
 
-        max_distance = 0
+        max_conflict = 0.0
         flagged_predicates = []
 
-        for pred_id, arg_id, arity in ir_matrix.predicates:
-            if arity == 2:
-                try:
-                    # [LOGIC FIX]: Ayrıştırıcı '_' yerine '::' yapıldı.
-                    amil_str, mamul_str = arg_id.split('::', 1)
-                    distance = self._get_distance(amil_str, mamul_str)
-                    
-                    if distance > 3:
-                        max_distance = max(max_distance, distance)
-                        flagged_predicates.append(arg_id)
-                except ValueError:
-                    continue 
+        for item in ir_matrix.predicates:
+            # Sadece atomik yüklemler ve ilişki ağları taranır (Şartiyye Nested operatörler L3 Z3 uzayına bırakılır)
+            if isinstance(item, tuple):
+                pred_id, arg_id, arity = item
+                if arity == 2 and '::' in arg_id:
+                    try:
+                        amil_str, mamul_str = arg_id.split('::', 1)
+                        amil_ent = self.entity_map.get(amil_str)
+                        mamul_ent = self.entity_map.get(mamul_str)
+                        
+                        if amil_ent and mamul_ent:
+                            conflict = self._evaluate_modal_conflict(amil_ent, mamul_ent)
+                            
+                            if conflict >= 0.5:
+                                max_conflict = max(max_conflict, conflict)
+                                flagged_predicates.append(arg_id)
+                    except ValueError:
+                        continue 
 
-        metaphor_score = min((max_distance / 10.0), 1.0) if max_distance > 3 else 0.0
-        is_metaphor_likely = metaphor_score >= 0.5
+        is_metaphor_likely = max_conflict >= 0.5
 
         return {
             "status": "ANALYZED",
             "is_metaphor_likely": is_metaphor_likely,
-            "metaphor_probability": metaphor_score,
-            "max_ontological_distance": max_distance,
+            "metaphor_probability": max_conflict,
+            "max_modal_conflict_score": max_conflict,
             "flagged_elements": flagged_predicates
         }
 
@@ -552,9 +562,6 @@ class Layer3SMTCircuitBreaker:
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                 
-                # [LOGIC FIX]: İzafet (Mudaf) ve Yüklem (Mubteda) ilişkileri, teolojide 
-                # zat ve sıfatın aynı entite üzerinde değerlendirilmesini (Ayniyet) zorunlu kılar.
-                # Eşitlik (amil == mamul) dayatıldığında, disjoint (zıt) kavramlar aynı varlıkta çakışarak UNSAT üretir.
                 if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
                     return amil_const == mamul_const
                 
@@ -572,6 +579,14 @@ class Layer3SMTCircuitBreaker:
                 if len(args) == 2:
                     return z3.And(z3.Or(args[0], args[1]), z3.Not(z3.And(args[0], args[1])))
                 return z3.Or(args)
+            elif item.operator == "Wajib_Fiqh":
+                # Fıkhî Emir (Deontic Necessity -> Kripke ForAll)
+                body = args[0] if len(args) == 1 else z3.And(args)
+                return z3.ForAll([w_const, t_const], body)
+            elif item.operator == "Haram_Fiqh":
+                # Fıkhî Nehiy (Deontic Impossibility -> Not Exists)
+                body = args[0] if len(args) == 1 else z3.And(args)
+                return z3.Not(z3.Exists([w_const, t_const], body))
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 
@@ -874,7 +889,6 @@ from typing import List, Optional, Literal, Dict, Any
 
 class EpistemicNamespace(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    
     id: str
     parent_namespace: Optional[str] = None
 
@@ -885,7 +899,6 @@ class TermModel(BaseModel):
 
 class RelationalConstraint(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    
     relation_type: str
     target_id: str  
     axiom: str
@@ -898,12 +911,14 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
-    # Faz 2 - Adım 2: eş-Şemsiyye Muvaccehât (Kiplik) belirteçleri eklendi.
-    # Kâtibî'nin Zarûriyye-i Mutlaka, Dâime-i Mutlaka ve Mümkine-i Âmme kiplikleri Z3 uzayına dahil edildi.
     modal_status: Literal[
         "Wajib", "Mumkin", "Mustahil", 
         "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme"
     ] = "Mumkin"
+
+    # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân ve Maksad-ı Şâri' metrikleri
+    husn_u_mucerred: bool = Field(default=False, description="Mutlak ontolojik mükemmellik/noksansızlık kısıtı")
+    karine_derecesi: Literal[0, 1, 2, 3] = Field(default=0, description="0: Yok, 1: Mutabakat, 2: Tazammun, 3: İltizam")
 
     differentia_id: Optional[str] = None
     propria_ids: List[str] = Field(default_factory=list)
@@ -1025,64 +1040,140 @@ DOSYA: ./data/base_ontology.json
         },
         "roots": {
             "Base": {
-                "ontologic_id": "Cevher",
+                "ontologic_id": "Mevcud",
                 "namespace": "Base",
-                "terms": { "ar": "Cevher" },
-                "level": 1,
+                "terms": { "ar": "el-Mevcûd" },
+                "level": 0,
+                "modal_status": "Mumkine_i_Amme",
+                "husn_u_mucerred": false,
+                "karine_derecesi": 0,
                 "differentia_id": null,
                 "propria_ids": [],
                 "accidents_ids": [],
                 "relations": [],
                 "children": [
                     {
-                        "ontologic_id": "Cism",
+                        "ontologic_id": "Wajib_al_Wujud",
                         "namespace": "Base",
-                        "terms": { "ar": "Cism" },
-                        "level": 2,
-                        "differentia_id": "Mutahayyiz",
-                        "propria_ids": [ "el_Ebadus_selase" ],
-                        "accidents_ids": [ "el_Levn" ],
+                        "terms": { "ar": "Vâcibu'l-Vücûd" },
+                        "level": 1,
+                        "modal_status": "Zaruriyye_i_Mutlaka",
+                        "husn_u_mucerred": true,
+                        "karine_derecesi": 0,
+                        "differentia_id": "Mutlak_Kemal",
+                        "propria_ids": ["Ezeliyyet", "Ebediyyet"],
+                        "accidents_ids": [],
+                        "relations": [],
+                        "children": []
+                    },
+                    {
+                        "ontologic_id": "Mumkin_al_Wujud",
+                        "namespace": "Base",
+                        "terms": { "ar": "Mümkinu'l-Vücûd" },
+                        "level": 1,
+                        "modal_status": "Mumkine_i_Amme",
+                        "husn_u_mucerred": false,
+                        "karine_derecesi": 0,
+                        "differentia_id": "Hudus",
+                        "propria_ids": [],
+                        "accidents_ids": [],
                         "relations": [],
                         "children": [
                             {
-                                "ontologic_id": "Nami",
+                                "ontologic_id": "Cevher",
                                 "namespace": "Base",
-                                "terms": { "ar": "en_Nami" },
-                                "level": 3,
-                                "differentia_id": "Gazi",
-                                "propria_ids": [ "et_Tenasul" ],
-                                "accidents_ids": [ "es_Sihha_vel_Marad" ],
+                                "terms": { "ar": "Cevher" },
+                                "level": 2,
+                                "modal_status": "Mumkine_i_Amme",
+                                "husn_u_mucerred": false,
+                                "karine_derecesi": 0,
+                                "differentia_id": "Kaim_Bi_Zatihi",
+                                "propria_ids": [],
+                                "accidents_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
-                                        "ontologic_id": "Hayvan",
+                                        "ontologic_id": "Cism",
                                         "namespace": "Base",
-                                        "terms": { "ar": "Hayvan" },
-                                        "level": 4,
-                                        "differentia_id": "Mudrik_Hassas",
-                                        "propria_ids": [ "en_Nevm" ],
-                                        "accidents_ids": [ "el_Cu" ],
+                                        "terms": { "ar": "Cism" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": "Mutahayyiz",
+                                        "propria_ids": [ "el_Ebadus_selase" ],
+                                        "accidents_ids": [ "el_Levn" ],
                                         "relations": [],
                                         "children": [
                                             {
-                                                "ontologic_id": "Insan",
+                                                "ontologic_id": "Nami",
                                                 "namespace": "Base",
-                                                "terms": { "ar": "Insan" },
-                                                "level": 5,
-                                                "differentia_id": "Natik",
-                                                "propria_ids": [ "ed_Dahik", "el_Baki" ],
-                                                "accidents_ids": [ "el_Katib", "el_Kaim" ],
+                                                "terms": { "ar": "en_Nami" },
+                                                "level": 4,
+                                                "modal_status": "Mumkine_i_Amme",
+                                                "husn_u_mucerred": false,
+                                                "karine_derecesi": 0,
+                                                "differentia_id": "Gazi",
+                                                "propria_ids": [ "et_Tenasul" ],
+                                                "accidents_ids": [ "es_Sihha_vel_Marad" ],
                                                 "relations": [],
-                                                "children": []
+                                                "children": [
+                                                    {
+                                                        "ontologic_id": "Hayvan",
+                                                        "namespace": "Base",
+                                                        "terms": { "ar": "Hayvan" },
+                                                        "level": 5,
+                                                        "modal_status": "Mumkine_i_Amme",
+                                                        "husn_u_mucerred": false,
+                                                        "karine_derecesi": 0,
+                                                        "differentia_id": "Mudrik_Hassas",
+                                                        "propria_ids": [ "en_Nevm" ],
+                                                        "accidents_ids": [ "el_Cu" ],
+                                                        "relations": [],
+                                                        "children": [
+                                                            {
+                                                                "ontologic_id": "Insan",
+                                                                "namespace": "Base",
+                                                                "terms": { "ar": "Insan" },
+                                                                "level": 6,
+                                                                "modal_status": "Mumkine_i_Amme",
+                                                                "husn_u_mucerred": false,
+                                                                "karine_derecesi": 0,
+                                                                "differentia_id": "Natik",
+                                                                "propria_ids": [ "ed_Dahik", "el_Baki" ],
+                                                                "accidents_ids": [ "el_Katib", "el_Kaim" ],
+                                                                "relations": [],
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "ontologic_id": "Feres",
+                                                                "namespace": "Base",
+                                                                "terms": { "ar": "Feres" },
+                                                                "level": 6,
+                                                                "modal_status": "Mumkine_i_Amme",
+                                                                "husn_u_mucerred": false,
+                                                                "karine_derecesi": 0,
+                                                                "differentia_id": "Sahil",
+                                                                "propria_ids": [ "et_Tesfih" ],
+                                                                "accidents_ids": [ "el_Udme" ],
+                                                                "relations": [],
+                                                                "children": []
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
                                             },
                                             {
-                                                "ontologic_id": "Feres",
+                                                "ontologic_id": "Cemad",
                                                 "namespace": "Base",
-                                                "terms": { "ar": "Feres" },
-                                                "level": 5,
-                                                "differentia_id": "Sahil",
-                                                "propria_ids": [ "et_Tesfih" ],
-                                                "accidents_ids": [ "el_Udme" ],
+                                                "terms": { "ar": "el_Cemadat" },
+                                                "level": 4,
+                                                "modal_status": "Mumkine_i_Amme",
+                                                "husn_u_mucerred": false,
+                                                "karine_derecesi": 0,
+                                                "differentia_id": "La_Nami",
+                                                "propria_ids": [ "el_Hareketul_kasriyye" ],
+                                                "accidents_ids": [],
                                                 "relations": [],
                                                 "children": []
                                             }
@@ -1091,15 +1182,47 @@ DOSYA: ./data/base_ontology.json
                                 ]
                             },
                             {
-                                "ontologic_id": "Cemad",
+                                "ontologic_id": "Araz",
                                 "namespace": "Base",
-                                "terms": { "ar": "el_Cemadat" },
-                                "level": 3,
-                                "differentia_id": "La_Nami",
-                                "propria_ids": [ "el_Hareketul_kasriyye" ],
+                                "terms": { "ar": "Araz" },
+                                "level": 2,
+                                "modal_status": "Mumkine_i_Amme",
+                                "husn_u_mucerred": false,
+                                "karine_derecesi": 0,
+                                "differentia_id": "Kaim_Bi_Ghayrihi",
+                                "propria_ids": [],
                                 "accidents_ids": [],
                                 "relations": [],
-                                "children": []
+                                "children": [
+                                    {
+                                        "ontologic_id": "Sifat_Yed_Literal",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Yed (Uzuv)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Tekvin",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Tekvin (Yaratma Eylemi)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    }
+                                ]
                             }
                         ]
                     }
@@ -1167,38 +1290,45 @@ DOSYA: ./linguistics/__init__.py
 ==================================================
 DOSYA: ./linguistics/contextual_lexicon.py
 ==================================================
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
+from linguistics.discourse_state import DiscourseRegister
 
 class ContextualLexicon:
     """
-    N-boyutlu Leksikon Tensörü: (word -> namespace -> proposition_type -> ontologic_id)
+    N-boyutlu Leksikon Tensörü: (word -> namespace -> proposition_type -> {default, context_triggers})
     'İlm-i Vaz adaptasyonunu destekler.
-    Faz 3 - Adım 1: Şemsiyye Önermesel Bağlam (Propositional Context) genişletmesi.
-    Kelimenin anlamı salt ekole değil, içinde bulunduğu önerme türüne (Hamliyye/Şartiyye) göre değişir.
+    Faz 3 - Adım 1: Siyak-Sibak (Bağlam Avcısı) Genişletmesi.
+    Kelimenin anlamı, Söylem Belleğindeki (DiscourseRegister) geçmiş kelimelere (Sibak) göre dinamik değişir.
     """
     def __init__(self):
-        # 3 Boyutlu Dict formatı: 
-        # { "istiva": { "Ashari": { "Kadiyye-i_Hamliyye": "Istiva_Metaphor", "Kadiyye-i_Sartiyye": "Istiva_Literal" } } }
-        self._tensor: Dict[str, Dict[str, Dict[str, str]]] = {}
+        self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 
-    def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye") -> None:
-        """Kelimenin ontolojik izdüşümünü spesifik bir isim alanı ve önerme türü bağlamında kaydeder."""
+    def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None) -> None:
         word_lower = word.lower()
         if word_lower not in self._tensor:
             self._tensor[word_lower] = {}
-            
         if namespace not in self._tensor[word_lower]:
             self._tensor[word_lower][namespace] = {}
+        if proposition_type not in self._tensor[word_lower][namespace]:
+            self._tensor[word_lower][namespace][proposition_type] = {"default": None, "context_triggers": {}}
         
-        # Override (Defeasibility) önerme katmanında gerçekleşir
-        self._tensor[word_lower][namespace][proposition_type] = ontologic_id
+        if sibak_trigger:
+            self._tensor[word_lower][namespace][proposition_type]["context_triggers"][sibak_trigger.lower()] = ontologic_id
+        else:
+            self._tensor[word_lower][namespace][proposition_type]["default"] = ontologic_id
 
-    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye") -> str:
-        """
-        Gelen kelimeyi aktif isim alanında ve önerme bağlamında arar.
-        Bulamazsa 'Kadiyye-i_Hamliyye' (Varsayılan Hüküm) tipine, ardından
-        'Base' (İsağoci Kalıtımı) isim alanına geri çekilir (Fallback).
-        """
+    def _scan_discourse_for_sibak(self, discourse: DiscourseRegister, triggers: Dict[str, str]) -> Optional[str]:
+        if not discourse or not triggers:
+            return None
+        
+        frames = discourse.mujib_frames if discourse.active_agent == "Mujib" else discourse.sail_frames
+        for frame in reversed(frames):
+            for mention in reversed(frame):
+                if mention.word.lower() in triggers:
+                    return triggers[mention.word.lower()]
+        return None
+
+    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None) -> str:
         word_lower = word.lower()
         if word_lower not in self._tensor:
             raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' tensörde kayıtlı değil.")
@@ -1206,28 +1336,32 @@ class ContextualLexicon:
         namespace_map = self._tensor[word_lower]
 
         def get_from_namespace(ns: str) -> Optional[str]:
-            if ns in namespace_map:
-                prop_map = namespace_map[ns]
-                if proposition_type in prop_map:
-                    return prop_map[proposition_type]
-                # İlgili önerme türü yoksa, mutlak (Hamliyye) anlama fallback yap
-                elif "Kadiyye-i_Hamliyye" in prop_map:
-                    return prop_map["Kadiyye-i_Hamliyye"]
+            if ns not in namespace_map:
+                return None
+                
+            prop_map = namespace_map[ns]
+            target_map = None
+            if proposition_type in prop_map:
+                target_map = prop_map[proposition_type]
+            elif "Kadiyye-i_Hamliyye" in prop_map:
+                target_map = prop_map["Kadiyye-i_Hamliyye"]
+            
+            if target_map:
+                context_id = self._scan_discourse_for_sibak(discourse, target_map.get("context_triggers", {}))
+                if context_id:
+                    return context_id
+                return target_map.get("default")
             return None
 
-        # 1. Aktif mezhep/ekol bağlamında ara
         resolved = get_from_namespace(active_namespace)
-        if resolved:
-            return resolved
+        if resolved: return resolved
         
-        # 2. Base ontolojide ara (Kalıtım)
         resolved_base = get_from_namespace("Base")
-        if resolved_base:
-            return resolved_base
+        if resolved_base: return resolved_base
             
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{word}' kelimesi '{active_namespace}' veya 'Base' alanlarında '{proposition_type}' bağlamında çözümlenemedi.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{word}' kelimesi '{active_namespace}' alanında çözümlenemedi.")
         
-    def dump_tensor(self) -> Dict[str, Dict[str, Dict[str, str]]]:
+    def dump_tensor(self) -> Dict[str, Any]:
         return self._tensor
 
 
@@ -1242,12 +1376,13 @@ class EntityMention(BaseModel):
     ontologic_id: str
     timestamp: int
     agent: Literal["Mujib", "Sail"]
+    sealed_namespace: str  # [FAZ 4] Yalıtım Zırhı: Hangi usûl uzayında üretildi?
 
 class DiscourseRegister:
     """
     Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
-    Faz 4 - Adım 1: Taftazânî Diyalektiği için Mucîb ve Sâil yığıtları (Stack) izole edilmiştir.
-    Z3 push/pop state mimarisiyle tam senkronize, aktör-spesifik çalışır.
+    Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı eklendi.
+    Z3, bir uzayın zamirlerini tararken diğer uzayın Müsellemât'ına (önkabüllerine) kesinlikle sızamaz.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
@@ -1277,22 +1412,24 @@ class DiscourseRegister:
         else:
             raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
 
-    def add_mention(self, word: str, ontologic_id: str) -> None:
-        """Aktif aktörün kapsamına yeni bir ontolojik varlık ataması yapar."""
+    def add_mention(self, word: str, ontologic_id: str, active_namespace: str) -> None:
+        """Aktif aktörün kapsamına, aktif uzayın mührüyle (namespace) yeni bir ontolojik varlık ataması yapar."""
         mention = EntityMention(
             word=word, 
             ontologic_id=ontologic_id, 
             timestamp=self.clock,
-            agent=self.active_agent
+            agent=self.active_agent,
+            sealed_namespace=active_namespace
         )
         frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
         frames[-1].append(mention)
         self.clock += 1
 
-    def resolve_pronoun(self, pronoun: str) -> Optional[str]:
+    def resolve_pronoun(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[str]:
         """
-        Aktör-Spesifik Zamir (Anafora) tespiti.
+        Aktör-Spesifik ve Uzay-Korumalı Zamir (Anafora) tespiti.
         Sadece konuşan aktörün kendi yığıtındaki (LIFO) geçmiş kabulleri (Müsellemat) taranır.
+        Eğer çapraz sorguda (Mu'aradah) bağlam zehirlenmesi saptanırsa motor durdurulur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
@@ -1302,7 +1439,17 @@ class DiscourseRegister:
 
         for frame in reversed(frames):
             if frame:
-                return frame[-1].ontologic_id
+                resolved_mention = frame[-1]
+                
+                # [FAZ 4] Context Sealing (Bağlam Zehirlenmesi Koruması)
+                if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
+                    raise ValueError(
+                        f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
+                        f"'{pronoun}' zamiri '{resolved_mention.sealed_namespace}' uzayında üretildi, "
+                        f"ancak şu an '{enforcement_namespace}' uzayına sızmaya/bağlanmaya çalışıyor."
+                    )
+                    
+                return resolved_mention.ontologic_id
                 
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")
         
@@ -1348,14 +1495,13 @@ class IlmWadAdapter:
         self.current_tevil_targets: List[str] = []
 
     def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye") -> SemanticStatementIR:
-        if auto_lexicon is None:
-            auto_lexicon = {}
-        if tevil_fallback_nodes is None:
-            tevil_fallback_nodes = []
-            
+        if auto_lexicon is None: auto_lexicon = {}
+        if tevil_fallback_nodes is None: tevil_fallback_nodes = []
+        
         self.current_tevil_targets = tevil_fallback_nodes
         
-        if not self.pragmatics.is_khabari(tokens):
+        pragmatics_res = self.pragmatics.analyze_pragmatics(tokens)
+        if not pragmatics_res["is_valid"]:
             return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False)
 
         ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
@@ -1380,24 +1526,25 @@ class IlmWadAdapter:
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
         if has_inadi:
-            nested_logic = NestedPredicate(
-                operator="Inadi",
-                args=atomic_predicates
-            )
+            nested_logic = NestedPredicate(operator="Inadi", args=atomic_predicates)
             ir_predicates.append(nested_logic)
         elif has_luzumi:
-            nested_logic = NestedPredicate(
-                operator="Luzumi",
-                args=atomic_predicates
-            )
+            nested_logic = NestedPredicate(operator="Luzumi", args=atomic_predicates)
             ir_predicates.append(nested_logic)
         else:
             ir_predicates.extend(atomic_predicates)
 
+        # [FAZ 3] Deontik Mantık Sarmalayıcısı
+        if pragmatics_res["type"] == "Deontic":
+            op = "Wajib_Fiqh" if pragmatics_res["operator"] == "Emir" else "Haram_Fiqh"
+            deontic_logic = NestedPredicate(operator=op, args=ir_predicates)
+            ir_predicates = [deontic_logic]
+
         return SemanticStatementIR(active_namespace=active_namespace, predicates=ir_predicates, is_valid_for_z3=True)
         
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str) -> str:
-        pronoun_res = self.discourse.resolve_pronoun(word)
+        # [FAZ 4] Zamir çözücüye 'active_namespace' zırhı basıldı
+        pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
             return pronoun_res
             
@@ -1406,19 +1553,20 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        # Faz 4: Dinamik Önerme Tipi Aktarımı (Kadiyye-i Hamliyye veya Kadiyye-i Şartiyye)
-        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type)
+        # [FAZ 3] Bağlam Avcısı
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse)
         
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
-                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback")
+                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse)
             except ValueError:
                 ontologic_id = base_ontologic_id
         else:
             ontologic_id = base_ontologic_id
         
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_"):
-            self.discourse.add_mention(word, ontologic_id)
+            # [FAZ 4] Söylem belleğine kayıt esnasında 'active_namespace' mührü eklendi
+            self.discourse.add_mention(word, ontologic_id, active_namespace)
             
         return ontologic_id
 
@@ -1517,40 +1665,39 @@ class NahivDependencyCompiler:
 ==================================================
 DOSYA: ./linguistics/pragmatics.py
 ==================================================
-# DOSYA: ./linguistics/pragmatics.py
-
-from typing import List
+from typing import List, Dict, Any
 
 class PragmaticsFilter:
     """
     'İlm-i Ma'ânî (Pragmatics) Filtresi.
-    Cümlelerin Khabarî (Bilgi/Hüküm bildiren) veya İnşâî (Soru/Emir/Temenni)
-    olduğunu denetler. Mantık motoru (Z3 SMT) sadece Khabarî cümleleri işleyebilir.
+    Faz 3 - Adım 2: Fıkhî İstinbat (Deontik Mantık) İzolasyon Motoru.
+    İnşâî formdaki istifham (soru) edatları reddedilirken, emir (if'al) ve nehiy (yasak)
+    kalıpları Deontik Mantık olarak Z3'e girmesi için onaylanır.
     """
     def __init__(self):
-        # Transliterasyon tabanlı İnşâî (Soru ve Emir) edatları/kalıpları
         self.inshai_markers = {
             "question": ["hal", "a", "mata", "kayfa", "man", "ma", "eyne"],
-            "imperative_patterns": ["if'al", "la_taf'al"]
+            "imperative": ["if'al", "la_taf'al", "ef'al", "li_yaf'al"]
         }
 
-    def is_khabari(self, tokens: List[str]) -> bool:
-        """
-        Token dizisini analiz eder. Eğer inşâî bir alamet varsa False döner.
-        """
+    def analyze_pragmatics(self, tokens: List[str]) -> Dict[str, Any]:
         if not tokens:
-            return False
+            return {"is_valid": False, "type": "Empty"}
         
         first_token = tokens[0].lower()
         
-        # Soru edatı (İstifham) kontrolü
         if first_token in self.inshai_markers["question"]:
-            return False
+            return {"is_valid": False, "type": "Istifham", "message": "Soru cümleleri mantıksal değer taşımaz."}
             
-        # Gelecek fazlarda daha karmaşık emir/nehiy (imperative/prohibitive) 
-        # kalıpları buraya eklenecektir.
+        if first_token in self.inshai_markers["imperative"]:
+            is_prohibitive = first_token.startswith("la_")
+            return {"is_valid": True, "type": "Deontic", "operator": "Nehiy" if is_prohibitive else "Emir"}
+            
+        return {"is_valid": True, "type": "Khabari"}
         
-        return True
+    def is_khabari(self, tokens: List[str]) -> bool:
+        res = self.analyze_pragmatics(tokens)
+        return res["is_valid"]
 
 
 ==================================================
@@ -1768,6 +1915,7 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             "ashari": AshariUsul(),
             "maturidi": MaturidiUsul()
         }
+        self.last_ir = None
         self._initialize_pipeline()
 
     def _initialize_pipeline(self):
@@ -1783,10 +1931,15 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             self.lexicon = ContextualLexicon()
             self.discourse = DiscourseRegister()
             
-            # Faz 9.5: Leksikon kayıtları kök (Cidr) formlarına çekildi
+            # Dinamik Leksikon Eşleştirmeleri (Ontoloji JSON ile uyumlu)
             self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
             self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
+            self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
             self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
+            self.lexicon.register_word("tekvin", "Maturidi", "Tekvin")
+            self.lexicon.register_word("nam", "Base", "Nami")
+            self.lexicon.register_word("cemad", "Base", "Cemad")
+            self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
             
             self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
@@ -1811,15 +1964,15 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             self.active_usul = self.available_schools[target]
             self.prompt = f"Epistemic-Engine [{self.active_usul.namespace}]> "
             self.discourse.clear_memory()
+            self.last_ir = None
             print(f"[BAĞLAM DEĞİŞİMİ] Aktif Usûl Profiline Geçildi: {self.active_usul.namespace}")
         else:
             print(f"[RED] Tanımsız Usûl. Mevcut seçenekler: {list(self.available_schools.keys())}")
 
     def do_parse_sentence(self, arg):
         """
-        Ham metni Tokenize -> Sarf -> Nahiv (AST) -> Orkestratör (L1-L2-L3)
-        zincirinden geçirerek ontolojik zorunluluğunu ve mezhepsel geçerliliğini test eder.
-        Kullanım: parse_sentence yadun allahun
+        Ham metni Mucîb (Savunucu) kimliğiyle sisteme sunar ve mantıksal geçerliliğini test eder.
+        Kullanım: parse_sentence yadu allahi
         """
         if not arg:
             print("[HATA] Analiz edilecek cümleyi girin.")
@@ -1828,13 +1981,13 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
         try:
             tokens = self.tokenizer.tokenize(arg)
             auto_lexicon = self.sarf_engine.derive_lexicon(tokens)
-            
             ast_dependencies = self.nahiv_parser.suggest_dependencies(tokens, auto_lexicon)
+            
             print(f"\n[SENTAKS] Üretilen Bağımlılık Ağacı (AST): {ast_dependencies}")
-
             print(f"[YÜRÜTME] Orkestratör Aktif Profil ({self.active_usul.namespace}) ile tetikleniyor...\n")
             
-            # Faz 9.4 Senkronizasyonu: auto_lexicon parametresi eklendi
+            # SemanticStatementIR matrisi mu'aradah çapraz sorgusu için belleğe alınır
+            self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon)
             result = self.orchestrator.process_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
 
             print(f"[{result.get('status', 'BİLİNMİYOR')}]")
@@ -1849,9 +2002,50 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             print(f"\n[SİSTEM ÇÖKÜŞÜ] Boru Hattı İhlali:")
             traceback.print_exc()
 
+    def do_muaradah(self, arg):
+        """
+        Sâil (İtirazcı) kimliğiyle, Mucîb'in son sunduğu argümana çapraz-ekol saldırısı (Muaradah) yapar.
+        Kullanım: muaradah <rakip_ekol> <karşı_cümle> (Örn: muaradah salafi namun zeydun)
+        """
+        args = arg.split(maxsplit=1)
+        if len(args) < 2:
+            print("[HATA] Rakip usûl ve karşı cümleyi eksiksiz girin. Örn: muaradah salafi namun zeydun")
+            return
+            
+        sail_usul_str, sail_sentence = args[0].strip().lower(), args[1]
+        
+        if sail_usul_str not in self.available_schools:
+            print(f"[HATA] Geçersiz Sâil usûlü: {sail_usul_str}")
+            return
+            
+        if not self.last_ir or not self.last_ir.is_valid_for_z3:
+            print("[HATA] Çapraz sorgu için önce Mucîb (parse_sentence) olarak geçerli bir iddia sunmalısınız.")
+            return
+
+        sail_usul = self.available_schools[sail_usul_str]
+
+        try:
+            sail_tokens = self.tokenizer.tokenize(sail_sentence)
+            sail_lexicon = self.sarf_engine.derive_lexicon(sail_tokens)
+            sail_ast = self.nahiv_parser.suggest_dependencies(sail_tokens, sail_lexicon)
+            
+            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) saldırı protokolü başlatıldı...")
+            
+            result = self.orchestrator.execute_cross_school_muaradah(
+                self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon
+            )
+            
+            print(f"[{result.get('status', 'BİLİNMİYOR')}]")
+            print(f"Gerekçe: {result.get('message')}")
+            
+        except Exception as e:
+            print(f"\n[SİSTEM ÇÖKÜŞÜ] Mu'aradah İhlali:")
+            traceback.print_exc()
+
     def do_clear_memory(self, arg):
         """Söylem belleğindeki (Anafora/Zamir) geçmiş bağlamı sıfırlar."""
         self.discourse.clear_memory()
+        self.last_ir = None
         print("[BELLEK] Söylem hafızası sıfırlandı.")
 
     def do_exit(self, arg):
@@ -1879,7 +2073,7 @@ import sys
 from pathlib import Path
 
 # Core Katmanları
-from core.models import OntologyLoader
+from core.models import OntologyLoader, EpistemicEntity, TermModel
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -1916,15 +2110,28 @@ def execute_healthcheck():
     lexicon = ContextualLexicon()
     discourse = DiscourseRegister()
     
-    # Mock Veri Enjeksiyonu (Kök/Cidr tabanlı)
+    # Mock Veri Enjeksiyonu
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
-    lexicon.register_word("tekvin", "Maturidi", "Tekvin") # Mâtürîdî spesifik düğüm
+    lexicon.register_word("tekvin", "Maturidi", "Tekvin")
     lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
+    lexicon.register_word("cemad", "Base", "Cemad")
+    # [LOGIC FIX]: Leksikon kayıtları, Sarf motorunun (-i ve -un) i'rablarını kestikten sonra üreteceği saf kök forma (nam ve zeyd) indirgendi.
+    lexicon.register_word("nam", "Base", "Nami")
+    lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
 
     adapter = IlmWadAdapter(lexicon, discourse)
     l1 = Layer1HeuristicGraph(ontology)
+    
+    # L1 Graph Entity Map Mocking (Faz 2 uyumluluğu için)
+    l1.entity_map["Wajib_al_Wujud"] = EpistemicEntity(ontologic_id="Wajib_al_Wujud", terms=TermModel(ar="Allah"), modal_status="Wajib", husn_u_mucerred=True)
+    l1.entity_map["Sifat_Yed_Literal"] = EpistemicEntity(ontologic_id="Sifat_Yed_Literal", terms=TermModel(ar="Yed"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Tekvin"] = EpistemicEntity(ontologic_id="Tekvin", terms=TermModel(ar="Tekvin"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Cemad"] = EpistemicEntity(ontologic_id="Cemad", terms=TermModel(ar="Cemad"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Nami"] = EpistemicEntity(ontologic_id="Nami", terms=TermModel(ar="Nami"), modal_status="Mumkin", husn_u_mucerred=False)
+    l1.entity_map["Zeyd_Entity"] = EpistemicEntity(ontologic_id="Zeyd_Entity", terms=TermModel(ar="Zeydun"), modal_status="Mumkin", husn_u_mucerred=False)
+
     l2 = Layer2RuleEngine()
     l3 = Layer3SMTCircuitBreaker(solver, timeout_ms=3000)
     
@@ -1932,7 +2139,6 @@ def execute_healthcheck():
     print("[BAŞARILI] Orkestratör ve tüm alt-motorlar belleğe yüklendi.\n")
 
     # 2. TEST SENARYOLARI
-    # Test Cümlesi 1: İzafet Terkibi (Mudaf Tenvin Düşmesi ve Mecrur)
     sentence_1 = "yadu allahi" 
     tokens_1 = tokenizer.tokenize(sentence_1)
     morph_1 = sarf.derive_lexicon(tokens_1)
@@ -1950,7 +2156,6 @@ def execute_healthcheck():
     res_ashari = orchestrator.process_statement(tokens_1, ast_1, AshariUsul(), morph_1)
     print(f"Sonuç: [{res_ashari['status']}] (L2 Kararı: {res_ashari.get('l2_context')})\n")
 
-    # Test Cümlesi 2: Maturidi DSL Spesifik Düğüm Blokajı
     sentence_2 = "tekvinu allahi"
     tokens_2 = tokenizer.tokenize(sentence_2)
     morph_2 = sarf.derive_lexicon(tokens_2)
@@ -1963,12 +2168,20 @@ def execute_healthcheck():
     print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
 
     print("--- SENARYO 4: CÜRCÂNÎ MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
-    # Faz 4 Red-Teaming: Eş'arî (Cemad) ve Selefî (Nami) üzerinden yatay ontolojik çelişki testi
-    # İki argüman da kendi uzaylarında SAT (Tutarlı) döner ancak çapraz sorguda Yatay Dışlama (Sibling Disjointness) nedeniyle UNSAT'a düşer.
-    ir_mujib = SemanticStatementIR(active_namespace="Ashari", predicates=[("Cemad", "test_entity", 1)], is_valid_for_z3=True)
-    ir_sail = SemanticStatementIR(active_namespace="Salafi", predicates=[("Nami", "test_entity", 1)], is_valid_for_z3=True)
+    discourse.clear_memory()
+    ir_mujib = SemanticStatementIR(
+        active_namespace="Ashari", 
+        predicates=[("Cemad", "Cemad", 1), ("Zeyd_Entity", "Zeyd_Entity", 1), ("Rel_Mubteda_Haber", "Cemad::Zeyd_Entity", 2)], 
+        is_valid_for_z3=True
+    )
     
-    res_muaradah = orchestrator.execute_cross_school_muaradah(ir_mujib, AshariUsul(), ir_sail, SalafiUsul())
+    sail_tokens = ["nami", "zeydun"]
+    sail_morph = sarf.derive_lexicon(sail_tokens)
+    sail_ast = nahiv.suggest_dependencies(sail_tokens, sail_morph)
+    
+    res_muaradah = orchestrator.execute_cross_school_muaradah(
+        ir_mujib, AshariUsul(), sail_tokens, sail_ast, SalafiUsul(), sail_morph
+    )
     print(f"Mucîb (Ashari): Cemad | Sâil (Salafi): Nami")
     print(f"Sonuç: [{res_muaradah['status']}] -> {res_muaradah.get('message')}\n")
 
@@ -2340,6 +2553,9 @@ from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
 from schools.taftazani.adab_al_bahth import AdabAlBahthEngine
 from schools.ashari_usul import AshariUsul
 from schools.salafi_usul import SalafiUsul
+from linguistics.tokenizer import EpistemicTokenizer
+from linguistics.sarf_parser import SarfEngine
+from linguistics.nahiv_ast import NahivDependencyCompiler
 
 class TestDialecticsFSM(unittest.TestCase):
     def setUp(self):
@@ -2354,6 +2570,9 @@ class TestDialecticsFSM(unittest.TestCase):
         self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
         self.orchestrator = EpistemicOrchestrator(self.adapter, self.l1, self.l2, self.l3)
         self.engine = AdabAlBahthEngine(self.solver, self.discourse)
+        self.tokenizer = EpistemicTokenizer()
+        self.sarf = SarfEngine()
+        self.nahiv = NahivDependencyCompiler()
 
     def test_fsm_sequential_integrity(self):
         """[Faz 3] FSM'nin AWAITING_CLAIM -> AWAITING_EVIDENCE -> AWAITING_ATTACK sıralaması ihlali koruması."""
@@ -2365,12 +2584,8 @@ class TestDialecticsFSM(unittest.TestCase):
 
     def test_curcani_nakz_refutation(self):
         """[Faz 3 Red-Teaming] Sâil'in Nakz hücumunda, öncüller SAT olsa dahi sonucun lüzum bağını kırması testi."""
-        # Mucîb İddiası: "Tüm S'ler P'dir"
         self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
         
-        # Mucîb'in Hatalı Kıyası (Fâsid İstidlâl): Öncüller tutarlı ama sonucu doğurmuyor
-        # Öncül 1: Bazı S'ler M'dir. Öncül 2: Bazı M'ler P'dir.
-        # Bu iki öncül Z3 için SAT döner (tutarlıdır), ancak "Tüm S'ler P'dir" neticesini ZORUNLU kılmaz.
         premises = [
             "Exists([x], And(S(x), M(x)))",
             "Exists([x], And(M(x), P(x)))"
@@ -2379,20 +2594,31 @@ class TestDialecticsFSM(unittest.TestCase):
         ev_result = self.engine.submit_evidence(premises)
         self.assertEqual(ev_result["status"], "EVIDENCE_LOGGED", "Öncüller kendi içinde çeliştiği için Z3 reddetti. Hatalı mock verisi.")
         
-        # Sâil Nakz (Refutation) ile saldırır
         attack_result = self.engine.attack_evidence(attack_type="Nakz")
         
-        # Beklenen: FSM otonom olarak Nakz saldırısını başarılı ("NAKZ_SUCCESS") bulmalıdır.
         self.assertEqual(attack_result["status"], "NAKZ_SUCCESS", "[DİYALEKTİK ÇÖKÜŞ] Fâsid istidlâl (Hatalı Lüzum Bağı) Z3 tarafından Nakz edilemedi.")
         self.assertEqual(self.engine.current_state, "RESOLVED", "Tartışma bitmesine rağmen FSM durumu açık kaldı.")
 
     def test_cross_school_muaradah_stalemate(self):
-        """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu."""
-        mujib_ir = SemanticStatementIR(active_namespace="Ashari", predicates=[("Cevher", "Cevher", 1)], is_valid_for_z3=True)
-        sail_ir = SemanticStatementIR(active_namespace="Salafi", predicates=[("Cism", "Cism", 1)], is_valid_for_z3=True)
+        """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu ve Leksikon Yeniden Derlemesi."""
+        self.lexicon.register_word("cevher", "Base", "Cevher")
+        self.lexicon.register_word("cism", "Base", "Cism")
+        # [LOGIC FIX]: Leksikon kaydı, Sarf motorunun (-un) tenvinini kestikten sonra üreteceği saf kök forma (zeyd) indirgendi.
+        self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
+        
+        mujib_ir = SemanticStatementIR(
+            active_namespace="Ashari", 
+            predicates=[("Cevher", "Cevher", 1), ("Zeyd_Entity", "Zeyd_Entity", 1), ("Rel_Mubteda_Haber", "Cevher::Zeyd_Entity", 2)], 
+            is_valid_for_z3=True
+        )
+        
+        # [LOGIC FIX]: Sentaktik I'rab (Tenvin -un) eklenerek Câmid İsim Fallback mekanizması tetiklendi.
+        sail_tokens = ["cismun", "zeydun"]
+        sail_morph = self.sarf.derive_lexicon(sail_tokens)
+        sail_deps = self.nahiv.suggest_dependencies(sail_tokens, sail_morph)
         
         result = self.orchestrator.execute_cross_school_muaradah(
-            mujib_ir, AshariUsul(), sail_ir, SalafiUsul()
+            mujib_ir, AshariUsul(), sail_tokens, sail_deps, SalafiUsul(), sail_morph
         )
         
         self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE", "MUARADAH_FAILED"], "[DİYALEKTİK ÇÖKÜŞ] Çapraz ekol çarpışması hatası.")
@@ -2406,7 +2632,7 @@ DOSYA: ./tests/integration/test_defeasibility_loop.py
 ==================================================
 import unittest
 from pathlib import Path
-from core.models import OntologyLoader
+from core.models import OntologyLoader, EpistemicEntity, TermModel
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -2444,15 +2670,16 @@ class TestDefeasibilityEngine(unittest.TestCase):
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
         self.l1 = Layer1HeuristicGraph(self.ontology)
         
-        # [MOCK L1 GRAPH] Karîne-i Mânia algılanması için sahte ontolojik mesafeler (LCA>3) enjekte edilir
-        self.l1.parent_map["Sifat_Yed_Literal"] = "Cism"
-        self.l1.parent_map["Wajib_al_Wujud"] = "Divine"
-        self.l1.parent_map["Tekvin"] = "Sifat_Action"
-        self.l1.parent_map["Cism"] = "Cevher"
-        self.l1.parent_map["Cevher"] = "Base_Root"
-        self.l1.parent_map["Divine"] = "Absolute_Root"
-        self.l1.parent_map["Sifat_Action"] = "Action_Root"
-        self.l1.parent_map["Action_Root"] = "Absolute_Root"
+        # [MOCK L1 GRAPH] Karîne-i Mânia algılanması için LCA yerine Modal Uyuşmazlık matrisi enjekte edilir
+        self.l1.entity_map["Wajib_al_Wujud"] = EpistemicEntity(
+            ontologic_id="Wajib_al_Wujud", terms=TermModel(ar="Allah"), modal_status="Wajib", husn_u_mucerred=True
+        )
+        self.l1.entity_map["Sifat_Yed_Literal"] = EpistemicEntity(
+            ontologic_id="Sifat_Yed_Literal", terms=TermModel(ar="Yed"), modal_status="Mumkin", husn_u_mucerred=False
+        )
+        self.l1.entity_map["Tekvin"] = EpistemicEntity(
+            ontologic_id="Tekvin", terms=TermModel(ar="Tekvin"), modal_status="Mumkin", husn_u_mucerred=False
+        )
 
         self.l2 = Layer2RuleEngine()
         self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
@@ -2538,16 +2765,18 @@ class TestSemanticPipeline(unittest.TestCase):
 
     def test_anaphoric_discourse_binding(self):
         """[BRQ-04] Söylem belleği ve zamir (Anafora) çözümlemesi doğrulaması."""
-        self.discourse.add_mention("Zeydun", "Zeyd_Entity")
+        # [LOGIC FIX]: Söylem belleği kaydında 'active_namespace' yalıtım zırhı zorunluluğu
+        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base")
         
-        resolved_id = self.discourse.resolve_pronoun("Huve")
+        # 'Base' uzayı mührüyle (enforcement_namespace) zamir araması
+        resolved_id = self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
         self.assertEqual(resolved_id, "Zeyd_Entity")
         
-        self.assertIsNone(self.discourse.resolve_pronoun("Kalem"))
+        self.assertIsNone(self.discourse.resolve_pronoun("Kalem", enforcement_namespace="Base"))
         
         self.discourse.clear_memory()
         with self.assertRaises(ValueError):
-            self.discourse.resolve_pronoun("Huve")
+            self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
 
     def test_khabari_propositional_isolation(self):
         khabari_tokens = ["Daraba", "Zeydun", "Amran"]
@@ -2573,7 +2802,8 @@ class TestSemanticPipeline(unittest.TestCase):
         self.assertEqual(predicates[0][1], "Fiil_Daraba::Zeyd_Entity")
 
     def test_anaphoric_ir_injection(self):
-        self.discourse.add_mention("Zeydun", "Zeyd_Entity")
+        # [LOGIC FIX]: Söylem belleği kaydında 'active_namespace' yalıtım zırhı zorunluluğu
+        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base")
         
         tokens = ["Daraba", "Huve"]
         dependencies = [("Daraba", "Huve", "Fail", "Marfu")]

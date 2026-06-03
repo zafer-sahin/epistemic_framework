@@ -19,11 +19,27 @@ class SemanticStatementIR(BaseModel):
     predicates: List[Union[Tuple[str, str, int], NestedPredicate]] 
     is_valid_for_z3: bool
 
+class StructuralPositingEngine:
+    """
+    İlm-i Vaz' Yapısal Kodlama Motoru (Vaz' Nev'î).
+    Faz 1.2: Kelimelerin morfolojik kalıbından (vezninden) doğan tematik rolleri 
+    (Agent, Patient, Action) Semantik Ara Temsil'e (IR) FOL yüklemi olarak enjekte eder.
+    """
+    def extract_structural_roles(self, word: str, ontologic_id: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, int]]:
+        predicates = []
+        morph_data = auto_lexicon.get(word)
+        if morph_data and morph_data.thematic_role:
+            # Örn: ("Role_Agent", "Zeyd_Entity", 1)
+            role_predicate = f"Role_{morph_data.thematic_role}"
+            predicates.append((role_predicate, ontologic_id, 1))
+        return predicates
+
 class IlmWadAdapter:
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
         self.discourse = discourse
         self.pragmatics = PragmaticsFilter()
+        self.positing_engine = StructuralPositingEngine() # [FAZ 1.2] Middleware Entegrasyonu
         self.luzumi_particles = {"in", "iza", "law", "amma"}
         self.inadi_particles = {"imma", "aw", "ya"} 
         self.current_tevil_targets: List[str] = []
@@ -43,6 +59,8 @@ class IlmWadAdapter:
         
         has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
         has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
+        
+        processed_roles = set()
 
         for amil, mamul, rel_type, _ in dependencies:
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
@@ -59,6 +77,19 @@ class IlmWadAdapter:
             atomic_predicates.append((amil_id, amil_id, 1))
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
+            # [FAZ 1.2 & 1.3] Vaz' Nev'î (Kalıpsal Semantik) Yüklemlerinin IR Matrisine Zerk Edilmesi
+            amil_roles = self.positing_engine.extract_structural_roles(amil, amil_id, auto_lexicon)
+            for role in amil_roles:
+                if role not in processed_roles:
+                    atomic_predicates.append(role)
+                    processed_roles.add(role)
+                    
+            mamul_roles = self.positing_engine.extract_structural_roles(mamul, mamul_id, auto_lexicon)
+            for role in mamul_roles:
+                if role not in processed_roles:
+                    atomic_predicates.append(role)
+                    processed_roles.add(role)
+
         if has_inadi:
             nested_logic = NestedPredicate(operator="Inadi", args=atomic_predicates)
             ir_predicates.append(nested_logic)
@@ -74,7 +105,16 @@ class IlmWadAdapter:
             deontic_logic = NestedPredicate(operator=op, args=ir_predicates)
             ir_predicates = [deontic_logic]
 
-        return SemanticStatementIR(active_namespace=active_namespace, predicates=ir_predicates, is_valid_for_z3=True)
+        # Çift (Duplicate) yüklemlerin temizlenerek IR'nin Z3 optimizasyonuna hazırlanması
+        unique_predicates = []
+        seen = set()
+        for item in ir_predicates:
+            frozen_item = str(item)
+            if frozen_item not in seen:
+                seen.add(frozen_item)
+                unique_predicates.append(item)
+
+        return SemanticStatementIR(active_namespace=active_namespace, predicates=unique_predicates, is_valid_for_z3=True)
         
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str) -> str:
         # [FAZ 4] Zamir çözücüye 'active_namespace' zırhı basıldı

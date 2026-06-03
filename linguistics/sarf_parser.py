@@ -1,4 +1,4 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from pydantic import BaseModel
 
 class MorphologicalAnalysis(BaseModel):
@@ -6,32 +6,35 @@ class MorphologicalAnalysis(BaseModel):
     root: str           
     pattern: str        
     ontologic_type: str 
+    thematic_role: Optional[str] = None  # [FAZ 1.1] Vaz' Nev'î: Kalıpsal Tematik Rol
 
 class SarfEngine:
     """
     Üretken Morfoloji Motoru ('İlm-i Sarf).
-    Faz 10.4: Mudaf (Tamlanan) kelimelerin tenvin düşmesi (İ'rab)
-    durumu için deterministik Fallback yaması eklendi.
+    Faz 1.1: Vaz' Nev'î (Kategorik Atama) matrisi entegre edildi.
+    Kalıplar (Vezin), sadece kök tespiti için değil, ontolojik aktör rollerini 
+    (Agent, Patient, Action) belirlemek için 4 boyutlu tensöre yükseltildi.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
         self.harf_set = {"fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "la", "in"}
         
+        # Wazan Matrix Formatı: (Vezin_Adı, Ontolojik_Tip, Kök_Çıkarma_Komutları, Thematic_Role)
         self.wazan_matrix = {
-            "CaCaCa": ("Fa'ala", "Fiil", [0, 2, 4]),       
-            "yaCCiCu": ("Yaf'ilu", "Fiil", [2, 3, 5]),     
-            "yaCCaCu": ("Yaf'alu", "Fiil", [2, 3, 5]),     
-            "yaCCuCu": ("Yaf'ulu", "Fiil", [2, 3, 5]),     
+            "CaCaCa": ("Fa'ala", "Fiil", [0, 2, 4], "Action"),       
+            "yaCCiCu": ("Yaf'ilu", "Fiil", [2, 3, 5], "Action"),     
+            "yaCCaCu": ("Yaf'alu", "Fiil", [2, 3, 5], "Action"),     
+            "yaCCuCu": ("Yaf'ulu", "Fiil", [2, 3, 5], "Action"),     
             
-            "CaaCa": ("Fa'ala_Ecvef", "Fiil", [0, 'W_Y', 3]),   
-            "yaCooCu": ("Yaf'ulu_Ecvef", "Fiil", [2, 'W', 4]),   
-            "yaCeeCu": ("Yaf'ilu_Ecvef", "Fiil", [2, 'Y', 4]),   
-            "CaCaa": ("Fa'ala_Nakis", "Fiil", [0, 2, 'W_Y']),    
+            "CaaCa": ("Fa'ala_Ecvef", "Fiil", [0, 'W_Y', 3], "Action"),   
+            "yaCooCu": ("Yaf'ulu_Ecvef", "Fiil", [2, 'W', 4], "Action"),   
+            "yaCeeCu": ("Yaf'ilu_Ecvef", "Fiil", [2, 'Y', 4], "Action"),   
+            "CaCaa": ("Fa'ala_Nakis", "Fiil", [0, 2, 'W_Y'], "Action"),    
             
-            "iCCaCaCa": ("Ifta'ala_Ibdal", "Fiil", ['IBDAL', 4, 6]), 
+            "iCCaCaCa": ("Ifta'ala_Ibdal", "Fiil", ['IBDAL', 4, 6], "Action"), 
             
-            "CaCiCun": ("Fâ'ilun", "Ism", [0, 2, 4]),      
-            "maCCuCun": ("Maf'ûlun", "Ism", [2, 3, 5]),    
+            "CaCiCun": ("Fâ'ilun", "Ism", [0, 2, 4], "Agent"),      
+            "maCCuCun": ("Maf'ûlun", "Ism", [2, 3, 5], "Patient"),    
         }
 
     def _generate_structural_signature(self, word: str) -> str:
@@ -81,19 +84,28 @@ class SarfEngine:
     def _derive_morphology(self, word: str) -> MorphologicalAnalysis:
         word_lower = word.lower()
         
+        # 1. Harf (Particle) Fallback
         if word_lower in self.harf_set:
-            return MorphologicalAnalysis(original_word=word_lower, root=word_lower, pattern="Harf", ontologic_type="Harf")
+            return MorphologicalAnalysis(
+                original_word=word_lower, 
+                root=word_lower, 
+                pattern="Harf", 
+                ontologic_type="Harf",
+                thematic_role=None # Harfler yapısal rol taşımaz
+            )
 
         signature = self._generate_structural_signature(word_lower)
         
+        # 2. Müştekk (Türemiş) Vezin Eşleşmesi ve Thematic Role Zerk Edilmesi
         if signature in self.wazan_matrix:
-            vezin, ont_type, root_commands = self.wazan_matrix[signature]
+            vezin, ont_type, root_commands, thematic_role = self.wazan_matrix[signature]
             extracted_root = self._extract_root(word_lower, root_commands)
             return MorphologicalAnalysis(
                 original_word=word_lower,
                 root=extracted_root,
                 pattern=vezin,
-                ontologic_type=ont_type
+                ontologic_type=ont_type,
+                thematic_role=thematic_role
             )
             
         # 3. İ'rab Fallback (Câmid İsimler ve Mudaf Formları)
@@ -101,13 +113,21 @@ class SarfEngine:
         if word_lower.endswith(("un", "an", "in")):
             camid_root = word_lower[:-2] 
             return MorphologicalAnalysis(
-                original_word=word_lower, root=camid_root, pattern="Alem/Camid_Munevven", ontologic_type="Ism"
+                original_word=word_lower, 
+                root=camid_root, 
+                pattern="Alem/Camid_Munevven", 
+                ontologic_type="Ism",
+                thematic_role=None # Câmid isimler doğrudan Vaz' Şahsî'dir, kalıpsal rol üretmez.
             )
         # Tenvinsiz (Mudaf veya Gayr-ı Munsarif)
         elif word_lower.endswith(("u", "a", "i")):
             camid_root = word_lower[:-1]
             return MorphologicalAnalysis(
-                original_word=word_lower, root=camid_root, pattern="Alem/Camid_Mudaf", ontologic_type="Ism"
+                original_word=word_lower, 
+                root=camid_root, 
+                pattern="Alem/Camid_Mudaf", 
+                ontologic_type="Ism",
+                thematic_role=None
             )
 
         raise ValueError(f"[SARF ÇÖKÜŞÜ] '{word}' (İmza: {signature}) kelimesi ontolojik evrende tanımlanamadı.")
