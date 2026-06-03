@@ -12,7 +12,6 @@ class Layer3SMTCircuitBreaker:
         self.core_solver.solver.set("smt.macro_finder", True)
         
         self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
-        # Global bağlam zehirlenmesini ve z3 named assertion çökmelerini engellemek için lokal köprü önbelleği
         self._proven_bridges = set()
         self._active_bridge_axioms = []
 
@@ -46,6 +45,7 @@ class Layer3SMTCircuitBreaker:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
             args = [self._build_z3_expr(a, w_const, tz_const, tv_const) for a in item.args]
+            
             if item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
@@ -53,15 +53,12 @@ class Layer3SMTCircuitBreaker:
             elif item.operator == "Inadi_Hakikiyye":
                 if len(args) == 2:
                     return z3.And(z3.Or(args[0], args[1]), z3.Not(z3.And(args[0], args[1])))
-                # Çoklu argümanlar için zincirleme XOR benzeri davranış (basitleştirilmiş)
                 return z3.Or(args)
             elif item.operator == "Inadi_Maniatul_Cem":
-                # Aynı anda doğru olamazlar (NAND)
                 if len(args) == 2:
                     return z3.Not(z3.And(args[0], args[1]))
                 return z3.Not(z3.And(args))
             elif item.operator == "Inadi_Maniatul_Huluv":
-                # Aynı anda yanlış olamazlar (OR)
                 if len(args) == 2:
                     return z3.Or(args[0], args[1])
                 return z3.Or(args)
@@ -74,6 +71,33 @@ class Layer3SMTCircuitBreaker:
             elif item.operator == "Istifham_Inkari":
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, tz_const, tv_const], z3.Not(body))
+            elif item.operator == "Kasr_Universal_Exclusion":
+                # [FAZ 2 ENTEGRASYONU] Kasr/Hasr (Kısıtlama) Operatörü
+                # Z3'e mutlak evrensel dışlama komutu verilir: ∀x (x ≠ Target ⇒ ¬Predicate(x))
+                base_truth = args[0] if len(args) == 1 else z3.And(args)
+                exclusion_axioms = []
+                
+                for a in item.args:
+                    if isinstance(a, tuple) and a[2] == 2 and '::' in a[1]:
+                        pred_id, arg_id, arity = a
+                        amil_str, mamul_str = arg_id.split('::', 1)
+                        predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
+                        
+                        y_kasr = z3.Const('y_kasr', self.core_solver.builder.EntitySort)
+                        amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
+                        mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
+                        
+                        exclusion = z3.ForAll([w_const, tz_const, tv_const, y_kasr],
+                            z3.Implies(
+                                y_kasr != mamul_const,
+                                z3.Not(predicate(w_const, tz_const, tv_const, amil_const, y_kasr))
+                            )
+                        )
+                        exclusion_axioms.append(exclusion)
+                        
+                if exclusion_axioms:
+                    return z3.And(base_truth, *exclusion_axioms)
+                return base_truth
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 

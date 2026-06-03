@@ -8,9 +8,12 @@ class ContextualLexicon:
     Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
     Kelimelerin sadece yan yana gelmesi (lookahead) değil, doğrudan yapısal (AST) 
     olarak birbirlerine bağlanması (Mudaf_MudafIlayh vb.) denetlenir.
+    [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
     """
     def __init__(self):
         self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+        # İlm-i Ma'ânî Kasr (Hasr) Operatörleri
+        self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
 
     def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None) -> None:
         word_lower = word.lower()
@@ -43,7 +46,7 @@ class ContextualLexicon:
             mamul_lower = mamul.lower()
             
             for trigger, ont_id in triggers.items():
-                valid_relations = ["Mudaf_MudafIlayh", "Mubteda_Haber", "Fail", "Meful", "Sifat_Mevsuf"]
+                valid_relations = ["Mudaf_MudafIlayh", "Mubteda_Haber", "Fail", "Meful", "Sifat_Mevsuf", "Rel_Ihtisas"]
                 
                 if rel_type in valid_relations:
                     if (target_lower in amil_lower and trigger in mamul_lower) or \
@@ -54,6 +57,11 @@ class ContextualLexicon:
 
     def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None) -> str:
         word_lower = word.lower()
+
+        # [FAZ 2 ENTEGRASYONU] Kasr Operatörleri Doğrudan Çözümlenir
+        if word_lower in self.kasr_operators:
+            return f"Harf_{self.kasr_operators[word_lower]}"
+
         if word_lower not in self._tensor:
             raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' tensörde kayıtlı değil.")
 

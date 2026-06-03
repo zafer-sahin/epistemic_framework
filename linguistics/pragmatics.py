@@ -7,6 +7,7 @@ class MaaniSpeechActAnalyzer:
     Faz 2 - Adım 2.3: PragmaticsFilter'ın yerine inşa edilmiştir.
     Cümlenin formunu (vurgu/tevkîd) muhatabın epistemik inkâr derecesiyle (Denial Level) çapraz denetler.
     Faz 2 - Adım 2.4: İstifham-ı İnkârî (Reddedici Soru) tespiti.
+    Faz 2 - Adım 2.5: Kasr/Hasr (Kısıtlama) ve İhtisas (Takdim/Te'hir) tespiti eklendi.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
@@ -15,16 +16,17 @@ class MaaniSpeechActAnalyzer:
             "imperative": ["if'al", "la_taf'al", "ef'al", "li_yaf'al"]
         }
         self.nefy_markers = {"illa", "la", "ma", "lam", "lan"}
+        self.kasr_markers = {"innema", "illa"}
 
     def analyze_pragmatics(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         if not tokens:
             return {"is_valid": False, "type": "Empty"}
         
         first_token = tokens[0].lower()
+        has_nefy = any(t.lower() in self.nefy_markers for t in tokens)
         
         # 1. İstifham-ı İnkârî ve Normal Soru Kontrolü (Faz 2.4)
         if first_token in self.inshai_markers["question"]:
-            has_nefy = any(t.lower() in self.nefy_markers for t in tokens)
             if has_nefy:
                 return {
                     "is_valid": True, 
@@ -60,8 +62,42 @@ class MaaniSpeechActAnalyzer:
                 "type": "MAANI_VIOLATION",
                 "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez."
             }
-            
-        return {"is_valid": True, "type": "Khabari"}
+
+        # 4. İlm-i Ma'ânî: Kasr (Hasr) ve İhtisas Tespiti (Faz 2.5)
+        kasr_data = None
+        
+        # A. Takdim/Te'hir İhtisası (Mefulün Faile/Fiile Takdimi)
+        ihtisas_deps = [dep for dep in dependencies if dep[2] == 'Rel_Ihtisas']
+        if ihtisas_deps:
+            amil = ihtisas_deps[0][0]
+            mamul = ihtisas_deps[0][1]
+            kasr_data = {
+                "kasr_type": "Takdim_Ihtisas",
+                "kasr_target": mamul,
+                "kasr_predicate": amil,
+                "message": f"Takdim (İhtisas) tespit edildi. Eylem ({amil}) sadece hedefe ({mamul}) kısıtlanacak."
+            }
+        
+        # B. İnnemâ ile Kasr
+        elif "innema" in [t.lower() for t in tokens]:
+            # İnnemâ genellikle cümlede son gelen öğeye (Haber veya Meful) kısıtlama yapar.
+            kasr_data = {
+                "kasr_type": "Kasr_Innema",
+                "message": "İnnemâ edatı ile Kasr tespit edildi. Evrensel dışlama (Universal Exclusion) uygulanacak."
+            }
+        
+        # C. Nefy + İllâ ile Kasr
+        elif has_nefy and "illa" in [t.lower() for t in tokens]:
+            kasr_data = {
+                "kasr_type": "Kasr_Nefy_Illa",
+                "message": "Nefy ve İllâ ile Kasr tespit edildi. Belirtilen öğe dışındakiler dışlanacak."
+            }
+
+        response = {"is_valid": True, "type": "Khabari"}
+        if kasr_data:
+            response["kasr_data"] = kasr_data
+
+        return response
         
     def is_khabari(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         res = self.analyze_pragmatics(tokens, dependencies)

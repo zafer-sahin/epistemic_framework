@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional, List
-from linguistics.ilm_wad_adapter import SemanticStatementIR
+from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 from core.models import BaseOntology, EpistemicEntity
 
 class Layer1HeuristicGraph:
@@ -44,39 +44,46 @@ class Layer1HeuristicGraph:
         
     def find_mana_el_mana_chain(self, source_id: str, target_id: str) -> List[str]:
         """
-        [FAZ 3] Cürcânî'nin Nazm ve Ma'nâ el-Ma'nâ (İlm-i Beyân) algoritması.
-        Literal anlamdan (Ma'nâ) mecaz anlama (Ma'nâ el-Ma'nâ) giden nedensellik ve araz zincirini (Alâka) bulur.
-        BFS (Breadth-First Search) ile relation_type izleri takip edilir.
+        [FAZ 2 ENTEGRASYONU] İlm-i Beyân Alâka İzi (Deterministic Path).
+        Mevcut BFS iptal edildi. Hakiki mecazın (Mecaz-ı Mürsel ve İstiare)
+        yönlü nedensellik bağları (Alâka-i Sebebiyye, Mülâzemet vb.) üzerinden 
+        deterministik bir '_trace_alaka_path' algoritması kurgulandı.
         """
-        queue = [[source_id]]
-        visited = set([source_id])
+        visited = set()
+        path = []
 
-        while queue:
-            path = queue.pop(0)
-            current_node = path[-1]
-
+        def _trace_alaka_path(current_node: str) -> bool:
             if current_node == target_id:
-                return path
+                path.append(current_node)
+                return True
+
+            if current_node in visited:
+                return False
+
+            visited.add(current_node)
+            path.append(current_node)
 
             entity = self.entity_map.get(current_node)
             if not entity:
-                continue
+                path.pop()
+                return False
 
+            # 1. Öncelik: Doğrudan İlm-i Beyân Alâka tiplerine sahip ilişkiler (Sebebiyye/Mülâzemet)
             for rel in entity.relations:
-                if rel.target_id not in visited:
-                    visited.add(rel.target_id)
-                    new_path = list(path)
-                    new_path.append(rel.target_id)
-                    queue.append(new_path)
-                    
-            # Ana hedef hiyerarşik bir alt türevse (Örn: Kudret -> Sifat_Yed_Metaphor) aşağıya doğru da ara
+                if getattr(rel, 'alaka_type', None):
+                    if _trace_alaka_path(rel.target_id):
+                        return True
+
+            # 2. Öncelik: Cüz'iyye/Külliyye Alâkası (Hiyerarşik Alt/Üst Bağlantılar)
             for child in entity.children:
-                if child.ontologic_id not in visited:
-                    visited.add(child.ontologic_id)
-                    new_path = list(path)
-                    new_path.append(child.ontologic_id)
-                    queue.append(new_path)
-                    
+                if _trace_alaka_path(child.ontologic_id):
+                    return True
+
+            path.pop()
+            return False
+
+        if _trace_alaka_path(source_id):
+            return path
         return []
 
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
@@ -86,24 +93,30 @@ class Layer1HeuristicGraph:
         max_conflict = 0.0
         flagged_predicates = []
 
-        for item in ir_matrix.predicates:
-            # Sadece atomik yüklemler ve ilişki ağları taranır (Şartiyye Nested operatörler L3 Z3 uzayına bırakılır)
-            if isinstance(item, tuple):
-                pred_id, arg_id, arity = item
-                if arity == 2 and '::' in arg_id:
-                    try:
-                        amil_str, mamul_str = arg_id.split('::', 1)
-                        amil_ent = self.entity_map.get(amil_str)
-                        mamul_ent = self.entity_map.get(mamul_str)
-                        
-                        if amil_ent and mamul_ent:
-                            conflict = self._evaluate_modal_conflict(amil_ent, mamul_ent)
+        # [FAZ 2 ENTEGRASYONU] NestedPredicate içeren Kasr/Deontik yapıları taramak için rekürsif tarayıcı
+        def _scan_predicates(pred_list):
+            nonlocal max_conflict
+            for item in pred_list:
+                if isinstance(item, tuple):
+                    pred_id, arg_id, arity = item
+                    if arity == 2 and '::' in arg_id:
+                        try:
+                            amil_str, mamul_str = arg_id.split('::', 1)
+                            amil_ent = self.entity_map.get(amil_str)
+                            mamul_ent = self.entity_map.get(mamul_str)
                             
-                            if conflict >= 0.5:
-                                max_conflict = max(max_conflict, conflict)
-                                flagged_predicates.append(arg_id)
-                    except ValueError:
-                        continue 
+                            if amil_ent and mamul_ent:
+                                conflict = self._evaluate_modal_conflict(amil_ent, mamul_ent)
+                                
+                                if conflict >= 0.5:
+                                    max_conflict = max(max_conflict, conflict)
+                                    flagged_predicates.append(arg_id)
+                        except ValueError:
+                            continue 
+                elif isinstance(item, NestedPredicate):
+                    _scan_predicates(item.args)
+
+        _scan_predicates(ir_matrix.predicates)
 
         is_metaphor_likely = max_conflict >= 0.5
 

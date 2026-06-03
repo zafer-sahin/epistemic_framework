@@ -29,6 +29,11 @@ class StructuralPositingEngine:
         return predicates
 
 class IlmWadAdapter:
+    """
+    Doğal dil bileşenlerini (AST ve Sarf) Birinci Dereceden Mantık (FOL) matrislerine (Semantic IR) dönüştürür.
+    Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen 'Kasr_Data' verisini 'Kasr_Universal_Exclusion' 
+    NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
+    """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
         self.discourse = discourse
@@ -61,6 +66,11 @@ class IlmWadAdapter:
         processed_roles = set()
 
         for amil, mamul, rel_type, _ in dependencies:
+            # [FAZ 2 ENTEGRASYONU] Tevkid, Kasr ve İhtisas (Takdim) kenarları atomik ilişkiler (Rel_X) 
+            # olarak Z3'e gönderilmez; Pragmatics katmanında yakalanıp NestedPredicate'e sarmalanır.
+            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas']:
+                continue
+            
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
                 continue
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
@@ -72,9 +82,6 @@ class IlmWadAdapter:
 
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies)
-            
-            if rel_type == 'Tevkid_Modifier':
-                continue
             
             rel_id = f"Rel_{rel_type}"
             atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
@@ -118,6 +125,14 @@ class IlmWadAdapter:
             inkari_logic = NestedPredicate(operator="Istifham_Inkari", args=ir_predicates)
             ir_predicates = [inkari_logic]
 
+        # [FAZ 2 ENTEGRASYONU] İlm-i Ma'ânî Kasr (Hasr) İşlemesi
+        kasr_data = pragmatics_res.get("kasr_data")
+        if kasr_data:
+            # Kasr (Kısıtlama) verisi tespit edildiyse tüm atomik yüklemler evrensel dışlama 
+            # (Kasr_Universal_Exclusion) operatörüyle sarmalanarak Z3'e yollanır.
+            kasr_logic = NestedPredicate(operator="Kasr_Universal_Exclusion", args=ir_predicates)
+            ir_predicates = [kasr_logic]
+
         unique_predicates = []
         seen = set()
         for item in ir_predicates:
@@ -139,6 +154,9 @@ class IlmWadAdapter:
             search_key = morph_data.root
 
         if morph_data and morph_data.ontologic_type == "Harf_Tevkid":
+            return f"GrammarNode_{search_key.capitalize()}"
+            
+        if morph_data and morph_data.ontologic_type == "Harf_Kasr":
             return f"GrammarNode_{search_key.capitalize()}"
 
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies)

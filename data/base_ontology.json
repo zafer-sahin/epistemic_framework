@@ -251,7 +251,14 @@
                                             {
                                                 "relation_type": "Luzum_Araz",
                                                 "target_id": "Bats",
-                                                "axiom": "Implies"
+                                                "axiom": "Implies",
+                                                "alaka_type": "Alaka_Mülazemet"
+                                            },
+                                            {
+                                                "relation_type": "Luzum_Zati",
+                                                "target_id": "Kudret",
+                                                "axiom": "Implies",
+                                                "alaka_type": "Alaka_Sebebiyye"
                                             }
                                         ],
                                         "children": []
@@ -319,6 +326,34 @@
                                                 "children": []
                                             }
                                         ]
+                                    },
+                                    {
+                                        "ontologic_id": "Harf_Kasr_Innema",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "İnnemâ (Kasr/Hasr Edatı)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Harf_Kasr_Illa",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "İllâ (İstisna/Kasr Edatı)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
                                     }
                                 ]
                             }

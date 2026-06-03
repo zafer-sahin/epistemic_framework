@@ -20,6 +20,8 @@ class RelationalConstraint(BaseModel):
     relation_type: str
     target_id: str  
     axiom: str
+    # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi (Nedensellik Vektörü)
+    alaka_type: Optional[str] = Field(default=None, description="Mecaz-ı Mürsel veya İstiare alâkası (Örn: Alaka_Sebebiyye, Alaka_Cuziyye)")
 
 class EpistemicEntity(BaseModel):
     model_config = ConfigDict(extra="forbid")

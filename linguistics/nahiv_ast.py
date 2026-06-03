@@ -7,6 +7,7 @@ class NahivDependencyCompiler:
     Arapça Sentaktik Bağımlılık Ağacını (Nahiv AST) üreten parser.
     Faz 10.2: Alt-ağaç (Sub-Tree) çözümleyicileri entegre edildi.
     Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
+    Faz 2 - Adım 2.5: Takdim (Pre-positioning) ve İhtisas (Kasr) tespiti.
     İzafet (İsim Tamlaması), Sıfat-Mevsuf ve Hal ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
@@ -35,6 +36,11 @@ class NahivDependencyCompiler:
                 dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
                 continue
             
+            # [FAZ 2.5] Kasr Edatlarının (İnnemâ, İllâ) Bağlanması
+            if m1 and m1.ontologic_type == "Harf_Kasr":
+                dependencies.append((t2, t1, 'Kasr_Modifier', 'None'))
+                continue
+            
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
                 # İzafet (Mudaf - Mudaf İleyh) Matrisi
                 if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i'))):
@@ -56,10 +62,12 @@ class NahivDependencyCompiler:
 
         # 2. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL KONTROLÜ
         amil_token = None
-        for token in tokens:
+        amil_index = -1
+        for idx, token in enumerate(tokens):
             morph = lexicon.get(token)
             if morph and morph.ontologic_type == "Fiil":
                 amil_token = token
+                amil_index = idx
                 break
         
         # 3. İSİM CÜMLESİ (Kadiyye-i Hamliyye) ZİNCİRİ
@@ -85,7 +93,7 @@ class NahivDependencyCompiler:
             return dependencies
 
         # 4. FİİL CÜMLESİ (Verbal Sentence) ZİNCİRİ
-        for token in tokens:
+        for idx, token in enumerate(tokens):
             if token == amil_token: 
                 continue
                 
@@ -99,7 +107,12 @@ class NahivDependencyCompiler:
                 # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
                 is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
                 if not is_hal:
-                    dependencies.append((amil_token, token, 'Meful', 'Mansub'))
+                    # [FAZ 2.5] İlm-i Ma'ânî İhtisas (Takdim) Kontrolü
+                    # Eğer meful, fiilden (amil) önce gelmişse bu bir İhtisas/Kasr durumudur.
+                    if idx < amil_index:
+                        dependencies.append((amil_token, token, 'Rel_Ihtisas', 'Mansub'))
+                    else:
+                        dependencies.append((amil_token, token, 'Meful', 'Mansub'))
             elif token.lower().endswith(('in', 'i')):
                 is_sub_tree_child = any(rel == 'Mudaf_MudafIlayh' and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:

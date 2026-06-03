@@ -636,9 +636,20 @@ class Layer3SMTCircuitBreaker:
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
                 return z3.And(args) 
-            elif item.operator == "Inadi":
+            elif item.operator == "Inadi_Hakikiyye":
                 if len(args) == 2:
                     return z3.And(z3.Or(args[0], args[1]), z3.Not(z3.And(args[0], args[1])))
+                # Çoklu argümanlar için zincirleme XOR benzeri davranış (basitleştirilmiş)
+                return z3.Or(args)
+            elif item.operator == "Inadi_Maniatul_Cem":
+                # Aynı anda doğru olamazlar (NAND)
+                if len(args) == 2:
+                    return z3.Not(z3.And(args[0], args[1]))
+                return z3.Not(z3.And(args))
+            elif item.operator == "Inadi_Maniatul_Huluv":
+                # Aynı anda yanlış olamazlar (OR)
+                if len(args) == 2:
+                    return z3.Or(args[0], args[1])
                 return z3.Or(args)
             elif item.operator == "Wajib_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
@@ -1009,10 +1020,20 @@ class Z3ExpressionBuilder:
                     return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
 
-            elif func_name == 'Inadi':
+            elif func_name == 'Inadi_Hakikiyye':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
                 return z3.And(z3.Or(arg_a, arg_b), z3.Not(z3.And(arg_a, arg_b)))
+                
+            elif func_name == 'Inadi_Maniatul_Cem':
+                arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
+                arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
+                return z3.Not(z3.And(arg_a, arg_b))
+                
+            elif func_name == 'Inadi_Maniatul_Huluv':
+                arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
+                arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
+                return z3.Or(arg_a, arg_b)
             
             elif func_name in ('Forall', 'Exists'):
                 if not isinstance(node.args[0], ast.List):
@@ -1205,7 +1226,8 @@ DOSYA: ./data/base_ontology.json
             "P": { "symbol": "P", "ar": "el-Haddü'l-Ekber" },
             "M": { "symbol": "M", "ar": "el-Haddü'l-Evsat" },
             "A": { "symbol": "A", "ar": "el-Mukaddem" },
-            "C": { "symbol": "C", "ar": "et-Tâli" }
+            "C": { "symbol": "C", "ar": "et-Tâli" },
+            "B": { "symbol": "B", "ar": "el-Alternatif" }
         },
         "Premises": {
             "Major": { "ar": "el-Mukaddimetü'l-Kübrâ" },
@@ -1573,6 +1595,36 @@ DOSYA: ./data/base_ontology.json
                     "Forall([x], Not(A(x)))"
                 ]
             }
+        },
+        "Sartiyye_Munfasila": {
+            "Modus_Tollendo_Ponens": {
+                "islamic_term": "Kıyas-ı İstisnâî (Munfasıl - Ref' ile İspat)",
+                "logic_structure": "Modus Tollendo Ponens",
+                "mapping": {
+                    "Major": "A V B",
+                    "Minor": "~A",
+                    "Conclusion": "B"
+                },
+                "predicates": [
+                    "Forall([x], Inadi_Maniatul_Huluv(A(x), B(x)))",
+                    "Forall([x], Not(A(x)))",
+                    "Forall([x], B(x))"
+                ]
+            },
+            "Modus_Ponendo_Tollens": {
+                "islamic_term": "Kıyas-ı İstisnâî (Munfasıl - İspat ile Ref')",
+                "logic_structure": "Modus Ponendo Tollens",
+                "mapping": {
+                    "Major": "A XOR B",
+                    "Minor": "A",
+                    "Conclusion": "~B"
+                },
+                "predicates": [
+                    "Forall([x], Inadi_Maniatul_Cem(A(x), B(x)))",
+                    "Forall([x], A(x))",
+                    "Forall([x], Not(B(x)))"
+                ]
+            }
         }
     }
 }
@@ -1841,6 +1893,8 @@ class IlmWadAdapter:
         self.positing_engine = StructuralPositingEngine() 
         self.luzumi_particles = {"in", "iza", "law", "amma"}
         self.inadi_particles = {"imma", "aw", "ya"} 
+        self.mani_cem_particles = {"mani_cem", "la_yectemian"} 
+        self.mani_huluv_particles = {"mani_huluv", "la_yahtaliyan"} 
         self.current_tevil_targets: List[str] = []
 
     def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye") -> SemanticStatementIR:
@@ -1858,6 +1912,8 @@ class IlmWadAdapter:
         
         has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
         has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
+        has_mani_cem = any(t.lower() in self.mani_cem_particles for t in tokens)
+        has_mani_huluv = any(t.lower() in self.mani_huluv_particles for t in tokens)
         
         processed_roles = set()
 
@@ -1865,6 +1921,10 @@ class IlmWadAdapter:
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
                 continue
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
+                continue
+            if amil.lower() in self.mani_cem_particles or mamul.lower() in self.mani_cem_particles:
+                continue
+            if amil.lower() in self.mani_huluv_particles or mamul.lower() in self.mani_huluv_particles:
                 continue
 
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies)
@@ -1891,8 +1951,14 @@ class IlmWadAdapter:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
 
-        if has_inadi:
-            nested_logic = NestedPredicate(operator="Inadi", args=atomic_predicates)
+        if has_mani_cem:
+            nested_logic = NestedPredicate(operator="Inadi_Maniatul_Cem", args=atomic_predicates)
+            ir_predicates.append(nested_logic)
+        elif has_mani_huluv:
+            nested_logic = NestedPredicate(operator="Inadi_Maniatul_Huluv", args=atomic_predicates)
+            ir_predicates.append(nested_logic)
+        elif has_inadi:
+            nested_logic = NestedPredicate(operator="Inadi_Hakikiyye", args=atomic_predicates)
             ir_predicates.append(nested_logic)
         elif has_luzumi:
             nested_logic = NestedPredicate(operator="Luzumi", args=atomic_predicates)
@@ -3719,8 +3785,8 @@ class TestModalLogicEngine(unittest.TestCase):
         self.solver.pop()
 
     def test_inadi_mutually_exclusive_operator(self):
-        """[Faz 1.1] İnadi Şartiyye (Hulüvv ve Cem'i Mânia) XOR mantıksal operatörü."""
-        expr_str = "Forall([x], Inadi(Fail_Muhtar(x), Mecbur(x)))"
+        """[Faz 1] İnadi Şartiyye Hakikiyye (Tam XOR) mantıksal operatörü."""
+        expr_str = "Forall([x], Inadi_Hakikiyye(Fail_Muhtar(x), Mecbur(x)))"
         z3_ast = self.builder.parse(expr_str)
         self.solver.add(z3_ast)
         
@@ -3728,7 +3794,40 @@ class TestModalLogicEngine(unittest.TestCase):
         self.solver.add(conflict_expr)
         
         result = self.solver.check()
-        self.assertEqual(result, z3.unsat, "[ZAFİYET] İnadi Şartiyye (Cem'i Mânia) ihlali Z3 tarafından engellenemedi.")
+        self.assertEqual(result, z3.unsat, "[ZAFİYET] İnadi Şartiyye Hakikiyye ihlali Z3 tarafından engellenemedi.")
+
+    def test_inadi_maniatul_cem(self):
+        """[Faz 1] Mâniatü'l-Cem' (NAND): İkisi aynı anda doğru olamaz (Cem' edilemez), ancak ikisi birden yanlış olabilir."""
+        expr_str = "Forall([x], Inadi_Maniatul_Cem(Siyah(x), Beyaz(x)))"
+        self.solver.add(self.builder.parse(expr_str))
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Siyah(y), Beyaz(y)))"))
+        self.assertEqual(self.solver.check(), z3.unsat, "[ZAFİYET] Mâniatü'l-Cem' ihlali: İkisi aynı anda doğru olamaz.")
+        self.solver.pop()
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Not(Siyah(y)), Not(Beyaz(y))))"))
+        self.assertEqual(self.solver.check(), z3.sat, "[MANTIK HATASI] Mâniatü'l-Cem' özelliği: İkisi birden yanlış olabilir (Örn: Kırmızı) ancak Z3 UNSAT verdi.")
+        self.solver.pop()
+
+    def test_inadi_maniatul_huluv(self):
+        """[Faz 1] Mâniatü'l-Hulüvv (OR): İkisi aynı anda yanlış olamaz (Hâlî kalamaz), ancak ikisi birden doğru olabilir."""
+        expr_str = "Forall([x], Inadi_Maniatul_Huluv(Zeyd_Denizde(x), Zeyd_Bogulmadi(x)))"
+        self.solver.add(self.builder.parse(expr_str))
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Not(Zeyd_Denizde(y)), Not(Zeyd_Bogulmadi(y))))"))
+        self.assertEqual(self.solver.check(), z3.unsat, "[ZAFİYET] Mâniatü'l-Hulüvv ihlali: İkisi aynı anda yanlış olamaz.")
+        self.solver.pop()
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Zeyd_Denizde(y), Zeyd_Bogulmadi(y)))"))
+        self.assertEqual(self.solver.check(), z3.sat, "[MANTIK HATASI] Mâniatü'l-Hulüvv özelliği: İkisi birden doğru olabilir, Z3 UNSAT verdi.")
+        self.solver.pop()
+
+if __name__ == '__main__':
+    unittest.main()
 
 
 ==================================================

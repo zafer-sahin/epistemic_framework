@@ -13,13 +13,12 @@ class SarfEngine:
     Üretken Morfoloji Motoru ('İlm-i Sarf).
     Faz 1.1: Vaz' Nev'î (Kategorik Atama) matrisi entegre edildi.
     Faz 2 - Adım 2.2: İlm-i Ma'ânî (Tevkîd) edatları ontolojik evrene tanıtıldı.
-    [HATA GİDERME]: İstifham (Soru) ve Nefy (Olumsuzluk) edatları harf setine eklendi,
-    böylece Sarf motorunun bu edatlarda C-V imza çıkarmaya çalışıp çökmesi engellendi.
+    Faz 2 - Adım 2.3: Kasr (Hasr) edatları (İnnemâ, İllâ) sisteme eklendi.
+    [HATA GİDERME]: İstifham (Soru) ve Nefy (Olumsuzluk) edatları harf setine eklendi.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
         
-        # [LOGIC FIX]: Tüm sentaktik harfler, istifham edatları ve nefy edatları buraya dahil edildi.
         self.harf_set = {
             "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
             "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  # İstifham Edatları
@@ -28,6 +27,9 @@ class SarfEngine:
         
         # [FAZ 2.2] Tevkîd (Pekiştirme) Edatları
         self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
+        
+        # [FAZ 2.3] Kasr (Hasr/Kısıtlama) Edatları
+        self.kasr_set = {"innema", "illa"}
         
         # Wazan Matrix Formatı: (Vezin_Adı, Ontolojik_Tip, Kök_Çıkarma_Komutları, Thematic_Role)
         self.wazan_matrix = {
@@ -94,6 +96,16 @@ class SarfEngine:
     def _derive_morphology(self, word: str) -> MorphologicalAnalysis:
         word_lower = word.lower()
         
+        # 0. Kasr (Hasr) Edatı Fallback
+        if word_lower in self.kasr_set:
+            return MorphologicalAnalysis(
+                original_word=word_lower,
+                root=word_lower,
+                pattern="Harf_Kasr",
+                ontologic_type="Harf_Kasr",
+                thematic_role=None
+            )
+
         # 1. Tevkîd Harfi Fallback
         if word_lower in self.tevkid_set:
             return MorphologicalAnalysis(
