@@ -36,6 +36,8 @@ class IlmWadAdapter:
         self.positing_engine = StructuralPositingEngine() 
         self.luzumi_particles = {"in", "iza", "law", "amma"}
         self.inadi_particles = {"imma", "aw", "ya"} 
+        self.mani_cem_particles = {"mani_cem", "la_yectemian"} 
+        self.mani_huluv_particles = {"mani_huluv", "la_yahtaliyan"} 
         self.current_tevil_targets: List[str] = []
 
     def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye") -> SemanticStatementIR:
@@ -53,6 +55,8 @@ class IlmWadAdapter:
         
         has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
         has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
+        has_mani_cem = any(t.lower() in self.mani_cem_particles for t in tokens)
+        has_mani_huluv = any(t.lower() in self.mani_huluv_particles for t in tokens)
         
         processed_roles = set()
 
@@ -60,6 +64,10 @@ class IlmWadAdapter:
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
                 continue
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
+                continue
+            if amil.lower() in self.mani_cem_particles or mamul.lower() in self.mani_cem_particles:
+                continue
+            if amil.lower() in self.mani_huluv_particles or mamul.lower() in self.mani_huluv_particles:
                 continue
 
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies)
@@ -86,8 +94,14 @@ class IlmWadAdapter:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
 
-        if has_inadi:
-            nested_logic = NestedPredicate(operator="Inadi", args=atomic_predicates)
+        if has_mani_cem:
+            nested_logic = NestedPredicate(operator="Inadi_Maniatul_Cem", args=atomic_predicates)
+            ir_predicates.append(nested_logic)
+        elif has_mani_huluv:
+            nested_logic = NestedPredicate(operator="Inadi_Maniatul_Huluv", args=atomic_predicates)
+            ir_predicates.append(nested_logic)
+        elif has_inadi:
+            nested_logic = NestedPredicate(operator="Inadi_Hakikiyye", args=atomic_predicates)
             ir_predicates.append(nested_logic)
         elif has_luzumi:
             nested_logic = NestedPredicate(operator="Luzumi", args=atomic_predicates)

@@ -89,10 +89,20 @@ class Z3ExpressionBuilder:
                     return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
 
-            elif func_name == 'Inadi':
+            elif func_name == 'Inadi_Hakikiyye':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
                 return z3.And(z3.Or(arg_a, arg_b), z3.Not(z3.And(arg_a, arg_b)))
+                
+            elif func_name == 'Inadi_Maniatul_Cem':
+                arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
+                arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
+                return z3.Not(z3.And(arg_a, arg_b))
+                
+            elif func_name == 'Inadi_Maniatul_Huluv':
+                arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
+                arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
+                return z3.Or(arg_a, arg_b)
             
             elif func_name in ('Forall', 'Exists'):
                 if not isinstance(node.args[0], ast.List):

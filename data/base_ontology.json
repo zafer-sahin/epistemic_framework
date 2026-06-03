@@ -5,7 +5,8 @@
             "P": { "symbol": "P", "ar": "el-Haddü'l-Ekber" },
             "M": { "symbol": "M", "ar": "el-Haddü'l-Evsat" },
             "A": { "symbol": "A", "ar": "el-Mukaddem" },
-            "C": { "symbol": "C", "ar": "et-Tâli" }
+            "C": { "symbol": "C", "ar": "et-Tâli" },
+            "B": { "symbol": "B", "ar": "el-Alternatif" }
         },
         "Premises": {
             "Major": { "ar": "el-Mukaddimetü'l-Kübrâ" },
@@ -371,6 +372,36 @@
                     "Forall([x], Luzumi(A(x), C(x)))",
                     "Forall([x], Not(C(x)))",
                     "Forall([x], Not(A(x)))"
+                ]
+            }
+        },
+        "Sartiyye_Munfasila": {
+            "Modus_Tollendo_Ponens": {
+                "islamic_term": "Kıyas-ı İstisnâî (Munfasıl - Ref' ile İspat)",
+                "logic_structure": "Modus Tollendo Ponens",
+                "mapping": {
+                    "Major": "A V B",
+                    "Minor": "~A",
+                    "Conclusion": "B"
+                },
+                "predicates": [
+                    "Forall([x], Inadi_Maniatul_Huluv(A(x), B(x)))",
+                    "Forall([x], Not(A(x)))",
+                    "Forall([x], B(x))"
+                ]
+            },
+            "Modus_Ponendo_Tollens": {
+                "islamic_term": "Kıyas-ı İstisnâî (Munfasıl - İspat ile Ref')",
+                "logic_structure": "Modus Ponendo Tollens",
+                "mapping": {
+                    "Major": "A XOR B",
+                    "Minor": "A",
+                    "Conclusion": "~B"
+                },
+                "predicates": [
+                    "Forall([x], Inadi_Maniatul_Cem(A(x), B(x)))",
+                    "Forall([x], A(x))",
+                    "Forall([x], Not(B(x)))"
                 ]
             }
         }

@@ -52,8 +52,8 @@ class TestModalLogicEngine(unittest.TestCase):
         self.solver.pop()
 
     def test_inadi_mutually_exclusive_operator(self):
-        """[Faz 1.1] İnadi Şartiyye (Hulüvv ve Cem'i Mânia) XOR mantıksal operatörü."""
-        expr_str = "Forall([x], Inadi(Fail_Muhtar(x), Mecbur(x)))"
+        """[Faz 1] İnadi Şartiyye Hakikiyye (Tam XOR) mantıksal operatörü."""
+        expr_str = "Forall([x], Inadi_Hakikiyye(Fail_Muhtar(x), Mecbur(x)))"
         z3_ast = self.builder.parse(expr_str)
         self.solver.add(z3_ast)
         
@@ -61,4 +61,37 @@ class TestModalLogicEngine(unittest.TestCase):
         self.solver.add(conflict_expr)
         
         result = self.solver.check()
-        self.assertEqual(result, z3.unsat, "[ZAFİYET] İnadi Şartiyye (Cem'i Mânia) ihlali Z3 tarafından engellenemedi.")
+        self.assertEqual(result, z3.unsat, "[ZAFİYET] İnadi Şartiyye Hakikiyye ihlali Z3 tarafından engellenemedi.")
+
+    def test_inadi_maniatul_cem(self):
+        """[Faz 1] Mâniatü'l-Cem' (NAND): İkisi aynı anda doğru olamaz (Cem' edilemez), ancak ikisi birden yanlış olabilir."""
+        expr_str = "Forall([x], Inadi_Maniatul_Cem(Siyah(x), Beyaz(x)))"
+        self.solver.add(self.builder.parse(expr_str))
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Siyah(y), Beyaz(y)))"))
+        self.assertEqual(self.solver.check(), z3.unsat, "[ZAFİYET] Mâniatü'l-Cem' ihlali: İkisi aynı anda doğru olamaz.")
+        self.solver.pop()
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Not(Siyah(y)), Not(Beyaz(y))))"))
+        self.assertEqual(self.solver.check(), z3.sat, "[MANTIK HATASI] Mâniatü'l-Cem' özelliği: İkisi birden yanlış olabilir (Örn: Kırmızı) ancak Z3 UNSAT verdi.")
+        self.solver.pop()
+
+    def test_inadi_maniatul_huluv(self):
+        """[Faz 1] Mâniatü'l-Hulüvv (OR): İkisi aynı anda yanlış olamaz (Hâlî kalamaz), ancak ikisi birden doğru olabilir."""
+        expr_str = "Forall([x], Inadi_Maniatul_Huluv(Zeyd_Denizde(x), Zeyd_Bogulmadi(x)))"
+        self.solver.add(self.builder.parse(expr_str))
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Not(Zeyd_Denizde(y)), Not(Zeyd_Bogulmadi(y))))"))
+        self.assertEqual(self.solver.check(), z3.unsat, "[ZAFİYET] Mâniatü'l-Hulüvv ihlali: İkisi aynı anda yanlış olamaz.")
+        self.solver.pop()
+        
+        self.solver.push()
+        self.solver.add(self.builder.parse("Exists([y], And(Zeyd_Denizde(y), Zeyd_Bogulmadi(y)))"))
+        self.assertEqual(self.solver.check(), z3.sat, "[MANTIK HATASI] Mâniatü'l-Hulüvv özelliği: İkisi birden doğru olabilir, Z3 UNSAT verdi.")
+        self.solver.pop()
+
+if __name__ == '__main__':
+    unittest.main()

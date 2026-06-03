@@ -50,9 +50,20 @@ class Layer3SMTCircuitBreaker:
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
                 return z3.And(args) 
-            elif item.operator == "Inadi":
+            elif item.operator == "Inadi_Hakikiyye":
                 if len(args) == 2:
                     return z3.And(z3.Or(args[0], args[1]), z3.Not(z3.And(args[0], args[1])))
+                # Çoklu argümanlar için zincirleme XOR benzeri davranış (basitleştirilmiş)
+                return z3.Or(args)
+            elif item.operator == "Inadi_Maniatul_Cem":
+                # Aynı anda doğru olamazlar (NAND)
+                if len(args) == 2:
+                    return z3.Not(z3.And(args[0], args[1]))
+                return z3.Not(z3.And(args))
+            elif item.operator == "Inadi_Maniatul_Huluv":
+                # Aynı anda yanlış olamazlar (OR)
+                if len(args) == 2:
+                    return z3.Or(args[0], args[1])
                 return z3.Or(args)
             elif item.operator == "Wajib_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
