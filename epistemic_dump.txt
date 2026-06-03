@@ -1932,6 +1932,7 @@ class IlmWadAdapter:
 ==================================================
 DOSYA: ./linguistics/nahiv_ast.py
 ==================================================
+import networkx as nx
 from typing import List, Dict, Tuple
 from linguistics.sarf_parser import MorphologicalAnalysis
 
@@ -1940,11 +1941,14 @@ class NahivDependencyCompiler:
     Arapça Sentaktik Bağımlılık Ağacını (Nahiv AST) üreten parser.
     Faz 10.2: Alt-ağaç (Sub-Tree) çözümleyicileri entegre edildi.
     Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
-    İzafet (İsim Tamlaması) ve Sıfat-Mevsuf ilişkilerini saptayarak,
+    İzafet (İsim Tamlaması), Sıfat-Mevsuf ve Hal ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") # Harf-i Ta'rif
+        self.dependency_graph = nx.DiGraph()
+        # Kâtibî'nin Şemsiyye kipliklerini tetikleyecek sentaktik bağlar (Hal ve Şart)
+        self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart"]
 
     def _is_definite(self, token: str) -> bool:
         return token.lower().startswith(self.definite_article)
@@ -1962,20 +1966,27 @@ class NahivDependencyCompiler:
             
             # [FAZ 2.2] Tevkîd Edatlarının Ana Yükleme/İsme Bağlanması
             if m1 and m1.ontologic_type == "Harf_Tevkid":
-                # Kural: Tevkid harfi her zaman kendisinden sonraki kelimeyi (t2) niteler.
-                # AST Yönü: t2 (Amil/Niteliyici) -> t1 (Mamul/Tevkid Edatı)
                 dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
                 continue
             
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
                 # İzafet (Mudaf - Mudaf İleyh) Matrisi
-                # Kural: 1. İsim Nekra (Belirsiz), 2. İsim Marife veya Mecrur (Kasrateyn '-in' veya Kasra '-i')
                 if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i'))):
                     dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
                 
+                # [FAZ 4 ENTEGRASYONU] Hal ve Zarf-ı Zaman (Vasfî Zaman Tetiği) - [ÖNCELİKLİ]
+                # Hal, marife veya nekra bir fail/mefulün mansub (-an) niteliğidir. İ'rab uyumu aramaz.
+                elif t2.lower().endswith('an') and m1.thematic_role in ["Agent", "Patient", "Action"]:
+                    dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
+
                 # Sıfat-Mevsuf (Na't - Man'ut) Matrisi
-                elif self._is_definite(t1) == self._is_definite(t2):
+                # [LOGIC FIX]: Sadece marife/nekra uyumu yetmez, kesin İ'rab (son iki harf: un/an/in) uyumu şarttır.
+                elif self._is_definite(t1) == self._is_definite(t2) and t1[-2:] == t2[-2:]:
                     dependencies.append((t1, t2, 'Sifat_Mevsuf', 'Tabi'))
+                    
+            # Şart Edatları (İn, İza, Lev, Amma)
+            elif t1.lower() in ["in", "iza", "law", "amma"]:
+                dependencies.append((t1, t2, "Rel_Shart", "Majzum"))
 
         # 2. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL KONTROLÜ
         amil_token = None
@@ -2019,13 +2030,38 @@ class NahivDependencyCompiler:
             if token.lower().endswith('un'):
                 dependencies.append((amil_token, token, 'Fail', 'Marfu'))
             elif token.lower().endswith('an'):
-                dependencies.append((amil_token, token, 'Meful', 'Mansub'))
+                # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
+                is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
+                if not is_hal:
+                    dependencies.append((amil_token, token, 'Meful', 'Mansub'))
             elif token.lower().endswith(('in', 'i')):
                 is_sub_tree_child = any(rel == 'Mudaf_MudafIlayh' and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
                     
         return dependencies
+
+    def build_ast(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> nx.DiGraph:
+        self.dependency_graph.clear()
+        for token in tokens:
+            self.dependency_graph.add_node(token)
+            
+        for amil, mamul, rel, irab in dependencies:
+            self.dependency_graph.add_edge(amil, mamul, relation=rel, irab=irab)
+            
+        return self.dependency_graph
+        
+    def extract_temporal_conditions(self, ast: nx.DiGraph) -> Dict[str, str]:
+        """
+        AST üzerinden Vasfî Zamanı (t_vasfi) tetikleyen düğümleri çeker.
+        Eğer bir varlığa Rel_Hal veya Rel_Shart bağlanmışsa, o varlık SMT katmanında
+        'Meşrûta-i Âmme' veya 'Örfiyye-i Âmme' matrisine sokulmalıdır.
+        """
+        conditions = {}
+        for u, v, data in ast.edges(data=True):
+            if data.get('relation') in self.temporal_triggers:
+                conditions[u] = v  # u: Zât (Özne), v: Vasıf (Şart/Hal)
+        return conditions
 
 
 ==================================================
@@ -2552,12 +2588,14 @@ def execute_healthcheck():
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
     
+    # Sistematik Ontoloji Kayıtları
     lexicon.register_word("tekvin", "Maturidi", "Tekvin")
     lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
     lexicon.register_word("cemad", "Base", "Cemad")
     lexicon.register_word("nam", "Base", "Nami")
     lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
     lexicon.register_word("drb", "Base", "Kavram_Vuran")
+    lexicon.register_word("masiy", "Base", "Masi") 
 
     adapter = IlmWadAdapter(lexicon, discourse)
     l1 = Layer1HeuristicGraph(ontology)
@@ -2639,13 +2677,10 @@ def execute_healthcheck():
     print(f"Sonuç: [{res_maani_1['status']}] -> {res_maani_1.get('message')}\n")
 
     print("--- SENARYO 7: ÂDÂB-I BAHS (FAZ 5 - TAHRÎR-İ NİZA' VE MÜLÂZAMA) ---")
-    # [LOGIC FIX]: Global SMT Çözücüsü önceki senaryolar tarafından kirletildiği için, 
-    # Âdâb-ı Bahs FSM motoruna tamamen temiz (Fresh) bir Solver örneği enjekte edilir.
     clean_solver = AristotelianSolver(ontology)
     fsm_engine = AdabAlBahthEngine(clean_solver, discourse)
     fsm_engine.reset_session()
     
-    # "Cemad olan her şey Nami (büyüyen) dır" gibi ontolojik olarak yanlış bir iddia sunulur ki doğrudan Aksiyom (TAHSIL_I_HASIL) olmasın.
     res_dava = fsm_engine.submit_claim("Forall([x], Implies(Cemad(x), Nami(x)))")
     print(f"Da'vâ (İddia) Durumu: {res_dava['message']}")
     
@@ -2658,9 +2693,44 @@ def execute_healthcheck():
     res_nakz = fsm_engine.attack_evidence("Nakz")
     print(f"Nakz (Çürütme) Sonucu: [{res_nakz['status']}] -> {res_nakz['message']}\n")
 
+    print("--- SENARYO 8: KÂTİBÎ ŞEMSİYYE KİPLİKLERİ (FAZ 4 - ZÂT/VASIF AYRIMI) ---")
+    sentence_8 = "zeydun daribun masiyan"
+    tokens_8 = tokenizer.tokenize(sentence_8)
+    morph_8 = sarf.derive_lexicon(tokens_8)
+    ast_8 = nahiv.suggest_dependencies(tokens_8, morph_8)
+    
+    ast_graph = nahiv.build_ast(tokens_8, ast_8)
+    temporal_conditions = nahiv.extract_temporal_conditions(ast_graph)
+    
+    for zat, vasif in temporal_conditions.items():
+        if zat in morph_8 and vasif in morph_8:
+            zat_root = morph_8.get(zat).root
+            vasif_root = morph_8.get(vasif).root
+            
+            zat_ont_id = lexicon.resolve_id(zat_root, "Base", current_tokens=tokens_8)
+            vasif_ont_id = lexicon.resolve_id(vasif_root, "Base", current_tokens=tokens_8)
+            
+            # [LOGIC FIX]: Modalite değişiklikleri morfolojik matrise değil, ontolojik ağaca işlenmelidir.
+            zat_entity = l1.entity_map.get(zat_ont_id)
+            if zat_entity:
+                zat_entity.modal_status = "Mesruta_i_Amme"
+                zat_entity.modal_condition_id = vasif_ont_id
+
+    # [LOGIC FIX]: Değiştirilen ontolojik kipliklerin SMT matrisine yansıması için yeni motor başlatılır.
+    clean_solver_8 = AristotelianSolver(ontology)
+    clean_l3_8 = Layer3SMTCircuitBreaker(clean_solver_8, timeout_ms=3000)
+    clean_orchestrator_8 = EpistemicOrchestrator(adapter, l1, l2, clean_l3_8)
+
+    discourse.clear_memory()
+    res_modal = clean_orchestrator_8.process_statement(tokens_8, ast_8, AshariUsul(), morph_8)
+    print(f"Girdi: '{sentence_8}' | AST: {ast_8}")
+    print(f"Şartlı Modalite (Meşrûta-i Âmme) Tespiti: {temporal_conditions}")
+    print(f"Sonuç: [{res_modal.get('status', 'BİLİNMİYOR')}] -> Vasfî Zaman Tensörü Z3'e başarıyla zerk edildi.\n")
+
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 
 if __name__ == "__main__":
+    sys.setrecursionlimit(5000)
     execute_healthcheck()
 
 

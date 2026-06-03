@@ -91,6 +91,8 @@ class EpistemicOrchestrator:
                                       sail_dependencies: List[Tuple[str, str, str, str]],
                                       sail_usul: AbstractSchoolUsul,
                                       sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
+        
+        # [FAZ 5] Cürcânî Diyalektiği: Mu'aradah için Soft Constraints (z3.Optimize) Entegrasyonu
         sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon)
         sail_result = sail_usul.execute_dag(sail_native_ir, self.l1, self.l2, self.l3, current_attempt=0)
 
@@ -101,37 +103,47 @@ class EpistemicOrchestrator:
             }
 
         cross_injected_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, mujib_usul.namespace, sail_auto_lexicon)
-
-        self.l3.core_solver.solver.push()
+        
+        # SMT Solver yerine SMT Optimizer kullanarak ontolojik önceliklendirme
+        optimizer = z3.Optimize()
+        
         try:
-            mujib_base_result = self.l3.execute_sat_check(mujib_claim_ir)
-            
-            if mujib_base_result["status"] != "SAT":
-                 return {"status": "MUJIB_INVALID", "message": "Mucîb'in kendi iddiası çapraz sorguya girmeden çöktü."}
-
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
             tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
             
+            # Mucîb'in iddiaları Soft Constraint (Ödünç alınmış uzay) olarak düşük maliyetle eklenir
             for item in mujib_claim_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
-                self.l3.core_solver.solver.add(z3_expr)
+                optimizer.add_soft(z3_expr, weight=1)
                 
+            # Sâil'in anti-tezi Hard Constraint (Mutlak İhlal) olarak eklenir
             for item in cross_injected_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
-                self.l3.core_solver.solver.add(z3_expr)
+                optimizer.add(z3_expr)
 
-            cross_status = self.l3.core_solver.solver.check()
+            cross_status = optimizer.check()
 
-            if cross_status == z3.unsat:
-                return {
-                    "status": "MUARADAH_SUCCESS",
-                    "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in ({mujib_usul.namespace}) ontolojik uzayında çelişki (UNSAT) yarattı. Diyalektik Stalemate."
-                }
+            if cross_status == z3.sat:
+                # Soft Constraint'lerin ne kadarının ihlal edildiğini ölç
+                model = optimizer.model()
+                penalty_score = optimizer.objectives()[0]
+                
+                # Eğer maliyet 0 ise tamamen paralel, çelişmeyen iddialardır.
+                if model.eval(penalty_score).as_long() == 0:
+                    return {
+                        "status": "MUARADAH_INEFFECTIVE",
+                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik)."
+                    }
+                else:
+                    return {
+                        "status": "MUARADAH_SUCCESS",
+                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate)."
+                    }
             else:
                 return {
-                    "status": "MUARADAH_INEFFECTIVE",
-                    "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla sentaktik veya semantik bir çelişki yaratmadı (Paralel Gerçeklik)."
+                    "status": "MUJIB_INVALID",
+                    "message": "Mucîb'in argümanları ile Sâil'in iddiaları yapısal olarak z3.Optimize düzleminde bile çözülemez bir kilitlenme yarattı."
                 }
-        finally:
-            self.l3.core_solver.solver.pop()
+        except Exception as e:
+            return {"status": "ERROR", "message": f"Mu'aradah SMT Çöküşü: {e}"}

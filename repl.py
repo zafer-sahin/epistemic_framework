@@ -20,6 +20,7 @@ from linguistics.ilm_wad_adapter import IlmWadAdapter
 from schools.salafi_usul import SalafiUsul
 from schools.ashari_usul import AshariUsul
 from schools.maturidi_usul import MaturidiUsul
+from schools.taftazani.adab_al_bahth import AdabAlBahthEngine
 
 class EpistemicShell(cmd.Cmd):
     intro = """
@@ -27,7 +28,8 @@ class EpistemicShell(cmd.Cmd):
 [AKTİF] N-TIER EPİSTEMİK ÇIKARIM MOTORU VE DİYALEKTİK REPL
 Durum: 0 Entropi | Rejim: Asenkron Çoklu-Ekol (Polymorphic Multi-Agent)
 Varsayılan Ekol: Eş'arî (AshariUsul)
-Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
+Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, clear
+Çıkmak için 'exit'.
 =============================================================================
 """
     prompt = "Epistemic-Engine [Ashari]> "
@@ -56,11 +58,11 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             self.lexicon = ContextualLexicon()
             self.discourse = DiscourseRegister()
             
-            # [FAZ 6] İbn Teymiyye Epistemolojisi: Bila-Kayf Düğüm Taşınması (Node Relocation)
-            # Selefî uzayında kelimenin "Allah" ile bir sibak/izafet bağı varsa, kelime literalden (Cism) koparılır.
-            self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal") # Varsayılan (Default) Atama
+            # [FAZ 6] İbn Teymiyye Node Relocation Leksikon Yapılandırması
+            self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
             self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
             
+            # [FAZ 3] Ma'nâ el-Ma'nâ Leksikon Yapılandırması
             self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor")
             self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor")
             self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
@@ -76,37 +78,38 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
 
             self.orchestrator = EpistemicOrchestrator(self.adapter, self.l1, self.l2, self.l3)
+            
+            # [FAZ 5] Diyalektik FSM Motoru
+            self.fsm = AdabAlBahthEngine(self.solver, self.discourse)
 
-            print("[SİSTEM] N-Tier Boru Hattı (Pipeline) başarıyla bağlandı ve izole edildi.")
+            print("[SİSTEM] N-Tier Boru Hattı ve Âdâb-ı Bahs FSM başarıyla başlatıldı.")
         except Exception as e:
             print(f"[KRİTİK HATA] Motor mimarisi başlatılamadı: {e}")
             sys.exit(1)
 
     def do_set_usul(self, arg):
-        """Aktif diyalektik ekolü (Usûl) değiştirir."""
         target = arg.strip().lower()
         if target in self.available_schools:
             self.active_usul = self.available_schools[target]
             self.prompt = f"Epistemic-Engine [{self.active_usul.namespace}]> "
             self.discourse.clear_memory()
+            self.fsm.reset_session()
             self.last_ir = None
             print(f"[BAĞLAM DEĞİŞİMİ] Aktif Usûl Profiline Geçildi: {self.active_usul.namespace}")
         else:
             print(f"[RED] Tanımsız Usûl. Mevcut seçenekler: {list(self.available_schools.keys())}")
 
     def do_parse_sentence(self, arg):
-        """Ham metni Mucîb (Savunucu) kimliğiyle sisteme sunar ve test eder."""
         if not arg:
             print("[HATA] Analiz edilecek cümleyi girin.")
             return
 
         try:
             tokens = self.tokenizer.tokenize(arg)
-            auto_lexicon = self.sarf_engine.derive_lexicon(tokens)
-            ast_dependencies = self.nahiv_parser.suggest_dependencies(tokens, auto_lexicon)
+            auto_lexicon = self.sarf.derive_lexicon(tokens)
+            ast_dependencies = self.nahiv.suggest_dependencies(tokens, auto_lexicon)
             
-            print(f"\n[SENTAKS] Üretilen Bağımlılık Ağacı (AST): {ast_dependencies}")
-            print(f"[YÜRÜTME] Orkestratör Aktif Profil ({self.active_usul.namespace}) ile tetikleniyor...\n")
+            print(f"\n[SENTAKS] AST: {ast_dependencies}")
             
             self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon)
             result = self.orchestrator.process_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
@@ -124,7 +127,6 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
             traceback.print_exc()
 
     def do_muaradah(self, arg):
-        """Sâil kimliğiyle, Mucîb'in argümanına çapraz-ekol saldırısı (Muaradah) yapar."""
         args = arg.split(maxsplit=1)
         if len(args) < 2:
             print("[HATA] Rakip usûl ve karşı cümleyi eksiksiz girin. Örn: muaradah salafi namun zeydun")
@@ -144,26 +146,86 @@ Komutlar için 'help' yazın. Çıkmak için 'exit' veya Ctrl+D.
 
         try:
             sail_tokens = self.tokenizer.tokenize(sail_sentence)
-            sail_lexicon = self.sarf_engine.derive_lexicon(sail_tokens)
-            sail_ast = self.nahiv_parser.suggest_dependencies(sail_tokens, sail_lexicon)
+            sail_lexicon = self.sarf.derive_lexicon(sail_tokens)
+            sail_ast = self.nahiv.suggest_dependencies(sail_tokens, sail_lexicon)
             
-            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) saldırı protokolü başlatıldı...")
+            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) z3.Optimize çapraz saldırı protokolü başlatıldı...")
             
             result = self.orchestrator.execute_cross_school_muaradah(
                 self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon
             )
             
-            print(f"[{result.get('status', 'BİLİNMİYOR')}]")
-            print(f"Gerekçe: {result.get('message')}")
+            print(f"[{result.get('status', 'BİLİNMİYOR')}] -> {result.get('message')}")
             
         except Exception as e:
             print(f"\n[SİSTEM ÇÖKÜŞÜ] Mu'aradah İhlali:")
             traceback.print_exc()
 
-    def do_clear_memory(self, arg):
+    # ==========================================
+    # FAZ 5: ÂDÂB-I BAHS DİYALEKTİK KOMUTLARI
+    # ==========================================
+
+    def do_claim(self, arg):
+        """[FAZ 5] Mucîb olarak tartışmaya Z3 FOL formatında iddia (Da'vâ) sürer."""
+        if not arg:
+            print("[HATA] Z3 FOL formatında bir iddia girin. Örn: Forall([x], Implies(Cemad(x), Nami(x)))")
+            return
+        try:
+            res = self.fsm.submit_claim(arg)
+            print(f"[{res['status']}] {res['message']}")
+        except Exception as e:
+            print(f"[FSM ÇÖKÜŞÜ] {e}")
+
+    def do_tahrir(self, arg):
+        """[FAZ 5] Kavramsal senkronizasyon. Format: <musellemat1,musellemat2> | <niza1,niza2>"""
+        if "|" not in arg:
+            print("[HATA] Format: musellem_terim | niza_terim. Örn: Cemad | Nami")
+            return
+        
+        parts = arg.split("|")
+        musellemat = [m.strip() for m in parts[0].split(",") if m.strip()]
+        niza_terms = [n.strip() for n in parts[1].split(",") if n.strip()]
+        
+        try:
+            res = self.fsm.tahrir_i_niza(musellemat, niza_terms)
+            print(f"[{res['status']}] {res['message']}")
+        except Exception as e:
+            print(f"[FSM ÇÖKÜŞÜ] {e}")
+
+    def do_evidence(self, arg):
+        """[FAZ 5] Mucîb olarak Z3 FOL formatında delil (Öncül) sunar. Virgülle ayırarak çoklu öncül girilebilir."""
+        if not arg:
+            print("[HATA] Z3 FOL formatında öncül girin.")
+            return
+            
+        premises = [p.strip() for p in arg.split(";") if p.strip()]
+        try:
+            res = self.fsm.submit_evidence(premises)
+            print(f"[{res['status']}] {res['message']}")
+        except Exception as e:
+            print(f"[FSM ÇÖKÜŞÜ] {e}")
+
+    def do_attack(self, arg):
+        """[FAZ 5] Sâil olarak delile saldırır (Men, Nakz, Muaradah). Örn: attack Nakz"""
+        args = arg.split(maxsplit=1)
+        if not args:
+            print("[HATA] Saldırı tipi belirtin: Men, Nakz, Muaradah")
+            return
+            
+        attack_type = args[0].capitalize()
+        target = args[1] if len(args) > 1 else None
+        
+        try:
+            res = self.fsm.attack_evidence(attack_type, target)
+            print(f"[{res['status']}] {res['message']}")
+        except Exception as e:
+            print(f"[FSM ÇÖKÜŞÜ] {e}")
+
+    def do_clear(self, arg):
         self.discourse.clear_memory()
+        self.fsm.reset_session()
         self.last_ir = None
-        print("[BELLEK] Söylem hafızası sıfırlandı.")
+        print("[BELLEK] Söylem hafızası ve FSM durumu sıfırlandı.")
 
     def do_exit(self, arg):
         print("[SİSTEM] Kapatılıyor.")

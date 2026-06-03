@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+import z3
 from core.models import OntologyLoader
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
@@ -33,44 +34,53 @@ class TestDialecticsFSM(unittest.TestCase):
         self.sarf = SarfEngine()
         self.nahiv = NahivDependencyCompiler()
 
-    def test_fsm_sequential_integrity(self):
-        """[Faz 5] FSM'nin AWAITING_CLAIM -> ISOLATING_CONTENTION -> AWAITING_EVIDENCE sıralaması ihlali koruması."""
+    def test_fsm_sequential_integrity_and_tahrir(self):
         with self.assertRaises(ValueError):
             self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
             
-        self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
-        self.assertEqual(self.engine.current_state, "ISOLATING_CONTENTION", "Tahrîr-i Niza' aşaması atlandı.")
+        claim_res = self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
+        self.assertEqual(self.engine.current_state, "ISOLATING_CONTENTION")
         
-        # [FAZ 5] Tahrîr-i Niza' (Kavramsal Senkronizasyon) uygulanmadan delile geçilemez
         with self.assertRaises(ValueError):
             self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
             
-        self.engine.tahrir_i_niza(musellemat=["S"], niza_terms=["P"])
-        self.assertEqual(self.engine.current_state, "AWAITING_EVIDENCE", "Tahrîr-i Niza' sonrası delil aşamasına geçiş başarısız.")
+        tahrir_res = self.engine.tahrir_i_niza(musellemat=["S"], niza_terms=["P"])
+        self.assertEqual(self.engine.current_state, "AWAITING_EVIDENCE")
+        self.assertEqual(tahrir_res["status"], "CONTENTION_ISOLATED")
 
-    def test_curcani_nakz_refutation(self):
-        """[Faz 3 & 5 Red-Teaming] Sâil'in Nakz hücumunda, Mülâzama (Lüzum Bağı) çöküşü testi."""
-        self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
-        self.engine.tahrir_i_niza(musellemat=["S", "M"], niza_terms=["P"]) # Faz 5 Senkronizasyonu
+    def test_tahrir_complex_fol_injection(self):
+        """[Faz 5 Refaktör] Tahrîr-i Niza' aşamasında kompleks FOL müsellemâtının Z3'e mutlak aksiyom olarak zerk edilmesi."""
+        self.engine.submit_claim("Exists([x], Nami(x))")
+        
+        complex_musellemat = ["Forall([x], Implies(Cemad(x), Cism(x)))", "Cemad"]
+        self.engine.tahrir_i_niza(musellemat=complex_musellemat, niza_terms=["Nami"])
+        
+        res = self.engine.submit_evidence(["Exists([y], Cemad(y))"])
+        self.assertEqual(res["status"], "EVIDENCE_LOGGED", "[SENTAKS İHLALİ] Kompleks FOL müsellemât Z3 tarafından işlenemedi.")
+
+    def test_curcani_nakz_counter_model_refutation(self):
+        self.engine.submit_claim("Forall([x], Implies(Cemad(x), Nami(x)))")
+        self.engine.tahrir_i_niza(musellemat=["Cemad", "Cism"], niza_terms=["Nami"]) 
         
         premises = [
-            "Exists([x], And(S(x), M(x)))",
-            "Exists([x], And(M(x), P(x)))"
+            "Exists([x], And(Cemad(x), Cism(x)))",
+            "Exists([x], And(Cism(x), Nami(x)))"
         ]
         
         ev_result = self.engine.submit_evidence(premises)
-        self.assertEqual(ev_result["status"], "EVIDENCE_LOGGED", "Öncüller kendi içinde çeliştiği için Z3 reddetti. Hatalı mock verisi.")
+        self.assertEqual(ev_result["status"], "EVIDENCE_LOGGED")
         
         attack_result = self.engine.attack_evidence(attack_type="Nakz")
         
-        self.assertEqual(attack_result["status"], "NAKZ_SUCCESS", "[DİYALEKTİK ÇÖKÜŞ] Fâsid istidlâl (Hatalı Mülâzama) Z3 tarafından Nakz edilemedi.")
-        self.assertEqual(self.engine.current_state, "RESOLVED", "Tartışma bitmesine rağmen FSM durumu açık kaldı.")
+        self.assertEqual(attack_result["status"], "NAKZ_SUCCESS")
+        self.assertEqual(self.engine.current_state, "RESOLVED")
 
-    def test_cross_school_muaradah_stalemate(self):
-        """[Faz 4.3] Çapraz Usûl (Muaradah) Z3 Push/Pop izolasyonu ve Leksikon Yeniden Derlemesi."""
+    def test_cross_school_muaradah_dynamic_weight_optimization(self):
+        """[Faz 5 Refaktör] Mu'aradah çapraz-ekol çarpışmasında ontolojik derinliğe göre dinamik ağırlık cezası ölçümü."""
         self.lexicon.register_word("cevher", "Base", "Cevher")
         self.lexicon.register_word("cism", "Base", "Cism")
         self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
+        self.lexicon.register_word("nam", "Base", "Nami")
         
         mujib_ir = SemanticStatementIR(
             active_namespace="Ashari", 
@@ -78,7 +88,7 @@ class TestDialecticsFSM(unittest.TestCase):
             is_valid_for_z3=True
         )
         
-        sail_tokens = ["cismun", "zeydun"]
+        sail_tokens = ["cismun", "nami"]
         sail_morph = self.sarf.derive_lexicon(sail_tokens)
         sail_deps = self.nahiv.suggest_dependencies(sail_tokens, sail_morph)
         
@@ -86,7 +96,9 @@ class TestDialecticsFSM(unittest.TestCase):
             mujib_ir, AshariUsul(), sail_tokens, sail_deps, SalafiUsul(), sail_morph
         )
         
-        self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE", "MUARADAH_FAILED"], "[DİYALEKTİK ÇÖKÜŞ] Çapraz ekol çarpışması hatası.")
+        self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE"])
+        if result["status"] == "MUARADAH_SUCCESS":
+            self.assertIn("ontolojik ağırlık maliyetiyle", result["message"])
 
 if __name__ == '__main__':
     unittest.main()
