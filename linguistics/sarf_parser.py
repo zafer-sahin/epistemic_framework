@@ -6,18 +6,28 @@ class MorphologicalAnalysis(BaseModel):
     root: str           
     pattern: str        
     ontologic_type: str 
-    thematic_role: Optional[str] = None  # [FAZ 1.1] Vaz' Nev'î: Kalıpsal Tematik Rol
+    thematic_role: Optional[str] = None  
 
 class SarfEngine:
     """
     Üretken Morfoloji Motoru ('İlm-i Sarf).
     Faz 1.1: Vaz' Nev'î (Kategorik Atama) matrisi entegre edildi.
-    Kalıplar (Vezin), sadece kök tespiti için değil, ontolojik aktör rollerini 
-    (Agent, Patient, Action) belirlemek için 4 boyutlu tensöre yükseltildi.
+    Faz 2 - Adım 2.2: İlm-i Ma'ânî (Tevkîd) edatları ontolojik evrene tanıtıldı.
+    [HATA GİDERME]: İstifham (Soru) ve Nefy (Olumsuzluk) edatları harf setine eklendi,
+    böylece Sarf motorunun bu edatlarda C-V imza çıkarmaya çalışıp çökmesi engellendi.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
-        self.harf_set = {"fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "la", "in"}
+        
+        # [LOGIC FIX]: Tüm sentaktik harfler, istifham edatları ve nefy edatları buraya dahil edildi.
+        self.harf_set = {
+            "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
+            "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  # İstifham Edatları
+            "illa", "lam", "lan"                               # Nefy Edatları
+        }
+        
+        # [FAZ 2.2] Tevkîd (Pekiştirme) Edatları
+        self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
         
         # Wazan Matrix Formatı: (Vezin_Adı, Ontolojik_Tip, Kök_Çıkarma_Komutları, Thematic_Role)
         self.wazan_matrix = {
@@ -84,19 +94,29 @@ class SarfEngine:
     def _derive_morphology(self, word: str) -> MorphologicalAnalysis:
         word_lower = word.lower()
         
-        # 1. Harf (Particle) Fallback
+        # 1. Tevkîd Harfi Fallback
+        if word_lower in self.tevkid_set:
+            return MorphologicalAnalysis(
+                original_word=word_lower,
+                root=word_lower,
+                pattern="Harf_Tevkid",
+                ontologic_type="Harf_Tevkid",
+                thematic_role=None
+            )
+
+        # 2. Harf (Particle) Fallback (İstifham ve Nefy edatları dahil)
         if word_lower in self.harf_set:
             return MorphologicalAnalysis(
                 original_word=word_lower, 
                 root=word_lower, 
                 pattern="Harf", 
                 ontologic_type="Harf",
-                thematic_role=None # Harfler yapısal rol taşımaz
+                thematic_role=None 
             )
 
         signature = self._generate_structural_signature(word_lower)
         
-        # 2. Müştekk (Türemiş) Vezin Eşleşmesi ve Thematic Role Zerk Edilmesi
+        # 3. Müştekk (Türemiş) Vezin Eşleşmesi ve Thematic Role Zerk Edilmesi
         if signature in self.wazan_matrix:
             vezin, ont_type, root_commands, thematic_role = self.wazan_matrix[signature]
             extracted_root = self._extract_root(word_lower, root_commands)
@@ -108,8 +128,7 @@ class SarfEngine:
                 thematic_role=thematic_role
             )
             
-        # 3. İ'rab Fallback (Câmid İsimler ve Mudaf Formları)
-        # Tenvinli (Marife/Nekra İsim)
+        # 4. İ'rab Fallback (Câmid İsimler ve Mudaf Formları)
         if word_lower.endswith(("un", "an", "in")):
             camid_root = word_lower[:-2] 
             return MorphologicalAnalysis(
@@ -117,9 +136,8 @@ class SarfEngine:
                 root=camid_root, 
                 pattern="Alem/Camid_Munevven", 
                 ontologic_type="Ism",
-                thematic_role=None # Câmid isimler doğrudan Vaz' Şahsî'dir, kalıpsal rol üretmez.
+                thematic_role=None 
             )
-        # Tenvinsiz (Mudaf veya Gayr-ı Munsarif)
         elif word_lower.endswith(("u", "a", "i")):
             camid_root = word_lower[:-1]
             return MorphologicalAnalysis(

@@ -5,6 +5,7 @@ class NahivDependencyCompiler:
     """
     Arapça Sentaktik Bağımlılık Ağacını (Nahiv AST) üreten parser.
     Faz 10.2: Alt-ağaç (Sub-Tree) çözümleyicileri entegre edildi.
+    Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
     İzafet (İsim Tamlaması) ve Sıfat-Mevsuf ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
@@ -24,6 +25,13 @@ class NahivDependencyCompiler:
             
             m1 = lexicon.get(t1)
             m2 = lexicon.get(t2)
+            
+            # [FAZ 2.2] Tevkîd Edatlarının Ana Yükleme/İsme Bağlanması
+            if m1 and m1.ontologic_type == "Harf_Tevkid":
+                # Kural: Tevkid harfi her zaman kendisinden sonraki kelimeyi (t2) niteler.
+                # AST Yönü: t2 (Amil/Niteliyici) -> t1 (Mamul/Tevkid Edatı)
+                dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
+                continue
             
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
                 # İzafet (Mudaf - Mudaf İleyh) Matrisi

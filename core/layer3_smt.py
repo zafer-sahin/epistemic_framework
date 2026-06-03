@@ -58,6 +58,10 @@ class Layer3SMTCircuitBreaker:
             elif item.operator == "Haram_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.Not(z3.Exists([w_const, t_const], body))
+            elif item.operator == "Istifham_Inkari":
+                # [FAZ 2.4] İstifham-ı İnkârî: Tüm dünyalarda ve zamanlarda içeriğin mantıksal reddi
+                body = args[0] if len(args) == 1 else z3.And(args)
+                return z3.ForAll([w_const, t_const], z3.Not(body))
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 

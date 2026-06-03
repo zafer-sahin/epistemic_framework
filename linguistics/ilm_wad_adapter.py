@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List, Tuple, Dict, Union, Optional
 from pydantic import BaseModel, ConfigDict
 from linguistics.contextual_lexicon import ContextualLexicon
-from linguistics.pragmatics import PragmaticsFilter
+from linguistics.pragmatics import MaaniSpeechActAnalyzer
 from linguistics.discourse_state import DiscourseRegister
 from linguistics.sarf_parser import MorphologicalAnalysis
 
@@ -38,8 +38,9 @@ class IlmWadAdapter:
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
         self.discourse = discourse
-        self.pragmatics = PragmaticsFilter()
-        self.positing_engine = StructuralPositingEngine() # [FAZ 1.2] Middleware Entegrasyonu
+        # [FAZ 2.3] PragmaticsFilter yerine MaaniSpeechActAnalyzer entegre edildi.
+        self.pragmatics = MaaniSpeechActAnalyzer(self.discourse)
+        self.positing_engine = StructuralPositingEngine() 
         self.luzumi_particles = {"in", "iza", "law", "amma"}
         self.inadi_particles = {"imma", "aw", "ya"} 
         self.current_tevil_targets: List[str] = []
@@ -50,8 +51,10 @@ class IlmWadAdapter:
         
         self.current_tevil_targets = tevil_fallback_nodes
         
-        pragmatics_res = self.pragmatics.analyze_pragmatics(tokens)
+        # [FAZ 2.3] Muktazâ el-Hâl analizi için dependencies parametresi de gönderilir
+        pragmatics_res = self.pragmatics.analyze_pragmatics(tokens, dependencies)
         if not pragmatics_res["is_valid"]:
+            # MAANI_VIOLATION (Muktazâ el-Hâl ihlali) veya Istifham_Hakiki reddi
             return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False)
 
         ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
@@ -71,13 +74,16 @@ class IlmWadAdapter:
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type)
             
+            # Tevkîd edatları ontolojik yüklem matrisine (Z3) girmez, Muktazâ el-Hâl için kullanılır.
+            if rel_type == 'Tevkid_Modifier':
+                continue
+            
             rel_id = f"Rel_{rel_type}"
             atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
             
             atomic_predicates.append((amil_id, amil_id, 1))
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
-            # [FAZ 1.2 & 1.3] Vaz' Nev'î (Kalıpsal Semantik) Yüklemlerinin IR Matrisine Zerk Edilmesi
             amil_roles = self.positing_engine.extract_structural_roles(amil, amil_id, auto_lexicon)
             for role in amil_roles:
                 if role not in processed_roles:
@@ -104,6 +110,11 @@ class IlmWadAdapter:
             op = "Wajib_Fiqh" if pragmatics_res["operator"] == "Emir" else "Haram_Fiqh"
             deontic_logic = NestedPredicate(operator=op, args=ir_predicates)
             ir_predicates = [deontic_logic]
+            
+        # [FAZ 2.4] İstifham-ı İnkârî Sarmalayıcısı
+        elif pragmatics_res["type"] == "Istifham_i_Inkari":
+            inkari_logic = NestedPredicate(operator="Istifham_Inkari", args=ir_predicates)
+            ir_predicates = [inkari_logic]
 
         # Çift (Duplicate) yüklemlerin temizlenerek IR'nin Z3 optimizasyonuna hazırlanması
         unique_predicates = []
@@ -127,6 +138,10 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
+        # Harf_Tevkid için leksikon sorgusunu atla, Z3 ontolojisine girmemesi gereken salt gramatik düğüm.
+        if morph_data and morph_data.ontologic_type == "Harf_Tevkid":
+            return f"GrammarNode_{search_key.capitalize()}"
+
         # [FAZ 3] Bağlam Avcısı
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse)
         
@@ -138,7 +153,7 @@ class IlmWadAdapter:
         else:
             ontologic_id = base_ontologic_id
         
-        if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_"):
+        if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
             # [FAZ 4] Söylem belleğine kayıt esnasında 'active_namespace' mührü eklendi
             self.discourse.add_mention(word, ontologic_id, active_namespace)
             

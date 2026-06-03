@@ -1,5 +1,11 @@
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 from pydantic import BaseModel
+from enum import IntEnum
+
+class DenialLevel(IntEnum):
+    KHALI_AL_ZIHN = 0  # Zihin boş, nötr durum. Tevkîd (pekiştirme) yasaktır.
+    MUTAREDDIT = 1     # Şüphe durumu (Men' saldırısı). Tevkîd kullanımı caiz/önerilendir (Hasan).
+    MUNKIR = 2         # Kesin inkar durumu (Nakz saldırısı). Tevkîd zorunludur (Vâcib).
 
 class EntityMention(BaseModel):
     word: str
@@ -12,7 +18,7 @@ class DiscourseRegister:
     """
     Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
     Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı eklendi.
-    Z3, bir uzayın zamirlerini tararken diğer uzayın Müsellemât'ına (önkabüllerine) kesinlikle sızamaz.
+    Faz 2 - Adım 1: Epistemik Durum (Muktazâ el-Hâl) matrisi eklendi.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
@@ -21,10 +27,28 @@ class DiscourseRegister:
         self.clock: int = 0
         self.pronouns = {"huve", "hiye", "huma", "hum", "hunne"}
         self.active_agent: Literal["Mujib", "Sail"] = "Mujib" # Varsayılan aktör iddia sahibidir
+        
+        # [FAZ 2.1] Epistemik Durum Matrisi (Muktazâ el-Hâl)
+        self.epistemic_state: Dict[Literal["Mujib", "Sail"], DenialLevel] = {
+            "Mujib": DenialLevel.KHALI_AL_ZIHN,
+            "Sail": DenialLevel.KHALI_AL_ZIHN
+        }
 
     def set_agent(self, agent: Literal["Mujib", "Sail"]) -> None:
         """Diyalektik sırasına göre aktif aktörü (Sâil veya Mucîb) değiştirir."""
         self.active_agent = agent
+
+    def update_epistemic_state(self, agent: Literal["Mujib", "Sail"], level: DenialLevel) -> None:
+        """İlm-i Ma'ânî gereği muhatabın inkâr derecesini günceller."""
+        if level < self.epistemic_state[agent]:
+            # Diyalektikte inkar derecesi (şüphe giderilmedikçe) geriye düşemez.
+            return
+        self.epistemic_state[agent] = level
+
+    def get_opponent_epistemic_state(self) -> DenialLevel:
+        """Aktif aktörün muhatabının epistemik durumunu döndürür (Muktazâ el-Hâl denetimi için)."""
+        opponent = "Sail" if self.active_agent == "Mujib" else "Mujib"
+        return self.epistemic_state[opponent]
 
     def push_scope(self) -> None:
         """Z3.push() veya yeni bir diyalektik iddia açıldığında, sadece aktif aktörün alt bağlamını yaratır."""
@@ -89,3 +113,4 @@ class DiscourseRegister:
         self.sail_frames = [[]]
         self.clock = 0
         self.active_agent = "Mujib"
+        self.epistemic_state = {"Mujib": DenialLevel.KHALI_AL_ZIHN, "Sail": DenialLevel.KHALI_AL_ZIHN}

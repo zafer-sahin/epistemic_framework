@@ -5,12 +5,14 @@ class EpistemicTokenizer:
     """
     Epistemik Derleyici İçin Gelişmiş Tokenizer.
     Faz 10.3: Clitic Splitting (Bitişik Edat Ayrıştırma) entegre edildi.
-    'wa-', 'fa-', 'bi-', 'li-', 'ka-' gibi ön ekleri (Prefixes) gövdeden
+    Faz 2 - Adım 2.2: Lam-ı Tevkîd ('la') ön eki sisteme tanıtıldı.
+    'wa-', 'fa-', 'bi-', 'li-', 'ka-', 'la-' gibi ön ekleri (Prefixes) gövdeden
     ayırarak Sarf motorunun yapısal imza (C-V) algoritmasını korur.
     """
     def __init__(self):
-        # Bitişik yazılan edat ve bağlaçlar (Harf-i Cer ve Atıf harfleri)
-        self.clitic_prefixes = ['wa', 'fa', 'bi', 'li', 'ka']
+        # Bitişik yazılan edat ve bağlaçlar (Harf-i Cer, Atıf harfleri ve Lam-ı Tevkîd)
+        # [FAZ 2.2] 'la' (Lam-ı Tevkîd/İbtida) eklendi.
+        self.clitic_prefixes = ['wa', 'fa', 'bi', 'li', 'ka', 'la']
         
     def tokenize(self, sentence: str) -> List[str]:
         if not sentence:

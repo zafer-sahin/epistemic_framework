@@ -10,7 +10,8 @@ from schools.base_usul import AbstractSchoolUsul
 class EpistemicOrchestrator:
     """
     Bilişsel Çıkarım Motoru (Pipeline Manager).
-    Faz 4 - Adım 2: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu ve İlm-i Vaz' Yeniden Derlemesi (Recompilation).
+    Faz 4 - Adım 2: Çapraz-Usûl (Cross-School) Mu'aradah Orkestrasyonu.
+    Faz 2 - Adım 2.5: İlm-i Ma'ânî (Muktazâ el-Hâl) ihlallerinin loglanması.
     Rakip iki ekolün ontolojik sınırlarını eşzamanlı olarak çarpıştırır.
     """
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
@@ -40,10 +41,11 @@ class EpistemicOrchestrator:
                 tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type
             )
             
+            # [FAZ 2.5] PragmaticsFilter yerine MaaniSpeechActAnalyzer reddi yakalanır
             if not ir_matrix.is_valid_for_z3:
                 return {
                     "status": "PRAGMATICS_REJECT", 
-                    "message": "İlm-i Ma'ânî İhlali: İnşâî form mantık motoruna giremez."
+                    "message": "İlm-i Ma'ânî İhlali: İnşâî form (İstifham-ı Hakikî) veya Muktazâ el-Hâl uyumsuzluğu."
                 }
             
             execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
@@ -77,12 +79,7 @@ class EpistemicOrchestrator:
                                       sail_dependencies: List[Tuple[str, str, str, str]],
                                       sail_usul: AbstractSchoolUsul,
                                       sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
-        """
-        Z3 Push/Pop İzolasyonu ile Çapraz Sorgu (Mu'aradah).
-        Faz 4: Sâil'in karşı argümanı, Mucîb'in uzayına zerk edilmeden evvel, 
-        Mucîb'in İlm-i Vaz' kurallarına göre anlık olarak yeniden derlenir (Cross-Injection Compilation).
-        """
-        # 1. Sâil'in argümanı kendi usûlünde geçerli mi?
+        """Z3 Push/Pop İzolasyonu ile Çapraz Sorgu (Mu'aradah)."""
         sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon)
         sail_result = sail_usul.execute_dag(sail_native_ir, self.l1, self.l2, self.l3, current_attempt=0)
 
@@ -92,12 +89,10 @@ class EpistemicOrchestrator:
                 "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
             }
 
-        # 2. Sâil'in argümanı Mucîb'in usûlüne göre YENİDEN DERLENİR (Context Sealing / Çapraz Çeviri)
         cross_injected_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, mujib_usul.namespace, sail_auto_lexicon)
 
         self.l3.core_solver.solver.push()
         try:
-            # Mucîb'in kendi argümanı kontrol edilir
             mujib_base_result = self.l3.execute_sat_check(mujib_claim_ir)
             
             if mujib_base_result["status"] != "SAT":

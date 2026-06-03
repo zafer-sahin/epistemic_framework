@@ -82,6 +82,10 @@ class AdabAlBahthEngine:
             if not target_premise or target_premise not in self.active_premises:
                 return {"status": "INVALID_ATTACK", "message": "Men' saldırısı için hedef öncül belirtilmelidir."}
             
+            # [FAZ 2.1] Sâil 'Men' (kanıtsız ret) yaptığında epistemik durumu 'Mutareddit' (Şüphe) seviyesine çıkar.
+            from linguistics.discourse_state import DenialLevel
+            self.discourse.update_epistemic_state("Sail", DenialLevel.MUTAREDDIT)
+
             # [LOGIC FIX]: Olası Memory Leak tıkandı. FSM AWAITING_EVIDENCE'a dönmeden önce reddedilen kapsam temizlenmelidir.
             self.solver.solver.pop()
             self.discourse.set_agent("Mujib")
@@ -89,9 +93,13 @@ class AdabAlBahthEngine:
             
             # Sâil öncülü reddettiği için FSM tekrar Mucîb'in ispat durumuna döner
             self.current_state = "AWAITING_EVIDENCE"
-            return {"status": "MEN_ON_PREMISE", "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti. Mucîb bu öncülü ara-iddia olarak ispatlamalıdır."}
+            return {"status": "MEN_ON_PREMISE", "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti (Mutareddit). Mucîb bu öncülü ara-iddia olarak ispatlamalıdır."}
             
         elif attack_type == "Nakz":
+            # [FAZ 2.1] Sâil 'Nakz' (Fâsid İstidlâl kanıtı) yaptığında epistemik durumu 'Munkir' (Kesin İnkar) seviyesine çıkar.
+            from linguistics.discourse_state import DenialLevel
+            self.discourse.update_epistemic_state("Sail", DenialLevel.MUNKIR)
+
             # Nakz: Mucîb'in öncülleri doğru kabul edilse dahi, kıyasın neticeyi vermediğinin (Lüzum Bağı/Hadd-i Evsat hatası) ispatı
             is_valid = self.solver.verify_syllogism(self.active_premises, self.active_claim)
             
