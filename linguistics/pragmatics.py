@@ -7,7 +7,8 @@ class MaaniSpeechActAnalyzer:
     Faz 2 - Adım 2.3: PragmaticsFilter'ın yerine inşa edilmiştir.
     Cümlenin formunu (vurgu/tevkîd) muhatabın epistemik inkâr derecesiyle (Denial Level) çapraz denetler.
     Faz 2 - Adım 2.4: İstifham-ı İnkârî (Reddedici Soru) tespiti.
-    Faz 2 - Adım 2.5: Kasr/Hasr (Kısıtlama) ve İhtisas (Takdim/Te'hir) tespiti eklendi.
+    Faz 2 - Adım 2.5: Kasr/Hasr (Kısıtlama) ve İhtisas (Takdim/Te'hir) tespiti.
+    Faz 2 - Adım 2.6: Kasr Operatörlerinde Yön Yitimi Onarımı (Kasr-ı Sıfat ale'l-Mevsuf / Kasr-ı Mevsuf ale's-Sıfat).
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
@@ -63,7 +64,7 @@ class MaaniSpeechActAnalyzer:
                 "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez."
             }
 
-        # 4. İlm-i Ma'ânî: Kasr (Hasr) ve İhtisas Tespiti (Faz 2.5)
+        # 4. İlm-i Ma'ânî: Kasr (Hasr) ve İhtisas Tespiti (Faz 2.5 & Faz 2.6 Yönlü Matris)
         kasr_data = None
         
         # A. Takdim/Te'hir İhtisası (Mefulün Faile/Fiile Takdimi)
@@ -75,23 +76,25 @@ class MaaniSpeechActAnalyzer:
                 "kasr_type": "Takdim_Ihtisas",
                 "kasr_target": mamul,
                 "kasr_predicate": amil,
+                "kasr_direction": "Sifat_to_Mevsuf",  # Fiil eylemi (sıfat) tamamen takdim edilen mefule (mevsuf) hasredilir.
                 "message": f"Takdim (İhtisas) tespit edildi. Eylem ({amil}) sadece hedefe ({mamul}) kısıtlanacak."
             }
         
-        # B. İnnemâ ile Kasr
-        elif "innema" in [t.lower() for t in tokens]:
-            # İnnemâ genellikle cümlede son gelen öğeye (Haber veya Meful) kısıtlama yapar.
-            kasr_data = {
-                "kasr_type": "Kasr_Innema",
-                "message": "İnnemâ edatı ile Kasr tespit edildi. Evrensel dışlama (Universal Exclusion) uygulanacak."
-            }
-        
-        # C. Nefy + İllâ ile Kasr
-        elif has_nefy and "illa" in [t.lower() for t in tokens]:
-            kasr_data = {
-                "kasr_type": "Kasr_Nefy_Illa",
-                "message": "Nefy ve İllâ ile Kasr tespit edildi. Belirtilen öğe dışındakiler dışlanacak."
-            }
+        # B. Edatlı Kasr (İnnemâ / İllâ) - Yön (Direction) Tespiti
+        if not kasr_data:
+            kasr_deps = [dep for dep in dependencies if dep[2] == 'Kasr_Modifier']
+            if kasr_deps:
+                # dep formati: (hedef_kelime, edat, 'Kasr_Modifier', kasr_yonu)
+                hedef_kelime = kasr_deps[0][0]
+                edat = kasr_deps[0][1].lower()
+                kasr_yonu = kasr_deps[0][3] # 'Mevsuf_to_Sifat' veya 'Sifat_to_Mevsuf'
+                
+                kasr_data = {
+                    "kasr_type": f"Kasr_{edat.capitalize()}",
+                    "kasr_target": hedef_kelime,
+                    "kasr_direction": kasr_yonu,
+                    "message": f"'{edat}' edatı ile yönlü Kasr ({kasr_yonu}) tespit edildi. Evrensel dışlama (Universal Exclusion) yönlü uygulanacak."
+                }
 
         response = {"is_valid": True, "type": "Khabari"}
         if kasr_data:

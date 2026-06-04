@@ -32,8 +32,9 @@ class StructuralPositingEngine:
 class IlmWadAdapter:
     """
     Doğal dil bileşenlerini (AST ve Sarf) Birinci Dereceden Mantık (FOL) matrislerine (Semantic IR) dönüştürür.
-    Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen 'Kasr_Data' verisini 'Kasr_Universal_Exclusion' 
-    NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
+    Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen yönlü 'Kasr_Data' verisini 'Kasr_Mevsuf_to_Sifat' 
+    veya 'Kasr_Sifat_to_Mevsuf' NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
+    Faz 2 - Adım 3.2: Harf-i Atıf (Fasıl/Vasıl) edatlarını Kadiyye-i Şartiyye (Inadi/Luzumi) düğümlerine dönüştürür.
     [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 
     'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
     """
@@ -43,7 +44,7 @@ class IlmWadAdapter:
         self.pragmatics = MaaniSpeechActAnalyzer(self.discourse)
         self.positing_engine = StructuralPositingEngine() 
         self.luzumi_particles = {"in", "iza", "law", "amma"}
-        self.inadi_particles = {"imma", "aw", "ya"} 
+        self.inadi_particles = {"imma", "aw", "ya", "am"} 
         self.mani_cem_particles = {"mani_cem", "la_yectemian"} 
         self.mani_huluv_particles = {"mani_huluv", "la_yahtaliyan"} 
         self.current_tevil_targets: List[str] = []
@@ -71,12 +72,27 @@ class IlmWadAdapter:
         
         processed_roles = set()
 
-        for amil, mamul, rel_type, _ in dependencies:
+        for amil, mamul, rel_type, irab in dependencies:
             # [FAZ 2 ENTEGRASYONU] Tevkid, Kasr ve İhtisas (Takdim) kenarları atomik ilişkiler (Rel_X) 
             # olarak Z3'e gönderilmez; Pragmatics katmanında yakalanıp NestedPredicate'e sarmalanır.
             if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas']:
                 continue
             
+            # [FAZ 2.6] Harf-i Atıf (Fasıl/Vasıl) Doğrudan Kadiyye-i Şartiyye'ye (NestedPredicate) dönüştürülür
+            if rel_type == 'Rel_Atif':
+                amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                
+                particle = irab.lower()
+                if particle in self.inadi_particles:
+                    atomic_predicates.append(NestedPredicate(operator="Inadi_Hakikiyye", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
+                else: # wa, fa, summe, vb. Lüzumî (Birleştirici) bağlar
+                    atomic_predicates.append(NestedPredicate(operator="Luzumi", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
+                
+                atomic_predicates.append((amil_id, amil_id, 1))
+                atomic_predicates.append((mamul_id, mamul_id, 1))
+                continue
+
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
                 continue
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
@@ -131,12 +147,12 @@ class IlmWadAdapter:
             inkari_logic = NestedPredicate(operator="Istifham_Inkari", args=ir_predicates)
             ir_predicates = [inkari_logic]
 
-        # [FAZ 2 ENTEGRASYONU] İlm-i Ma'ânî Kasr (Hasr) İşlemesi
+        # [FAZ 2 ENTEGRASYONU] İlm-i Ma'ânî Yönlü Kasr (Hasr) İşlemesi
         kasr_data = pragmatics_res.get("kasr_data")
         if kasr_data:
-            # Kasr (Kısıtlama) verisi tespit edildiyse tüm atomik yüklemler evrensel dışlama 
-            # (Kasr_Universal_Exclusion) operatörüyle sarmalanarak Z3'e yollanır.
-            kasr_logic = NestedPredicate(operator="Kasr_Universal_Exclusion", args=ir_predicates)
+            # Kasr (Kısıtlama) yönüne göre (Sıfat->Mevsuf veya Mevsuf->Sıfat) operatör sarmalanır.
+            kasr_dir = kasr_data.get("kasr_direction", "Mevsuf_to_Sifat")
+            kasr_logic = NestedPredicate(operator=f"Kasr_{kasr_dir}", args=ir_predicates)
             ir_predicates = [kasr_logic]
 
         unique_predicates = []

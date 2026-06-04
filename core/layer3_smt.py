@@ -64,16 +64,19 @@ class Layer3SMTCircuitBreaker:
                 return z3.Or(args)
             elif item.operator == "Wajib_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.ForAll([w_const, tz_const, tv_const], body)
+                # [FAZ 2 ENTEGRASYONU] Deontik (Emir) Zaman Kilitlenmesi Çözüldü.
+                # Emirler mutlak zâtî doğa yasası değildir, vasfî zamandaki eylemsel lüzumiyettir.
+                return z3.ForAll([w_const, tv_const], body)
             elif item.operator == "Haram_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.Not(z3.Exists([w_const, tz_const, tv_const], body))
+                # [FAZ 2 ENTEGRASYONU] Nehiyler (Yasaklar) vasfî zaman düzleminde varoluşsal yokluktur.
+                return z3.Not(z3.Exists([w_const, tv_const], body))
             elif item.operator == "Istifham_Inkari":
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, tz_const, tv_const], z3.Not(body))
-            elif item.operator == "Kasr_Universal_Exclusion":
-                # [FAZ 2 ENTEGRASYONU] Kasr/Hasr (Kısıtlama) Operatörü
-                # Z3'e mutlak evrensel dışlama komutu verilir: ∀x (x ≠ Target ⇒ ¬Predicate(x))
+            elif item.operator == "Kasr_Sifat_to_Mevsuf":
+                # [FAZ 2 ENTEGRASYONU] Yönlü Kasr (Sıfatın Mevsufa Hasredilmesi)
+                # ∀y (y ≠ Target ⇒ ¬Predicate(w, tz, tv, Amil, y))
                 base_truth = args[0] if len(args) == 1 else z3.And(args)
                 exclusion_axioms = []
                 
@@ -91,6 +94,33 @@ class Layer3SMTCircuitBreaker:
                             z3.Implies(
                                 y_kasr != mamul_const,
                                 z3.Not(predicate(w_const, tz_const, tv_const, amil_const, y_kasr))
+                            )
+                        )
+                        exclusion_axioms.append(exclusion)
+                        
+                if exclusion_axioms:
+                    return z3.And(base_truth, *exclusion_axioms)
+                return base_truth
+            elif item.operator == "Kasr_Mevsuf_to_Sifat":
+                # [FAZ 2 ENTEGRASYONU] Yönlü Kasr (Mevsufun Sıfata Hasredilmesi)
+                # ∀x (x ≠ Amil ⇒ ¬Predicate(w, tz, tv, x, Target))
+                base_truth = args[0] if len(args) == 1 else z3.And(args)
+                exclusion_axioms = []
+                
+                for a in item.args:
+                    if isinstance(a, tuple) and a[2] == 2 and '::' in a[1]:
+                        pred_id, arg_id, arity = a
+                        amil_str, mamul_str = arg_id.split('::', 1)
+                        predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
+                        
+                        x_kasr = z3.Const('x_kasr', self.core_solver.builder.EntitySort)
+                        amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
+                        mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
+                        
+                        exclusion = z3.ForAll([w_const, tz_const, tv_const, x_kasr],
+                            z3.Implies(
+                                x_kasr != amil_const,
+                                z3.Not(predicate(w_const, tz_const, tv_const, x_kasr, mamul_const))
                             )
                         )
                         exclusion_axioms.append(exclusion)

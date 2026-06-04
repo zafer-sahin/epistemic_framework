@@ -8,7 +8,8 @@ class NahivDependencyCompiler:
     Faz 10.2: Alt-ağaç (Sub-Tree) çözümleyicileri entegre edildi.
     Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
     Faz 2 - Adım 2.5: Takdim (Pre-positioning) ve İhtisas (Kasr) tespiti.
-    İzafet (İsim Tamlaması), Sıfat-Mevsuf ve Hal ilişkilerini saptayarak,
+    Faz 2 - Adım 2.6: Kasr (Hasr) Operatörlerinde Yön Tespiti (Sıfat/Mevsuf) ve Harf-i Atıf (Fasıl/Vasıl) Entegrasyonu.
+    İzafet (İsim Tamlaması), Sıfat-Mevsuf, Hal ve Atıf ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
     def __init__(self):
@@ -16,6 +17,8 @@ class NahivDependencyCompiler:
         self.dependency_graph = nx.DiGraph()
         # Kâtibî'nin Şemsiyye kipliklerini tetikleyecek sentaktik bağlar (Hal ve Şart)
         self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart"]
+        # Kadiyye-i Şartiyye (Fasıl/Vasıl) tetikleyicileri
+        self.atif_particles = ["wa", "fa", "aw", "summe", "am", "bal", "la", "lakin"]
 
     def _is_definite(self, token: str) -> bool:
         return token.lower().startswith(self.definite_article)
@@ -23,7 +26,17 @@ class NahivDependencyCompiler:
     def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, str, str]]:
         dependencies = []
         
-        # 1. ALT-AĞAÇ (PHRASE/TERKİB) ÇÖZÜMLEMESİ (Sliding Window)
+        # 1. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL KONTROLÜ (Erken Tespit)
+        amil_token = None
+        amil_index = -1
+        for idx, token in enumerate(tokens):
+            morph = lexicon.get(token)
+            if morph and morph.ontologic_type == "Fiil":
+                amil_token = token
+                amil_index = idx
+                break
+                
+        # 2. ALT-AĞAÇ (PHRASE/TERKİB) ÇÖZÜMLEMESİ (Sliding Window)
         for i in range(len(tokens) - 1):
             t1 = tokens[i]
             t2 = tokens[i+1]
@@ -36,11 +49,33 @@ class NahivDependencyCompiler:
                 dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
                 continue
             
-            # [FAZ 2.5] Kasr Edatlarının (İnnemâ, İllâ) Bağlanması
+            # [FAZ 2.6] Kasr Edatlarının (İnnemâ, İllâ) Yönlü Bağlanması
             if m1 and m1.ontologic_type == "Harf_Kasr":
-                dependencies.append((t2, t1, 'Kasr_Modifier', 'None'))
+                kasr_direction = 'Mevsuf_to_Sifat' # Varsayılan yön
+                
+                # İnnemâ genellikle cümlede son gelen öğeye (Te'hir) kısıtlama yapar.
+                if t1.lower() == "innema":
+                    if amil_index != -1 and i < amil_index:
+                        # Fiilden önce gelirse, faili fiile veya mefulü fiile hasreder.
+                        kasr_direction = 'Sifat_to_Mevsuf'
+                    else:
+                        kasr_direction = 'Mevsuf_to_Sifat'
+                # İllâ (Nefy ile birlikte), kendisinden sonra gelene hasreder.
+                elif t1.lower() == "illa":
+                    kasr_direction = 'Sifat_to_Mevsuf'
+
+                # Tuple aritesini korumak adına irab parametresi (4. indis) kasr yönünü taşımak için aşırı yüklenir (overloaded).
+                dependencies.append((t2, t1, 'Kasr_Modifier', kasr_direction))
                 continue
-            
+                
+            # [FAZ 2.6] Kadiyye-i Şartiyye: Harf-i Atıf (Fasıl ve Vasıl) Matrisi
+            if t1.lower() in self.atif_particles:
+                if i > 0:
+                    t_prev = tokens[i-1]
+                    # Atıf bağlacı, bir önceki token ile bir sonraki token (Ma'tûf ve Ma'tûf aleyh) arasında Lüzum/İnad bağı kurar.
+                    dependencies.append((t_prev, t2, 'Rel_Atif', t1.lower()))
+                continue
+
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
                 # İzafet (Mudaf - Mudaf İleyh) Matrisi
                 if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i'))):
@@ -59,16 +94,6 @@ class NahivDependencyCompiler:
             # Şart Edatları (İn, İza, Lev, Amma)
             elif t1.lower() in ["in", "iza", "law", "amma"]:
                 dependencies.append((t1, t2, "Rel_Shart", "Majzum"))
-
-        # 2. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL KONTROLÜ
-        amil_token = None
-        amil_index = -1
-        for idx, token in enumerate(tokens):
-            morph = lexicon.get(token)
-            if morph and morph.ontologic_type == "Fiil":
-                amil_token = token
-                amil_index = idx
-                break
         
         # 3. İSİM CÜMLESİ (Kadiyye-i Hamliyye) ZİNCİRİ
         if not amil_token:
@@ -114,7 +139,8 @@ class NahivDependencyCompiler:
                     else:
                         dependencies.append((amil_token, token, 'Meful', 'Mansub'))
             elif token.lower().endswith(('in', 'i')):
-                is_sub_tree_child = any(rel == 'Mudaf_MudafIlayh' and t2 == token for _, t2, rel, _ in dependencies)
+                # Mudaf İleyh veya Atıf (Ma'tûf) ile alt ağaca bağlananlar ana amile majrur olarak bağlanmamalıdır.
+                is_sub_tree_child = any((rel == 'Mudaf_MudafIlayh' or rel == 'Rel_Atif') and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
                     
