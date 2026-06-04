@@ -16,6 +16,7 @@ class EpistemicOrchestrator:
 
     def _extract_conflict_nodes_from_core(self, unsat_core: str) -> List[str]:
         conflict_nodes = set()
+        # Z3 Core formatını (AXIOM_DISJOINT_Wajib_AND_Mumkin vb.) parse et
         matches = re.findall(r'AXIOM_[A-Z]+_([A-Za-z0-9_]+)', unsat_core)
         for match in matches:
             parts = match.split('_AND_')
@@ -44,11 +45,13 @@ class EpistemicOrchestrator:
             
             execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
             
+            # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Te'vil (Metaphorical Bridge) Çıkarımı
             if execution_result.get("status") == "FALLBACK_TRIGGERED" and current_attempt < max_tevil_retries:
                 if usul_profile.dsl_ruleset.get("allow_tevil", False):
                     unsat_core_str = str(execution_result.get("unsat_core", ""))
                     conflicts = self._extract_conflict_nodes_from_core(unsat_core_str)
                     
+                    # Eğer doğrudan UNSAT core okunamadıysa, IR Matrisindeki Literal nodeları tespit et
                     for item in ir_matrix.predicates:
                         if isinstance(item, tuple) and len(item) == 3:
                             args = item[1].split("::")
@@ -60,8 +63,11 @@ class EpistemicOrchestrator:
                         for conflict_node in conflicts:
                             if "Literal" in conflict_node:
                                 target_metaphor = conflict_node.replace("Literal", "Metaphor")
+                                
+                                # 1. L1 Graph üzerinden deterministik Alâka (Nexus) yolunu bul
                                 chain = self.l1.find_mana_el_mana_chain(conflict_node, target_metaphor)
                                 if chain:
+                                    # 2. Bulunan Alâka yolunu L3 Z3 motoruna Köprü Aksiyomu olarak zerk et
                                     if self.l3.prove_metaphorical_bridge(chain):
                                         bridge_messages.append(f"İlm-i Beyân Çıkarımı: {chain} ardışık lüzumiyeti Z3'e ispatlatıldı.")
                                     

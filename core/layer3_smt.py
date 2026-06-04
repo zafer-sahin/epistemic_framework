@@ -131,6 +131,12 @@ class Layer3SMTCircuitBreaker:
         self.core_solver.solver.add(patient_axiom)
         
     def prove_metaphorical_bridge(self, chain: List[str]) -> bool:
+        """
+        [FAZ 3 ENTEGRASYONU] İlm-i Beyân Ma'nâ el-Ma'nâ İspatı.
+        L1'den gelen deterministik nedensellik (Alâka) zincirini (Örn: Yed -> Bats -> Kudret) 
+        Kripke Semantiğine (Olası Dünyalar ve Çift Zaman) uygun Z3 aksiyomlarına dönüştürür.
+        Bu sayede te'vil (metaphor), mantıksal bir sıçrama olmaktan çıkıp ispatlanabilir bir lüzumiyet halini alır.
+        """
         if not chain or len(chain) < 2:
             return False
 
@@ -151,6 +157,8 @@ class Layer3SMTCircuitBreaker:
             source_pred = self.core_solver.builder.get_or_create_predicate(source_id, arity=1)
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
 
+            # Lüzum-u Zihnî: Kaynağın (Lafz) var olduğu her olası dünya ve zamanda, 
+            # hedefin (Ma'nâ el-Ma'nâ) de var olması zorunludur.
             bridge_axiom = z3.ForAll(
                 [w_var, tz_var, tv_var, x_var],
                 z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))

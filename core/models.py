@@ -20,8 +20,23 @@ class RelationalConstraint(BaseModel):
     relation_type: str
     target_id: str  
     axiom: str
-    # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi (Nedensellik Vektörü)
-    alaka_type: Optional[str] = Field(default=None, description="Mecaz-ı Mürsel veya İstiare alâkası (Örn: Alaka_Sebebiyye, Alaka_Cuziyye)")
+    # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi ve Lüzumiyet Derecesi (Strictly-Typed)
+    alaka_type: Optional[Literal[
+        "Alaka_Sebebiyye", 
+        "Alaka_Müsebbebiyye", 
+        "Alaka_Cüziyye", 
+        "Alaka_Külliyye", 
+        "Alaka_Mülazemet", 
+        "Alaka_Zarfiyye", 
+        "Alaka_Mazrufiyye", 
+        "İstiare_Tahkikiyye", 
+        "İstiare_Mekniyye"
+    ]] = Field(default=None, description="Mecaz-ı Mürsel veya İstiare alâkası")
+    luzum_derecesi: Optional[Literal[
+        "Luzum_u_Zihni", 
+        "Luzum_u_Harici", 
+        "Luzum_u_Beyyin"
+    ]] = Field(default=None, description="Ma'nâ el-Ma'nâ geçişindeki mantıksal lüzumiyet derecesi")
 
 class EpistemicEntity(BaseModel):
     model_config = ConfigDict(extra="forbid")

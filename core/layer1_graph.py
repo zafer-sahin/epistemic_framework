@@ -29,6 +29,7 @@ class Layer1HeuristicGraph:
            (mamul_entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"] and amil_entity.modal_status in ["Mumkin", "Mumkine_i_Amme"]):
             conflict_score += 0.6
             
+
         # Kural 2: Hüsn-ü Mücerred (Soyut Mükemmellik) İhlali
         if amil_entity.husn_u_mucerred and not mamul_entity.husn_u_mucerred:
             conflict_score += 0.4
@@ -44,10 +45,11 @@ class Layer1HeuristicGraph:
         
     def find_mana_el_mana_chain(self, source_id: str, target_id: str) -> List[str]:
         """
-        [FAZ 2 ENTEGRASYONU] İlm-i Beyân Alâka İzi (Deterministic Path).
-        Mevcut BFS iptal edildi. Hakiki mecazın (Mecaz-ı Mürsel ve İstiare)
-        yönlü nedensellik bağları (Alâka-i Sebebiyye, Mülâzemet vb.) üzerinden 
-        deterministik bir '_trace_alaka_path' algoritması kurgulandı.
+        [FAZ 3 ENTEGRASYONU] İlm-i Beyân Alâka İzi (Deterministic Path).
+        Abdülkâhir el-Cürcânî'nin 'Ma'nâ el-Ma'nâ' teorisine uygun olarak; 
+        rastgele (fallback) veya serbest hiyerarşik (BFS) arama yerine, doğrudan 
+        'alaka_type' (Sebebiyye, Mülâzemet vb.) ile etiketlenmiş kenarları VE 
+        Alâka-i Cüz'iyye/Külliyye'yi (hiyerarşik alt türleri) takip ederek nedensellik vektörü çıkarır.
         """
         visited = set()
         path = []
@@ -68,13 +70,14 @@ class Layer1HeuristicGraph:
                 path.pop()
                 return False
 
-            # 1. Öncelik: Doğrudan İlm-i Beyân Alâka tiplerine sahip ilişkiler (Sebebiyye/Mülâzemet)
+            # 1. Öncelik: Doğrudan İlm-i Beyân Alâka tiplerine sahip yatay ilişkiler (Sebebiyye/Mülâzemet vb.)
             for rel in entity.relations:
                 if getattr(rel, 'alaka_type', None):
                     if _trace_alaka_path(rel.target_id):
                         return True
 
-            # 2. Öncelik: Cüz'iyye/Külliyye Alâkası (Hiyerarşik Alt/Üst Bağlantılar)
+            # 2. Öncelik: İlm-i Beyân Alâka-i Cüz'iyye / Külliyye (Hiyerarşik Alt/Üst Bağlantılar)
+            # Kudret -> Sifat_Yed_Metaphor gibi spesifik alt türlere inmek için zorunludur.
             for child in entity.children:
                 if _trace_alaka_path(child.ontologic_id):
                     return True
@@ -99,6 +102,7 @@ class Layer1HeuristicGraph:
             for item in pred_list:
                 if isinstance(item, tuple):
                     pred_id, arg_id, arity = item
+                
                     if arity == 2 and '::' in arg_id:
                         try:
                             amil_str, mamul_str = arg_id.split('::', 1)

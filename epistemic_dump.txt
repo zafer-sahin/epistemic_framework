@@ -410,7 +410,7 @@ DOSYA: ./core/exceptions.py
 DOSYA: ./core/layer1_graph.py
 ==================================================
 from typing import Dict, Any, Optional, List
-from linguistics.ilm_wad_adapter import SemanticStatementIR
+from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 from core.models import BaseOntology, EpistemicEntity
 
 class Layer1HeuristicGraph:
@@ -455,39 +455,46 @@ class Layer1HeuristicGraph:
         
     def find_mana_el_mana_chain(self, source_id: str, target_id: str) -> List[str]:
         """
-        [FAZ 3] Cürcânî'nin Nazm ve Ma'nâ el-Ma'nâ (İlm-i Beyân) algoritması.
-        Literal anlamdan (Ma'nâ) mecaz anlama (Ma'nâ el-Ma'nâ) giden nedensellik ve araz zincirini (Alâka) bulur.
-        BFS (Breadth-First Search) ile relation_type izleri takip edilir.
+        [FAZ 2 ENTEGRASYONU] İlm-i Beyân Alâka İzi (Deterministic Path).
+        Mevcut BFS iptal edildi. Hakiki mecazın (Mecaz-ı Mürsel ve İstiare)
+        yönlü nedensellik bağları (Alâka-i Sebebiyye, Mülâzemet vb.) üzerinden 
+        deterministik bir '_trace_alaka_path' algoritması kurgulandı.
         """
-        queue = [[source_id]]
-        visited = set([source_id])
+        visited = set()
+        path = []
 
-        while queue:
-            path = queue.pop(0)
-            current_node = path[-1]
-
+        def _trace_alaka_path(current_node: str) -> bool:
             if current_node == target_id:
-                return path
+                path.append(current_node)
+                return True
+
+            if current_node in visited:
+                return False
+
+            visited.add(current_node)
+            path.append(current_node)
 
             entity = self.entity_map.get(current_node)
             if not entity:
-                continue
+                path.pop()
+                return False
 
+            # 1. Öncelik: Doğrudan İlm-i Beyân Alâka tiplerine sahip ilişkiler (Sebebiyye/Mülâzemet)
             for rel in entity.relations:
-                if rel.target_id not in visited:
-                    visited.add(rel.target_id)
-                    new_path = list(path)
-                    new_path.append(rel.target_id)
-                    queue.append(new_path)
-                    
-            # Ana hedef hiyerarşik bir alt türevse (Örn: Kudret -> Sifat_Yed_Metaphor) aşağıya doğru da ara
+                if getattr(rel, 'alaka_type', None):
+                    if _trace_alaka_path(rel.target_id):
+                        return True
+
+            # 2. Öncelik: Cüz'iyye/Külliyye Alâkası (Hiyerarşik Alt/Üst Bağlantılar)
             for child in entity.children:
-                if child.ontologic_id not in visited:
-                    visited.add(child.ontologic_id)
-                    new_path = list(path)
-                    new_path.append(child.ontologic_id)
-                    queue.append(new_path)
-                    
+                if _trace_alaka_path(child.ontologic_id):
+                    return True
+
+            path.pop()
+            return False
+
+        if _trace_alaka_path(source_id):
+            return path
         return []
 
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
@@ -497,24 +504,30 @@ class Layer1HeuristicGraph:
         max_conflict = 0.0
         flagged_predicates = []
 
-        for item in ir_matrix.predicates:
-            # Sadece atomik yüklemler ve ilişki ağları taranır (Şartiyye Nested operatörler L3 Z3 uzayına bırakılır)
-            if isinstance(item, tuple):
-                pred_id, arg_id, arity = item
-                if arity == 2 and '::' in arg_id:
-                    try:
-                        amil_str, mamul_str = arg_id.split('::', 1)
-                        amil_ent = self.entity_map.get(amil_str)
-                        mamul_ent = self.entity_map.get(mamul_str)
-                        
-                        if amil_ent and mamul_ent:
-                            conflict = self._evaluate_modal_conflict(amil_ent, mamul_ent)
+        # [FAZ 2 ENTEGRASYONU] NestedPredicate içeren Kasr/Deontik yapıları taramak için rekürsif tarayıcı
+        def _scan_predicates(pred_list):
+            nonlocal max_conflict
+            for item in pred_list:
+                if isinstance(item, tuple):
+                    pred_id, arg_id, arity = item
+                    if arity == 2 and '::' in arg_id:
+                        try:
+                            amil_str, mamul_str = arg_id.split('::', 1)
+                            amil_ent = self.entity_map.get(amil_str)
+                            mamul_ent = self.entity_map.get(mamul_str)
                             
-                            if conflict >= 0.5:
-                                max_conflict = max(max_conflict, conflict)
-                                flagged_predicates.append(arg_id)
-                    except ValueError:
-                        continue 
+                            if amil_ent and mamul_ent:
+                                conflict = self._evaluate_modal_conflict(amil_ent, mamul_ent)
+                                
+                                if conflict >= 0.5:
+                                    max_conflict = max(max_conflict, conflict)
+                                    flagged_predicates.append(arg_id)
+                        except ValueError:
+                            continue 
+                elif isinstance(item, NestedPredicate):
+                    _scan_predicates(item.args)
+
+        _scan_predicates(ir_matrix.predicates)
 
         is_metaphor_likely = max_conflict >= 0.5
 
@@ -598,7 +611,6 @@ class Layer3SMTCircuitBreaker:
         self.core_solver.solver.set("smt.macro_finder", True)
         
         self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
-        # Global bağlam zehirlenmesini ve z3 named assertion çökmelerini engellemek için lokal köprü önbelleği
         self._proven_bridges = set()
         self._active_bridge_axioms = []
 
@@ -632,6 +644,7 @@ class Layer3SMTCircuitBreaker:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
             args = [self._build_z3_expr(a, w_const, tz_const, tv_const) for a in item.args]
+            
             if item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
@@ -639,15 +652,12 @@ class Layer3SMTCircuitBreaker:
             elif item.operator == "Inadi_Hakikiyye":
                 if len(args) == 2:
                     return z3.And(z3.Or(args[0], args[1]), z3.Not(z3.And(args[0], args[1])))
-                # Çoklu argümanlar için zincirleme XOR benzeri davranış (basitleştirilmiş)
                 return z3.Or(args)
             elif item.operator == "Inadi_Maniatul_Cem":
-                # Aynı anda doğru olamazlar (NAND)
                 if len(args) == 2:
                     return z3.Not(z3.And(args[0], args[1]))
                 return z3.Not(z3.And(args))
             elif item.operator == "Inadi_Maniatul_Huluv":
-                # Aynı anda yanlış olamazlar (OR)
                 if len(args) == 2:
                     return z3.Or(args[0], args[1])
                 return z3.Or(args)
@@ -660,6 +670,33 @@ class Layer3SMTCircuitBreaker:
             elif item.operator == "Istifham_Inkari":
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, tz_const, tv_const], z3.Not(body))
+            elif item.operator == "Kasr_Universal_Exclusion":
+                # [FAZ 2 ENTEGRASYONU] Kasr/Hasr (Kısıtlama) Operatörü
+                # Z3'e mutlak evrensel dışlama komutu verilir: ∀x (x ≠ Target ⇒ ¬Predicate(x))
+                base_truth = args[0] if len(args) == 1 else z3.And(args)
+                exclusion_axioms = []
+                
+                for a in item.args:
+                    if isinstance(a, tuple) and a[2] == 2 and '::' in a[1]:
+                        pred_id, arg_id, arity = a
+                        amil_str, mamul_str = arg_id.split('::', 1)
+                        predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
+                        
+                        y_kasr = z3.Const('y_kasr', self.core_solver.builder.EntitySort)
+                        amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
+                        mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
+                        
+                        exclusion = z3.ForAll([w_const, tz_const, tv_const, y_kasr],
+                            z3.Implies(
+                                y_kasr != mamul_const,
+                                z3.Not(predicate(w_const, tz_const, tv_const, amil_const, y_kasr))
+                            )
+                        )
+                        exclusion_axioms.append(exclusion)
+                        
+                if exclusion_axioms:
+                    return z3.And(base_truth, *exclusion_axioms)
+                return base_truth
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Bilinmeyen hiyerarşik operatör: {item.operator}")
 
@@ -1099,6 +1136,8 @@ class RelationalConstraint(BaseModel):
     relation_type: str
     target_id: str  
     axiom: str
+    # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi (Nedensellik Vektörü)
+    alaka_type: Optional[str] = Field(default=None, description="Mecaz-ı Mürsel veya İstiare alâkası (Örn: Alaka_Sebebiyye, Alaka_Cuziyye)")
 
 class EpistemicEntity(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1472,7 +1511,14 @@ DOSYA: ./data/base_ontology.json
                                             {
                                                 "relation_type": "Luzum_Araz",
                                                 "target_id": "Bats",
-                                                "axiom": "Implies"
+                                                "axiom": "Implies",
+                                                "alaka_type": "Alaka_Mülazemet"
+                                            },
+                                            {
+                                                "relation_type": "Luzum_Zati",
+                                                "target_id": "Kudret",
+                                                "axiom": "Implies",
+                                                "alaka_type": "Alaka_Sebebiyye"
                                             }
                                         ],
                                         "children": []
@@ -1540,6 +1586,34 @@ DOSYA: ./data/base_ontology.json
                                                 "children": []
                                             }
                                         ]
+                                    },
+                                    {
+                                        "ontologic_id": "Harf_Kasr_Innema",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "İnnemâ (Kasr/Hasr Edatı)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Harf_Kasr_Illa",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "İllâ (İstisna/Kasr Edatı)" },
+                                        "level": 3,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "relations": [],
+                                        "children": []
                                     }
                                 ]
                             }
@@ -1649,9 +1723,12 @@ class ContextualLexicon:
     Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
     Kelimelerin sadece yan yana gelmesi (lookahead) değil, doğrudan yapısal (AST) 
     olarak birbirlerine bağlanması (Mudaf_MudafIlayh vb.) denetlenir.
+    [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
     """
     def __init__(self):
         self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+        # İlm-i Ma'ânî Kasr (Hasr) Operatörleri
+        self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
 
     def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None) -> None:
         word_lower = word.lower()
@@ -1684,7 +1761,7 @@ class ContextualLexicon:
             mamul_lower = mamul.lower()
             
             for trigger, ont_id in triggers.items():
-                valid_relations = ["Mudaf_MudafIlayh", "Mubteda_Haber", "Fail", "Meful", "Sifat_Mevsuf"]
+                valid_relations = ["Mudaf_MudafIlayh", "Mubteda_Haber", "Fail", "Meful", "Sifat_Mevsuf", "Rel_Ihtisas"]
                 
                 if rel_type in valid_relations:
                     if (target_lower in amil_lower and trigger in mamul_lower) or \
@@ -1695,6 +1772,11 @@ class ContextualLexicon:
 
     def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None) -> str:
         word_lower = word.lower()
+
+        # [FAZ 2 ENTEGRASYONU] Kasr Operatörleri Doğrudan Çözümlenir
+        if word_lower in self.kasr_operators:
+            return f"Harf_{self.kasr_operators[word_lower]}"
+
         if word_lower not in self._tensor:
             raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' tensörde kayıtlı değil.")
 
@@ -1886,6 +1968,11 @@ class StructuralPositingEngine:
         return predicates
 
 class IlmWadAdapter:
+    """
+    Doğal dil bileşenlerini (AST ve Sarf) Birinci Dereceden Mantık (FOL) matrislerine (Semantic IR) dönüştürür.
+    Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen 'Kasr_Data' verisini 'Kasr_Universal_Exclusion' 
+    NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
+    """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
         self.discourse = discourse
@@ -1918,6 +2005,11 @@ class IlmWadAdapter:
         processed_roles = set()
 
         for amil, mamul, rel_type, _ in dependencies:
+            # [FAZ 2 ENTEGRASYONU] Tevkid, Kasr ve İhtisas (Takdim) kenarları atomik ilişkiler (Rel_X) 
+            # olarak Z3'e gönderilmez; Pragmatics katmanında yakalanıp NestedPredicate'e sarmalanır.
+            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas']:
+                continue
+            
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
                 continue
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
@@ -1929,9 +2021,6 @@ class IlmWadAdapter:
 
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies)
-            
-            if rel_type == 'Tevkid_Modifier':
-                continue
             
             rel_id = f"Rel_{rel_type}"
             atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
@@ -1975,6 +2064,14 @@ class IlmWadAdapter:
             inkari_logic = NestedPredicate(operator="Istifham_Inkari", args=ir_predicates)
             ir_predicates = [inkari_logic]
 
+        # [FAZ 2 ENTEGRASYONU] İlm-i Ma'ânî Kasr (Hasr) İşlemesi
+        kasr_data = pragmatics_res.get("kasr_data")
+        if kasr_data:
+            # Kasr (Kısıtlama) verisi tespit edildiyse tüm atomik yüklemler evrensel dışlama 
+            # (Kasr_Universal_Exclusion) operatörüyle sarmalanarak Z3'e yollanır.
+            kasr_logic = NestedPredicate(operator="Kasr_Universal_Exclusion", args=ir_predicates)
+            ir_predicates = [kasr_logic]
+
         unique_predicates = []
         seen = set()
         for item in ir_predicates:
@@ -1996,6 +2093,9 @@ class IlmWadAdapter:
             search_key = morph_data.root
 
         if morph_data and morph_data.ontologic_type == "Harf_Tevkid":
+            return f"GrammarNode_{search_key.capitalize()}"
+            
+        if morph_data and morph_data.ontologic_type == "Harf_Kasr":
             return f"GrammarNode_{search_key.capitalize()}"
 
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies)
@@ -2026,6 +2126,7 @@ class NahivDependencyCompiler:
     Arapça Sentaktik Bağımlılık Ağacını (Nahiv AST) üreten parser.
     Faz 10.2: Alt-ağaç (Sub-Tree) çözümleyicileri entegre edildi.
     Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
+    Faz 2 - Adım 2.5: Takdim (Pre-positioning) ve İhtisas (Kasr) tespiti.
     İzafet (İsim Tamlaması), Sıfat-Mevsuf ve Hal ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
@@ -2054,6 +2155,11 @@ class NahivDependencyCompiler:
                 dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
                 continue
             
+            # [FAZ 2.5] Kasr Edatlarının (İnnemâ, İllâ) Bağlanması
+            if m1 and m1.ontologic_type == "Harf_Kasr":
+                dependencies.append((t2, t1, 'Kasr_Modifier', 'None'))
+                continue
+            
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
                 # İzafet (Mudaf - Mudaf İleyh) Matrisi
                 if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i'))):
@@ -2075,10 +2181,12 @@ class NahivDependencyCompiler:
 
         # 2. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL KONTROLÜ
         amil_token = None
-        for token in tokens:
+        amil_index = -1
+        for idx, token in enumerate(tokens):
             morph = lexicon.get(token)
             if morph and morph.ontologic_type == "Fiil":
                 amil_token = token
+                amil_index = idx
                 break
         
         # 3. İSİM CÜMLESİ (Kadiyye-i Hamliyye) ZİNCİRİ
@@ -2104,7 +2212,7 @@ class NahivDependencyCompiler:
             return dependencies
 
         # 4. FİİL CÜMLESİ (Verbal Sentence) ZİNCİRİ
-        for token in tokens:
+        for idx, token in enumerate(tokens):
             if token == amil_token: 
                 continue
                 
@@ -2118,7 +2226,12 @@ class NahivDependencyCompiler:
                 # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
                 is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
                 if not is_hal:
-                    dependencies.append((amil_token, token, 'Meful', 'Mansub'))
+                    # [FAZ 2.5] İlm-i Ma'ânî İhtisas (Takdim) Kontrolü
+                    # Eğer meful, fiilden (amil) önce gelmişse bu bir İhtisas/Kasr durumudur.
+                    if idx < amil_index:
+                        dependencies.append((amil_token, token, 'Rel_Ihtisas', 'Mansub'))
+                    else:
+                        dependencies.append((amil_token, token, 'Meful', 'Mansub'))
             elif token.lower().endswith(('in', 'i')):
                 is_sub_tree_child = any(rel == 'Mudaf_MudafIlayh' and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
@@ -2161,6 +2274,7 @@ class MaaniSpeechActAnalyzer:
     Faz 2 - Adım 2.3: PragmaticsFilter'ın yerine inşa edilmiştir.
     Cümlenin formunu (vurgu/tevkîd) muhatabın epistemik inkâr derecesiyle (Denial Level) çapraz denetler.
     Faz 2 - Adım 2.4: İstifham-ı İnkârî (Reddedici Soru) tespiti.
+    Faz 2 - Adım 2.5: Kasr/Hasr (Kısıtlama) ve İhtisas (Takdim/Te'hir) tespiti eklendi.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
@@ -2169,16 +2283,17 @@ class MaaniSpeechActAnalyzer:
             "imperative": ["if'al", "la_taf'al", "ef'al", "li_yaf'al"]
         }
         self.nefy_markers = {"illa", "la", "ma", "lam", "lan"}
+        self.kasr_markers = {"innema", "illa"}
 
     def analyze_pragmatics(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         if not tokens:
             return {"is_valid": False, "type": "Empty"}
         
         first_token = tokens[0].lower()
+        has_nefy = any(t.lower() in self.nefy_markers for t in tokens)
         
         # 1. İstifham-ı İnkârî ve Normal Soru Kontrolü (Faz 2.4)
         if first_token in self.inshai_markers["question"]:
-            has_nefy = any(t.lower() in self.nefy_markers for t in tokens)
             if has_nefy:
                 return {
                     "is_valid": True, 
@@ -2214,8 +2329,42 @@ class MaaniSpeechActAnalyzer:
                 "type": "MAANI_VIOLATION",
                 "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez."
             }
-            
-        return {"is_valid": True, "type": "Khabari"}
+
+        # 4. İlm-i Ma'ânî: Kasr (Hasr) ve İhtisas Tespiti (Faz 2.5)
+        kasr_data = None
+        
+        # A. Takdim/Te'hir İhtisası (Mefulün Faile/Fiile Takdimi)
+        ihtisas_deps = [dep for dep in dependencies if dep[2] == 'Rel_Ihtisas']
+        if ihtisas_deps:
+            amil = ihtisas_deps[0][0]
+            mamul = ihtisas_deps[0][1]
+            kasr_data = {
+                "kasr_type": "Takdim_Ihtisas",
+                "kasr_target": mamul,
+                "kasr_predicate": amil,
+                "message": f"Takdim (İhtisas) tespit edildi. Eylem ({amil}) sadece hedefe ({mamul}) kısıtlanacak."
+            }
+        
+        # B. İnnemâ ile Kasr
+        elif "innema" in [t.lower() for t in tokens]:
+            # İnnemâ genellikle cümlede son gelen öğeye (Haber veya Meful) kısıtlama yapar.
+            kasr_data = {
+                "kasr_type": "Kasr_Innema",
+                "message": "İnnemâ edatı ile Kasr tespit edildi. Evrensel dışlama (Universal Exclusion) uygulanacak."
+            }
+        
+        # C. Nefy + İllâ ile Kasr
+        elif has_nefy and "illa" in [t.lower() for t in tokens]:
+            kasr_data = {
+                "kasr_type": "Kasr_Nefy_Illa",
+                "message": "Nefy ve İllâ ile Kasr tespit edildi. Belirtilen öğe dışındakiler dışlanacak."
+            }
+
+        response = {"is_valid": True, "type": "Khabari"}
+        if kasr_data:
+            response["kasr_data"] = kasr_data
+
+        return response
         
     def is_khabari(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         res = self.analyze_pragmatics(tokens, dependencies)
@@ -2240,13 +2389,12 @@ class SarfEngine:
     Üretken Morfoloji Motoru ('İlm-i Sarf).
     Faz 1.1: Vaz' Nev'î (Kategorik Atama) matrisi entegre edildi.
     Faz 2 - Adım 2.2: İlm-i Ma'ânî (Tevkîd) edatları ontolojik evrene tanıtıldı.
-    [HATA GİDERME]: İstifham (Soru) ve Nefy (Olumsuzluk) edatları harf setine eklendi,
-    böylece Sarf motorunun bu edatlarda C-V imza çıkarmaya çalışıp çökmesi engellendi.
+    Faz 2 - Adım 2.3: Kasr (Hasr) edatları (İnnemâ, İllâ) sisteme eklendi.
+    [HATA GİDERME]: İstifham (Soru) ve Nefy (Olumsuzluk) edatları harf setine eklendi.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
         
-        # [LOGIC FIX]: Tüm sentaktik harfler, istifham edatları ve nefy edatları buraya dahil edildi.
         self.harf_set = {
             "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
             "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  # İstifham Edatları
@@ -2255,6 +2403,9 @@ class SarfEngine:
         
         # [FAZ 2.2] Tevkîd (Pekiştirme) Edatları
         self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
+        
+        # [FAZ 2.3] Kasr (Hasr/Kısıtlama) Edatları
+        self.kasr_set = {"innema", "illa"}
         
         # Wazan Matrix Formatı: (Vezin_Adı, Ontolojik_Tip, Kök_Çıkarma_Komutları, Thematic_Role)
         self.wazan_matrix = {
@@ -2321,6 +2472,16 @@ class SarfEngine:
     def _derive_morphology(self, word: str) -> MorphologicalAnalysis:
         word_lower = word.lower()
         
+        # 0. Kasr (Hasr) Edatı Fallback
+        if word_lower in self.kasr_set:
+            return MorphologicalAnalysis(
+                original_word=word_lower,
+                root=word_lower,
+                pattern="Harf_Kasr",
+                ontologic_type="Harf_Kasr",
+                thematic_role=None
+            )
+
         # 1. Tevkîd Harfi Fallback
         if word_lower in self.tevkid_set:
             return MorphologicalAnalysis(
@@ -2395,13 +2556,15 @@ class EpistemicTokenizer:
     Epistemik Derleyici İçin Gelişmiş Tokenizer.
     Faz 10.3: Clitic Splitting (Bitişik Edat Ayrıştırma) entegre edildi.
     Faz 2 - Adım 2.2: Lam-ı Tevkîd ('la') ön eki sisteme tanıtıldı.
+    Faz 2 - İlm-i Ma'ânî: Kasr edatlarının (İnnemâ, İllâ) bitişik formlardan korunması.
     'wa-', 'fa-', 'bi-', 'li-', 'ka-', 'la-' gibi ön ekleri (Prefixes) gövdeden
     ayırarak Sarf motorunun yapısal imza (C-V) algoritmasını korur.
     """
     def __init__(self):
         # Bitişik yazılan edat ve bağlaçlar (Harf-i Cer, Atıf harfleri ve Lam-ı Tevkîd)
-        # [FAZ 2.2] 'la' (Lam-ı Tevkîd/İbtida) eklendi.
         self.clitic_prefixes = ['wa', 'fa', 'bi', 'li', 'ka', 'la']
+        # Kasr edatları yapısal olarak bölünmemelidir.
+        self.protected_particles = ['innema', 'illa']
         
     def tokenize(self, sentence: str) -> List[str]:
         if not sentence:
@@ -2412,16 +2575,26 @@ class EpistemicTokenizer:
         
         normalized_tokens = []
         for token in raw_tokens:
+            if token in self.protected_particles:
+                normalized_tokens.append(token)
+                continue
+                
             split_occurred = False
             # 2. Clitic Splitting (Ön ek ayrıştırma)
             for prefix in self.clitic_prefixes:
-                # Eğer kelime prefix ile başlıyorsa ve geriye kalan kısım 
-                # tek başına anlamlı bir sülâsî kök/isim olabilecek uzunluktaysa (>2)
                 if token.startswith(prefix) and len(token) > len(prefix) + 2:
-                    normalized_tokens.append(prefix)
-                    normalized_tokens.append(token[len(prefix):])
-                    split_occurred = True
-                    break
+                    # Eğer kelimenin kalanı korumalı bir edatsa (Örn: wa+innema)
+                    remainder = token[len(prefix):]
+                    if remainder in self.protected_particles:
+                        normalized_tokens.append(prefix)
+                        normalized_tokens.append(remainder)
+                        split_occurred = True
+                        break
+                    else:
+                        normalized_tokens.append(prefix)
+                        normalized_tokens.append(remainder)
+                        split_occurred = True
+                        break
             
             if not split_occurred:
                 normalized_tokens.append(token)
