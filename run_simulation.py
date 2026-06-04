@@ -8,6 +8,7 @@ from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
 from core.layer3_smt import Layer3SMTCircuitBreaker
 from core.epistemic_orchestrator import EpistemicOrchestrator
+from core.exceptions import DiachronicViolationError
 
 # Dilbilim Katmanları
 from linguistics.tokenizer import EpistemicTokenizer
@@ -60,6 +61,17 @@ def execute_healthcheck():
     lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
     lexicon.register_word("drb", "Base", "Kavram_Vuran")
     lexicon.register_word("masiy", "Base", "Masi") 
+    
+    # [FAZ 1] Sızıntı Testi için Seküler Kelime Kaydı Denemesi
+    # Sarf motoru 'demokrasi' girdisinden 'demokras' kökünü çıkaracağı için test kök üzerinden yapılır.
+    print("[LOG] Diachronic Koruma Testi: 'Modern' epoch kaydı deneniyor...")
+    try:
+        lexicon.register_word("demokras", "Base", "Sekuler_Otorite", epoch="Modern")
+    except DiachronicViolationError as e:
+        print(f"[BAŞARILI] Güvenlik Duvarı Kaydı Reddetti: {e}")
+        
+    # Senaryo 3'ün Orkestratör düzeyinde reddedilmesini test etmek için tensöre arkadan zerk edilir
+    lexicon._tensor["demokras"] = {"Modern": {"Base": {"Kadiyye-i_Hamliyye": {"default": "Sekuler_Otorite", "context_triggers": {}}}}}
 
     adapter = IlmWadAdapter(lexicon, discourse)
     l1 = Layer1HeuristicGraph(ontology)
@@ -67,7 +79,7 @@ def execute_healthcheck():
     l3 = Layer3SMTCircuitBreaker(solver, timeout_ms=3000)
     
     orchestrator = EpistemicOrchestrator(adapter, l1, l2, l3)
-    print("[BAŞARILI] Orkestratör ve tüm alt-motorlar belleğe yüklendi.\n")
+    print("\n[BAŞARILI] Orkestratör ve tüm alt-motorlar belleğe yüklendi.\n")
 
     # 2. TEST SENARYOLARI
     sentence_1 = "yadu allahi" 
@@ -88,18 +100,28 @@ def execute_healthcheck():
     print(f"Sonuç: [{res_ashari['status']}] -> {res_ashari.get('message')}")
     print(f"L2 Kararı: {res_ashari.get('l2_context')}\n")
 
+    print("--- SENARYO 3: [FAZ 1 - AIR-GAP / DIACHRONIC İHLALİ] SEKÜLER MSA SIZINTISI KONTROLÜ ---")
+    sentence_secular = "demokrasi allahi"
+    tokens_sec = tokenizer.tokenize(sentence_secular)
+    morph_sec = sarf.derive_lexicon(tokens_sec)
+    ast_sec = nahiv.suggest_dependencies(tokens_sec, morph_sec)
+    print(f"Girdi: '{sentence_secular}' | Epoch: 'Modern' (MSA Sızıntı Testi)")
+    discourse.clear_memory()
+    res_secular = orchestrator.process_statement(tokens_sec, ast_sec, AshariUsul(), morph_sec)
+    print(f"Sistem Tepkisi: [{res_secular['status']}] -> {res_secular.get('message')}\n")
+
     sentence_2 = "tekvinu allahi"
     tokens_2 = tokenizer.tokenize(sentence_2)
     morph_2 = sarf.derive_lexicon(tokens_2)
     ast_2 = nahiv.suggest_dependencies(tokens_2, morph_2)
     
-    print("--- SENARYO 3: MÂTÜRÎDÎ USÛLÜ (DÜĞÜM BAZLI DSL YASAĞI) ---")
+    print("--- SENARYO 4: MÂTÜRÎDÎ USÛLÜ (DÜĞÜM BAZLI DSL YASAĞI) ---")
     print(f"Girdi: '{sentence_2}' | AST: {ast_2}")
     discourse.clear_memory()
     res_maturidi = orchestrator.process_statement(tokens_2, ast_2, MaturidiUsul(), morph_2)
     print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
 
-    print("--- SENARYO 4: CÜRCÂNÎ MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
+    print("--- SENARYO 5: CÜRCÂNÎ MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
     discourse.clear_memory()
     ir_mujib = SemanticStatementIR(
         active_namespace="Ashari", 
@@ -116,7 +138,7 @@ def execute_healthcheck():
     print(f"Mucîb (Ashari): Cemad | Sâil (Salafi): Nami")
     print(f"Sonuç: [{res_muaradah['status']}] -> {res_muaradah.get('message')}\n")
 
-    print("--- SENARYO 5: İLM-İ VAZ' NEV'Î (YAPISAL LÜZUMİYET VE TEMATİK ROL) ---")
+    print("--- SENARYO 6: İLM-İ VAZ' NEV'Î (YAPISAL LÜZUMİYET VE TEMATİK ROL) ---")
     sentence_5 = "zeydun daribun"
     tokens_5 = tokenizer.tokenize(sentence_5)
     morph_5 = sarf.derive_lexicon(tokens_5)
@@ -128,7 +150,7 @@ def execute_healthcheck():
     print(f"Çıkarılan Tematik Rol (Thematic Role): {morph_5['daribun'].thematic_role}")
     print(f"Sonuç: [{res_vaz['status']}] (Role_Agent tespiti otonom Role_Action yarattı)\n")
 
-    print("--- SENARYO 6: İLM-İ MA'ÂNÎ (MUKTAZÂ EL-HÂL VE İSTİFHAM-I İNKÂRÎ) ---")
+    print("--- SENARYO 7: İLM-İ MA'ÂNÎ (MUKTAZÂ EL-HÂL VE İSTİFHAM-I İNKÂRÎ) ---")
     sentence_6a = "inna zeydun daribun"
     tokens_6a = tokenizer.tokenize(sentence_6a)
     morph_6a = sarf.derive_lexicon(tokens_6a)
@@ -140,7 +162,7 @@ def execute_healthcheck():
     print(f"Girdi (Tevkîd): '{sentence_6a}' | Sâil Zihni: KHALI_AL_ZIHN")
     print(f"Sonuç: [{res_maani_1['status']}] -> {res_maani_1.get('message')}\n")
 
-    print("--- SENARYO 7: ÂDÂB-I BAHS (FAZ 5 - TAHRÎR-İ NİZA' VE MÜLÂZAMA) ---")
+    print("--- SENARYO 8: ÂDÂB-I BAHS (FAZ 5 - TAHRÎR-İ NİZA' VE MÜLÂZAMA) ---")
     clean_solver = AristotelianSolver(ontology)
     fsm_engine = AdabAlBahthEngine(clean_solver, discourse)
     fsm_engine.reset_session()
@@ -157,7 +179,7 @@ def execute_healthcheck():
     res_nakz = fsm_engine.attack_evidence("Nakz")
     print(f"Nakz (Çürütme) Sonucu: [{res_nakz['status']}] -> {res_nakz['message']}\n")
 
-    print("--- SENARYO 8: KÂTİBÎ ŞEMSİYYE KİPLİKLERİ (FAZ 4 - ZÂT/VASIF AYRIMI) ---")
+    print("--- SENARYO 9: KÂTİBÎ ŞEMSİYYE KİPLİKLERİ (FAZ 4 - ZÂT/VASIF AYRIMI) ---")
     sentence_8 = "zeydun daribun masiyan"
     tokens_8 = tokenizer.tokenize(sentence_8)
     morph_8 = sarf.derive_lexicon(tokens_8)
@@ -171,7 +193,6 @@ def execute_healthcheck():
             zat_root = morph_8.get(zat).root
             vasif_root = morph_8.get(vasif).root
             
-            # [FAZ 6 FİX] current_tokens imza uyumsuzluğu dependencies olarak güncellenmiştir
             zat_ont_id = lexicon.resolve_id(zat_root, "Base", dependencies=ast_8)
             vasif_ont_id = lexicon.resolve_id(vasif_root, "Base", dependencies=ast_8)
             

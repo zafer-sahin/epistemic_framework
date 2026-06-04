@@ -29,8 +29,9 @@ class TestVazNeviPipeline(unittest.TestCase):
         self.solver = AristotelianSolver(self.ontology)
         self.l3 = Layer3SMTCircuitBreaker(self.solver, timeout_ms=3000)
 
-        self.lexicon.register_word("Zeyd", "Base", "Zeyd_Entity")
-        self.lexicon.register_word("drb", "Base", "Kavram_Vuran")
+        # [FAZ 1] Epoch parametresi ile senkronizasyon
+        self.lexicon.register_word("Zeyd", "Base", "Zeyd_Entity", epoch="Classical")
+        self.lexicon.register_word("drb", "Base", "Kavram_Vuran", epoch="Classical")
 
     def test_sarf_thematic_role_extraction(self):
         morph_data = self.sarf._derive_morphology("daribun")
@@ -42,7 +43,7 @@ class TestVazNeviPipeline(unittest.TestCase):
         morph_lexicon = self.sarf.derive_lexicon(tokens)
         dependencies = self.nahiv.suggest_dependencies(tokens, morph_lexicon)
         
-        ir_matrix = self.adapter.generate_ir(tokens, dependencies, "Base", morph_lexicon)
+        ir_matrix = self.adapter.generate_ir(tokens, dependencies, "Base", morph_lexicon, epoch="Classical")
         
         has_agent_role = any(
             isinstance(pred, tuple) and pred[0] == "Role_Agent" and pred[1] == "Kavram_Vuran" 
@@ -54,7 +55,7 @@ class TestVazNeviPipeline(unittest.TestCase):
         tokens = ["zeydun", "daribun"]
         morph_lexicon = self.sarf.derive_lexicon(tokens)
         dependencies = self.nahiv.suggest_dependencies(tokens, morph_lexicon)
-        ir_matrix = self.adapter.generate_ir(tokens, dependencies, "Base", morph_lexicon)
+        ir_matrix = self.adapter.generate_ir(tokens, dependencies, "Base", morph_lexicon, epoch="Classical")
 
         self.l3.core_solver.solver.push()
         try:

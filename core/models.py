@@ -46,6 +46,10 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
+    # [FAZ 1 ENTEGRASYONU]: Çifte Dönüşümü (Double Conversion) Engelleyen Diachronic Köken Mührü
+    origin_epoch: Literal["Classical", "Modern", "Unknown"] = Field(default="Classical", description="Ontolojik kökenin tarihsel (diachronic) zaman damgası. Sadece 'Classical' mühürlü düğümler Z3'e girebilir.")
+    provenance_locked: bool = Field(default=True, description="Dış LLM, aracı İngilizce API'ler veya MSA seküler sözlük sızıntılarını engellemek için kapatılmış düğüm mührü.")
+    
     # [FAZ 4 ENTEGRASYONU]: Şemsiyye Kiplikleri (Kâtibî'nin 13 Kipliği - Zât ve Vasıf Ayrımı)
     modal_status: Literal[
         "Wajib", "Mumkin", "Mustahil", 

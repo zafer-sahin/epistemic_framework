@@ -1,33 +1,40 @@
 from typing import Dict, Optional, Any, List, Tuple
 from linguistics.discourse_state import DiscourseRegister
+from core.exceptions import DiachronicViolationError
 
 class ContextualLexicon:
     """
-    N-boyutlu Leksikon Tensörü: (word -> namespace -> proposition_type -> {default, context_triggers})
+    N-boyutlu Leksikon Tensörü: (word -> epoch -> namespace -> proposition_type -> {default, context_triggers})
     'İlm-i Vaz adaptasyonunu destekler.
+    [FAZ 1 ENTEGRASYONU]: Diachronic (Tarihsel-Dönemsel) yalıtım eklendi. Yalnızca 'Classical' 
+    (Klasik Arapça) zaman damgasına sahip ontolojik düğümlerin Z3 matrisine girmesine izin verilir.
     Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
-    Kelimelerin sadece yan yana gelmesi (lookahead) değil, doğrudan yapısal (AST) 
-    olarak birbirlerine bağlanması (Mudaf_MudafIlayh vb.) denetlenir.
     [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
     """
     def __init__(self):
-        self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+        # 4 Boyutlu Tensör Hiyerarşisi: Word -> Epoch -> Namespace -> PropositionType
+        self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Dict[str, Any]]]]] = {}
         # İlm-i Ma'ânî Kasr (Hasr) Operatörleri
         self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
 
-    def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None) -> None:
+    def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None, epoch: str = "Classical") -> None:
+        if epoch != "Classical":
+            raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{word}' kelimesi '{epoch}' dönemine ait. Yalnızca 'Classical' (Klasik Arapça) kökleri sisteme kaydedilebilir.")
+
         word_lower = word.lower()
         if word_lower not in self._tensor:
             self._tensor[word_lower] = {}
-        if namespace not in self._tensor[word_lower]:
-            self._tensor[word_lower][namespace] = {}
-        if proposition_type not in self._tensor[word_lower][namespace]:
-            self._tensor[word_lower][namespace][proposition_type] = {"default": None, "context_triggers": {}}
+        if epoch not in self._tensor[word_lower]:
+            self._tensor[word_lower][epoch] = {}
+        if namespace not in self._tensor[word_lower][epoch]:
+            self._tensor[word_lower][epoch][namespace] = {}
+        if proposition_type not in self._tensor[word_lower][epoch][namespace]:
+            self._tensor[word_lower][epoch][namespace][proposition_type] = {"default": None, "context_triggers": {}}
         
         if sibak_trigger:
-            self._tensor[word_lower][namespace][proposition_type]["context_triggers"][sibak_trigger.lower()] = ontologic_id
+            self._tensor[word_lower][epoch][namespace][proposition_type]["context_triggers"][sibak_trigger.lower()] = ontologic_id
         else:
-            self._tensor[word_lower][namespace][proposition_type]["default"] = ontologic_id
+            self._tensor[word_lower][epoch][namespace][proposition_type]["default"] = ontologic_id
 
     def _scan_ast_for_sibak(self, target_word: str, triggers: Dict[str, str], dependencies: List[Tuple[str, str, str, str]] = None) -> Optional[str]:
         """
@@ -55,7 +62,7 @@ class ContextualLexicon:
                         
         return None
 
-    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None) -> str:
+    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None, epoch: str = "Classical") -> str:
         word_lower = word.lower()
 
         # [FAZ 2 ENTEGRASYONU] Kasr Operatörleri Doğrudan Çözümlenir
@@ -65,7 +72,10 @@ class ContextualLexicon:
         if word_lower not in self._tensor:
             raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' tensörde kayıtlı değil.")
 
-        namespace_map = self._tensor[word_lower]
+        if epoch not in self._tensor[word_lower]:
+            raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{word}' kelimesi için '{epoch}' zaman damgasına sahip bir karşılık bulunamadı. Seküler/MSA sızıntısı reddedildi.")
+
+        namespace_map = self._tensor[word_lower][epoch]
 
         def get_from_namespace(ns: str) -> Optional[str]:
             if ns not in namespace_map:
@@ -92,7 +102,7 @@ class ContextualLexicon:
         resolved_base = get_from_namespace("Base")
         if resolved_base: return resolved_base
             
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{word}' kelimesi '{active_namespace}' alanında çözümlenemedi.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{word}' kelimesi '{active_namespace}' alanında (Epoch: {epoch}) çözümlenemedi.")
         
     def dump_tensor(self) -> Dict[str, Any]:
         return self._tensor

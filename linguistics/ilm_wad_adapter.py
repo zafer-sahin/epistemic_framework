@@ -5,6 +5,7 @@ from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.pragmatics import MaaniSpeechActAnalyzer
 from linguistics.discourse_state import DiscourseRegister
 from linguistics.sarf_parser import MorphologicalAnalysis
+from core.exceptions import DiachronicViolationError
 
 class NestedPredicate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -33,6 +34,8 @@ class IlmWadAdapter:
     Doğal dil bileşenlerini (AST ve Sarf) Birinci Dereceden Mantık (FOL) matrislerine (Semantic IR) dönüştürür.
     Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen 'Kasr_Data' verisini 'Kasr_Universal_Exclusion' 
     NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
+    [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 
+    'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -45,7 +48,10 @@ class IlmWadAdapter:
         self.mani_huluv_particles = {"mani_huluv", "la_yahtaliyan"} 
         self.current_tevil_targets: List[str] = []
 
-    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye") -> SemanticStatementIR:
+    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical") -> SemanticStatementIR:
+        if epoch != "Classical":
+            raise DiachronicViolationError("[ÇİFTE DÖNÜŞÜM İHLALİ] Semantic IR Matrisi yalnızca 'Classical' Arapça ontolojisini derleyebilir. Çeviri katmanları yasaktır.")
+            
         if auto_lexicon is None: auto_lexicon = {}
         if tevil_fallback_nodes is None: tevil_fallback_nodes = []
         
@@ -80,8 +86,8 @@ class IlmWadAdapter:
             if amil.lower() in self.mani_huluv_particles or mamul.lower() in self.mani_huluv_particles:
                 continue
 
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
             
             rel_id = f"Rel_{rel_type}"
             atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
@@ -143,7 +149,7 @@ class IlmWadAdapter:
 
         return SemanticStatementIR(active_namespace=active_namespace, predicates=unique_predicates, is_valid_for_z3=True)
         
-    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]]) -> str:
+    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str) -> str:
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
             return pronoun_res
@@ -159,12 +165,12 @@ class IlmWadAdapter:
         if morph_data and morph_data.ontologic_type == "Harf_Kasr":
             return f"GrammarNode_{search_key.capitalize()}"
 
-        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies)
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch)
         
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
-                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies)
-            except ValueError:
+                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch)
+            except (ValueError, DiachronicViolationError):
                 ontologic_id = base_ontologic_id
         else:
             ontologic_id = base_ontologic_id

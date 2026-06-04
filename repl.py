@@ -21,6 +21,7 @@ from schools.salafi_usul import SalafiUsul
 from schools.ashari_usul import AshariUsul
 from schools.maturidi_usul import MaturidiUsul
 from schools.taftazani.adab_al_bahth import AdabAlBahthEngine
+from core.exceptions import DiachronicViolationError, OutOfOntologyError, ContextPoisoningError
 
 class EpistemicShell(cmd.Cmd):
     intro = """
@@ -73,6 +74,9 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             self.lexicon.register_word("nam", "Base", "Nami")
             self.lexicon.register_word("cemad", "Base", "Cemad")
             self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
+
+            # [FAZ 1 TESTİ] Seküler kavram kirliliği (MSA Sızıntısı) örneği
+            self.lexicon.register_word("demokrasi", "Base", "Sekuler_Otorite", epoch="Modern")
             
             self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
@@ -114,8 +118,13 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             
             print(f"\n[SENTAKS] AST: {ast_dependencies}")
             
-            self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon)
+            self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon, epoch="Classical")
             result = self.orchestrator.process_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
+
+            if result.get("status") == "EPISTEMIC_BREACH":
+                print(f"\n[SİSTEMİK RED] Epistemik Kopuş / Sızıntı Tespit Edildi:")
+                print(f"Gerekçe: {result.get('message')}\n")
+                return
 
             print(f"[{result.get('status', 'BİLİNMİYOR')}]")
             if "reason" in result:
@@ -158,6 +167,11 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
                 self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon
             )
             
+            if result.get("status") == "EPISTEMIC_BREACH":
+                print(f"\n[SİSTEMİK RED] Epistemik Kopuş / Sızıntı Tespit Edildi:")
+                print(f"Gerekçe: {result.get('message')}\n")
+                return
+
             print(f"[{result.get('status', 'BİLİNMİYOR')}] -> {result.get('message')}")
             
         except Exception as e:

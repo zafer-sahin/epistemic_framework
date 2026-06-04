@@ -15,6 +15,7 @@ from linguistics.ilm_wad_adapter import IlmWadAdapter
 from schools.maturidi_usul import MaturidiUsul
 from schools.salafi_usul import SalafiUsul
 from schools.ashari_usul import AshariUsul
+from core.exceptions import OutOfOntologyError
 
 class TestDefeasibilityEngine(unittest.TestCase):
     def setUp(self):
@@ -27,18 +28,18 @@ class TestDefeasibilityEngine(unittest.TestCase):
         self.lexicon = ContextualLexicon()
         self.discourse = DiscourseRegister()
         
-        # [FAZ 6] İbn Teymiyye AST Tabanlı Node Relocation Leksikon Yapılandırması
-        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
-        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
+        # [FAZ 6] İbn Teymiyye AST Tabanlı Node Relocation Leksikon Yapılandırması (Epoch kısıtlı)
+        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal", epoch="Classical")
+        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah", epoch="Classical")
         
-        # [FAZ 3] Ma'nâ el-Ma'nâ Leksikon Yapılandırması
-        self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
-        self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
-        self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
-        self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
+        # [FAZ 3] Ma'nâ el-Ma'nâ Leksikon Yapılandırması (Epoch kısıtlı)
+        self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye", epoch="Classical")
+        self.lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback", epoch="Classical")
+        self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye", epoch="Classical")
+        self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback", epoch="Classical")
         
-        self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
-        self.lexicon.register_word("tekvin", "Maturidi", "Tekvin")
+        self.lexicon.register_word("allah", "Base", "Wajib_al_Wujud", epoch="Classical")
+        self.lexicon.register_word("tekvin", "Maturidi", "Tekvin", epoch="Classical")
         
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
         self.l1 = Layer1HeuristicGraph(self.ontology)
@@ -79,6 +80,22 @@ class TestDefeasibilityEngine(unittest.TestCase):
         
         self.assertEqual(result["status"], "SAT_BILA_KAYF", "[OTORİTE İHLALİ] İbn Teymiyye hakikat taşınması (Bila-Kayf) mekanizması çalışmadı.")
         self.assertEqual(result["l2_context"], "BILA_KAYF_NODE_RELOCATION", "L2 otoritesi yanlış karar mekanizması işletti.")
+
+    def test_out_of_ontology_firewall(self):
+        """[FAZ 1] Porphyrios Ağacında (Base Ontology) olmayan rastgele bir kelimenin Z3'e girmesinin reddi."""
+        # Sarf motoru 'uzaylun' kelimesinin sonundaki -un ekini atarak 'uzayl' kökünü üretir.
+        self.lexicon.register_word("uzayl", "Base", "Yabanci_Varlik", epoch="Classical")
+        
+        sentence = "uzaylun allahi"
+        tokens = self.tokenizer.tokenize(sentence)
+        morph = self.sarf.derive_lexicon(tokens)
+        ast = self.nahiv.suggest_dependencies(tokens, morph)
+        
+        self.discourse.clear_memory()
+        result = self.orchestrator.process_statement(tokens, ast, SalafiUsul(), morph)
+        
+        self.assertEqual(result["status"], "EPISTEMIC_BREACH", "[AIR-GAP İHLALİ] Ontolojide olmayan düğüm Z3 motoruna sızdırıldı.")
+        self.assertIn("Yabanci_Varlik", result["message"])
 
 if __name__ == '__main__':
     unittest.main()
