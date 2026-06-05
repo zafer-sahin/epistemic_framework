@@ -17,7 +17,6 @@ class EpistemicOrchestrator:
 
     def _extract_conflict_nodes_from_core(self, unsat_core: str) -> List[str]:
         conflict_nodes = set()
-        # Z3 Core formatını (AXIOM_DISJOINT_Wajib_AND_Mumkin vb.) parse et
         matches = re.findall(r'AXIOM_[A-Z]+_([A-Za-z0-9_]+)', unsat_core)
         for match in matches:
             parts = match.split('_AND_')
@@ -34,7 +33,8 @@ class EpistemicOrchestrator:
         allowed_system_prefixes = ("Rel_", "Role_", "GrammarNode_")
         allowed_operators = {
             "Wajib_Fiqh", "Haram_Fiqh", "Istifham_Inkari", "Kasr_Universal_Exclusion", 
-            "Luzumi", "Inadi_Hakikiyye", "Inadi_Maniatul_Cem", "Inadi_Maniatul_Huluv"
+            "Luzumi", "Inadi_Hakikiyye", "Inadi_Maniatul_Cem", "Inadi_Maniatul_Huluv",
+            "Kasr_Sifat_to_Mevsuf", "Kasr_Mevsuf_to_Sifat"
         }
 
         def _scan_items(items):
@@ -42,7 +42,6 @@ class EpistemicOrchestrator:
                 if isinstance(item, tuple):
                     pred_id = item[0]
                     if not pred_id.startswith(allowed_system_prefixes) and pred_id not in allowed_operators:
-                        # Kavram statik Porphyrios haritasında yoksa ve bir Differentia (Fasıl) ID'si değilse patlat
                         if pred_id not in self.l1.entity_map:
                             is_differentia = any(ent.differentia_id == pred_id for ent in self.l1.entity_map.values() if ent.differentia_id)
                             if not is_differentia:
@@ -52,76 +51,128 @@ class EpistemicOrchestrator:
 
         _scan_items(ir_matrix.predicates)
 
+    def _resolve_ilm_i_beyan(self, ir_matrix: SemanticStatementIR, flagged_elements: List[str], school_rules: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """
+        [FAZ 3 ENTEGRASYONU] Deterministik Te'vil ve Ma'nâ el-Ma'nâ (İlm-i Beyân) İşlemcisi.
+        Hardcoded (statik) string manipülasyonu yerine, L1 grafından gelen nedensellik ve Müşabehet 
+        vektörlerini (İstiare/Mecaz/Kinaye) kullanarak dinamik Z3 ispat rotaları oluşturur.
+        """
+        allow_tevil = school_rules.get("allow_tevil", False)
+        blocked_nodes = school_rules.get("blocked_nodes", [])
+        bridge_messages = []
+
+        if not allow_tevil:
+            return False, bridge_messages
+
+        tevil_basarili = False
+
+        for flagged in flagged_elements:
+            try:
+                amil_str, mamul_str = flagged.split("::", 1)
+            except ValueError:
+                continue
+
+            if amil_str in blocked_nodes or mamul_str in blocked_nodes:
+                continue
+
+            amil_entity = self.l1.entity_map.get(amil_str)
+            if not amil_entity:
+                continue
+
+            potential_targets = [rel.target_id for rel in amil_entity.relations if rel.alaka_type is not None]
+
+            for target_id in potential_targets:
+                if target_id in blocked_nodes:
+                    continue
+
+                # 1. L1 Grafı üzerinden Mecaz/İstiare zincirini talep et
+                chain_data = self.l1.find_mana_el_mana_chain(amil_str, target_id)
+                
+                if chain_data.get("is_found"):
+                    # 2. L3 Z3 SMT üzerinden Kripke semantiği aksiyomlarını ispatla
+                    bridge_proved = self.l3.prove_metaphorical_bridge(chain_data)
+                    
+                    if bridge_proved:
+                        alaka_str = chain_data.get("alaka_type", "Unknown")
+                        bridge_messages.append(f"İlm-i Beyân Çıkarımı: {amil_str} -> {target_id} ({alaka_str}) zihinsel köprüsü Z3'e ispatlatıldı.")
+                        
+                        # 3. IR Matrisi üzerinde Literal -> Mecaz sessiz mutasyonu (In-place)
+                        if hasattr(self.adapter, 'update_ir_predicate'):
+                            self.adapter.update_ir_predicate(ir_matrix, amil_str, target_id)
+                        else:
+                            def _replace_in_tuple(tup: Tuple[str, str, int]) -> Tuple[str, str, int]:
+                                p_id, a_id, arity = tup
+                                new_pred = target_id if p_id == amil_str else p_id
+                                if arity == 1:
+                                    new_arg = target_id if a_id == amil_str else a_id
+                                else:
+                                    args = a_id.split("::")
+                                    new_args = [target_id if a == amil_str else a for a in args]
+                                    new_arg = "::".join(new_args)
+                                return (new_pred, new_arg, arity)
+                            
+                            def _traverse_and_replace(predicates):
+                                new_preds = []
+                                from linguistics.ilm_wad_adapter import NestedPredicate
+                                for item in predicates:
+                                    if isinstance(item, tuple):
+                                        new_preds.append(_replace_in_tuple(item))
+                                    elif isinstance(item, NestedPredicate):
+                                        item.args = _traverse_and_replace(item.args)
+                                        new_preds.append(item)
+                                return new_preds
+                            
+                            ir_matrix.predicates = _traverse_and_replace(ir_matrix.predicates)
+                            
+                        tevil_basarili = True
+                        break 
+
+        return tevil_basarili, bridge_messages
+
     def process_statement(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], usul_profile: AbstractSchoolUsul, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
         max_tevil_retries = usul_profile.dsl_ruleset.get("max_tevil_retries", 1)
         current_attempt = 0
         tevil_flagged_nodes = []
-        bridge_messages = []
         
         has_condition = any(t.lower() in ["in", "iza", "law", "amma", "imma", "aw", "ya"] for t in tokens)
         proposition_type = "Kadiyye-i_Sartiyye" if has_condition else "Kadiyye-i_Hamliyye"
         
         try:
-            while current_attempt <= max_tevil_retries:
-                # [FAZ 1 ENTEGRASYONU] Zorunlu "Classical" zaman damgası (Epoch)
-                ir_matrix = self.adapter.generate_ir(
-                    tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type, epoch="Classical"
-                )
+            # [FAZ 1 ENTEGRASYONU] Zorunlu "Classical" zaman damgası (Epoch)
+            ir_matrix = self.adapter.generate_ir(
+                tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type, epoch="Classical"
+            )
+            
+            if not ir_matrix.is_valid_for_z3:
+                return {
+                    "status": "PRAGMATICS_REJECT", 
+                    "message": "İlm-i Ma'ânî İhlali: İnşâî form (İstifham-ı Hakikî) veya Muktazâ el-Hâl uyumsuzluğu."
+                }
+            
+            # Air-Gapped Ontology Mührü Denetimi
+            self._verify_air_gapped_ontology(ir_matrix)
+            
+            execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
+            
+            # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Te'vil Çıkarımı
+            if execution_result.get("status") == "FALLBACK_TRIGGERED" and current_attempt < max_tevil_retries:
+                l1_analysis = self.l1.analyze_ir(ir_matrix)
+                flagged = l1_analysis.get("flagged_elements", [])
                 
-                if not ir_matrix.is_valid_for_z3:
-                    return {
-                        "status": "PRAGMATICS_REJECT", 
-                        "message": "İlm-i Ma'ânî İhlali: İnşâî form (İstifham-ı Hakikî) veya Muktazâ el-Hâl uyumsuzluğu."
-                    }
+                # Dinamik graf tabanlı Müşabehet / Nedensellik çözümü
+                resolved, bridge_messages = self._resolve_ilm_i_beyan(ir_matrix, flagged, usul_profile.dsl_ruleset)
                 
-                # Air-Gapped Ontology Mührü Denetimi
-                self._verify_air_gapped_ontology(ir_matrix)
-                
-                execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
-                
-                # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Te'vil (Metaphorical Bridge) Çıkarımı
-                if execution_result.get("status") == "FALLBACK_TRIGGERED" and current_attempt < max_tevil_retries:
-                    if usul_profile.dsl_ruleset.get("allow_tevil", False):
-                        unsat_core_str = str(execution_result.get("unsat_core", ""))
-                        conflicts = self._extract_conflict_nodes_from_core(unsat_core_str)
-                        
-                        # Eğer doğrudan UNSAT core okunamadıysa, IR Matrisindeki Literal nodeları tespit et
-                        for item in ir_matrix.predicates:
-                            if isinstance(item, tuple) and len(item) == 3:
-                                args = item[1].split("::")
-                                for arg in args:
-                                    if "Literal" in arg and arg not in conflicts:
-                                        conflicts.append(arg)
-                        
-                        if conflicts:
-                            for conflict_node in conflicts:
-                                if "Literal" in conflict_node:
-                                    target_metaphor = conflict_node.replace("Literal", "Metaphor")
-                                    
-                                    # 1. L1 Graph üzerinden deterministik Alâka (Nexus) yolunu bul
-                                    chain = self.l1.find_mana_el_mana_chain(conflict_node, target_metaphor)
-                                    if chain:
-                                        # 2. Bulunan Alâka yolunu L3 Z3 motoruna Köprü Aksiyomu olarak zerk et
-                                        if self.l3.prove_metaphorical_bridge(chain):
-                                            bridge_messages.append(f"İlm-i Beyân Çıkarımı: {chain} ardışık lüzumiyeti Z3'e ispatlatıldı.")
-                                        
-                            tevil_flagged_nodes.extend(conflicts)
-                            current_attempt += 1
-                            continue
-                        else:
-                            break
-                    else:
-                        break
-
-                if current_attempt > 0 and execution_result.get("status") == "SAT":
-                    execution_result["tevil_applied"] = True
-                    msg_append = f" (Te'vil uygulandı: {tevil_flagged_nodes})"
-                    if bridge_messages:
-                        msg_append += " | " + " | ".join(bridge_messages)
-                    execution_result["message"] += msg_append
-                    
-                return execution_result
-                
+                if resolved:
+                    l3_result = self.l3.execute_sat_check(ir_matrix)
+                    if l3_result["status"] == "SAT":
+                        execution_result["status"] = "SAT"
+                        execution_result["tevil_applied"] = True
+                        msg_append = f" (Te'vil uygulandı)"
+                        if bridge_messages:
+                            msg_append += " | " + " | ".join(bridge_messages)
+                        execution_result["message"] += msg_append
+                        return execution_result
+            
             return execution_result
             
         except (DiachronicViolationError, OutOfOntologyError) as e:
@@ -175,7 +226,6 @@ class EpistemicOrchestrator:
                 model = optimizer.model()
                 penalty_score = optimizer.objectives()[0]
                 
-                # Eğer maliyet 0 ise tamamen paralel, çelişmeyen iddialardır.
                 if model.eval(penalty_score).as_long() == 0:
                     return {
                         "status": "MUARADAH_INEFFECTIVE",

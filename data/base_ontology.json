@@ -35,6 +35,7 @@
                 "differentia_id": null,
                 "propria_ids": [],
                 "accidents_ids": [],
+                "beyan_mushabehat_ids": [],
                 "relations": [],
                 "children": [
                     {
@@ -50,6 +51,7 @@
                         "differentia_id": "Mutlak_Kemal",
                         "propria_ids": ["Ezeliyyet", "Ebediyyet"],
                         "accidents_ids": [],
+                        "beyan_mushabehat_ids": [],
                         "relations": [],
                         "children": [
                             {
@@ -65,6 +67,7 @@
                                 "differentia_id": "La_Yusbeh",
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -80,6 +83,7 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     }
@@ -98,6 +102,7 @@
                                 "differentia_id": null,
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -113,6 +118,7 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     }
@@ -133,6 +139,7 @@
                         "differentia_id": "Hudus",
                         "propria_ids": [],
                         "accidents_ids": [],
+                        "beyan_mushabehat_ids": [],
                         "relations": [],
                         "children": [
                             {
@@ -148,6 +155,7 @@
                                 "differentia_id": "Kaim_Bi_Zatihi",
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -163,6 +171,7 @@
                                         "differentia_id": "Mutahayyiz",
                                         "propria_ids": [ "el_Ebadus_selase" ],
                                         "accidents_ids": [ "el_Levn" ],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": [
                                             {
@@ -178,6 +187,7 @@
                                                 "differentia_id": "Gazi",
                                                 "propria_ids": [ "et_Tenasul" ],
                                                 "accidents_ids": [ "es_Sihha_vel_Marad" ],
+                                                "beyan_mushabehat_ids": [],
                                                 "relations": [],
                                                 "children": [
                                                     {
@@ -193,6 +203,7 @@
                                                         "differentia_id": "Mudrik_Hassas",
                                                         "propria_ids": [ "en_Nevm" ],
                                                         "accidents_ids": [ "el_Cu" ],
+                                                        "beyan_mushabehat_ids": [],
                                                         "relations": [],
                                                         "children": [
                                                             {
@@ -208,8 +219,27 @@
                                                                 "differentia_id": "Natik",
                                                                 "propria_ids": [ "ed_Dahik", "el_Baki" ],
                                                                 "accidents_ids": [ "el_Katib", "el_Kaim" ],
+                                                                "beyan_mushabehat_ids": [],
                                                                 "relations": [],
-                                                                "children": []
+                                                                "children": [
+                                                                    {
+                                                                        "ontologic_id": "Cesur_Insan",
+                                                                        "namespace": "Base",
+                                                                        "terms": { "ar": "Eş-Şücâ" },
+                                                                        "level": 7,
+                                                                        "origin_epoch": "Classical",
+                                                                        "provenance_locked": true,
+                                                                        "modal_status": "Mumkine_i_Amme",
+                                                                        "husn_u_mucerred": false,
+                                                                        "karine_derecesi": 0,
+                                                                        "differentia_id": null,
+                                                                        "propria_ids": ["Secaat"],
+                                                                        "accidents_ids": [],
+                                                                        "beyan_mushabehat_ids": [],
+                                                                        "relations": [],
+                                                                        "children": []
+                                                                    }
+                                                                ]
                                                             },
                                                             {
                                                                 "ontologic_id": "Feres",
@@ -224,7 +254,33 @@
                                                                 "differentia_id": "Sahil",
                                                                 "propria_ids": [ "et_Tesfih" ],
                                                                 "accidents_ids": [ "el_Udme" ],
+                                                                "beyan_mushabehat_ids": [],
                                                                 "relations": [],
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "ontologic_id": "Esed",
+                                                                "namespace": "Base",
+                                                                "terms": { "ar": "Esed (Aslan)" },
+                                                                "level": 6,
+                                                                "origin_epoch": "Classical",
+                                                                "provenance_locked": true,
+                                                                "modal_status": "Mumkine_i_Amme",
+                                                                "husn_u_mucerred": false,
+                                                                "karine_derecesi": 0,
+                                                                "differentia_id": "Zaer",
+                                                                "propria_ids": ["Secaat"],
+                                                                "accidents_ids": [],
+                                                                "beyan_mushabehat_ids": ["Secaat"],
+                                                                "relations": [
+                                                                    {
+                                                                        "relation_type": "Istiare",
+                                                                        "target_id": "Cesur_Insan",
+                                                                        "axiom": "Implies",
+                                                                        "alaka_type": "İstiare_Tahkikiyye",
+                                                                        "luzum_derecesi": "Luzum_u_Zihni"
+                                                                    }
+                                                                ],
                                                                 "children": []
                                                             }
                                                         ]
@@ -244,6 +300,7 @@
                                                 "differentia_id": "La_Nami",
                                                 "propria_ids": [ "el_Hareketul_kasriyye" ],
                                                 "accidents_ids": [],
+                                                "beyan_mushabehat_ids": [],
                                                 "relations": [],
                                                 "children": []
                                             }
@@ -264,6 +321,7 @@
                                 "differentia_id": "Kaim_Bi_Ghayrihi",
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -279,18 +337,21 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [
                                             {
                                                 "relation_type": "Luzum_Araz",
                                                 "target_id": "Bats",
                                                 "axiom": "Implies",
-                                                "alaka_type": "Alaka_Mülazemet"
+                                                "alaka_type": "Alaka_Mülazemet",
+                                                "luzum_derecesi": "Luzum_u_Beyyin"
                                             },
                                             {
                                                 "relation_type": "Luzum_Zati",
                                                 "target_id": "Kudret",
                                                 "axiom": "Implies",
-                                                "alaka_type": "Alaka_Sebebiyye"
+                                                "alaka_type": "Alaka_Sebebiyye",
+                                                "luzum_derecesi": "Luzum_u_Zihni"
                                             }
                                         ],
                                         "children": []
@@ -308,11 +369,14 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [
                                             {
                                                 "relation_type": "Luzum_Zati",
                                                 "target_id": "Kudret",
-                                                "axiom": "Implies"
+                                                "axiom": "Implies",
+                                                "alaka_type": "Alaka_Sebebiyye",
+                                                "luzum_derecesi": "Luzum_u_Zihni"
                                             }
                                         ],
                                         "children": []
@@ -330,6 +394,7 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     },
@@ -346,6 +411,7 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": [
                                             {
@@ -362,10 +428,70 @@
                                                 "differentia_id": null,
                                                 "propria_ids": [],
                                                 "accidents_ids": [],
+                                                "beyan_mushabehat_ids": [],
                                                 "relations": [],
                                                 "children": []
                                             }
                                         ]
+                                    },
+                                    {
+                                        "ontologic_id": "Secaat",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Şecaat (Cesaret)" },
+                                        "level": 3,
+                                        "origin_epoch": "Classical",
+                                        "provenance_locked": true,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Tavil_un_Necad",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Tavîlu'n-Necâd (Kılıç kını uzun)" },
+                                        "level": 3,
+                                        "origin_epoch": "Classical",
+                                        "provenance_locked": true,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 3,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
+                                        "relations": [
+                                            {
+                                                "relation_type": "Kinaye",
+                                                "target_id": "Tavil_ul_Kame",
+                                                "axiom": "Implies",
+                                                "alaka_type": "Kinaye_Sifat",
+                                                "luzum_derecesi": "Luzum_u_Harici"
+                                            }
+                                        ],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Tavil_ul_Kame",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Tavîlu'l-Kâme (Boyu uzun)" },
+                                        "level": 3,
+                                        "origin_epoch": "Classical",
+                                        "provenance_locked": true,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
+                                        "relations": [],
+                                        "children": []
                                     },
                                     {
                                         "ontologic_id": "Harf_Kasr_Innema",
@@ -380,6 +506,7 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     },
@@ -396,6 +523,7 @@
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     }

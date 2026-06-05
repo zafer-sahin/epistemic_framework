@@ -160,26 +160,33 @@ class Layer3SMTCircuitBreaker:
         )
         self.core_solver.solver.add(patient_axiom)
         
-    def prove_metaphorical_bridge(self, chain: List[str]) -> bool:
+    def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> bool:
         """
         [FAZ 3 ENTEGRASYONU] İlm-i Beyân Ma'nâ el-Ma'nâ İspatı.
-        L1'den gelen deterministik nedensellik (Alâka) zincirini (Örn: Yed -> Bats -> Kudret) 
+        L1'den gelen İlm-i Beyân analiz paketini (İstiare Müşabehetleri, Lüzumiyet Dereceleri) 
         Kripke Semantiğine (Olası Dünyalar ve Çift Zaman) uygun Z3 aksiyomlarına dönüştürür.
-        Bu sayede te'vil (metaphor), mantıksal bir sıçrama olmaktan çıkıp ispatlanabilir bir lüzumiyet halini alır.
         """
-        if not chain or len(chain) < 2:
+        if not chain_data or not chain_data.get("is_found"):
             return False
+
+        path = chain_data.get("path", [])
+        if not path or len(path) < 2:
+            return False
+
+        alaka_type = chain_data.get("alaka_type", "Unknown")
+        luzum_derecesi = chain_data.get("luzum_derecesi", "Luzum_u_Zihni")
+        bridge_type = chain_data.get("type")
 
         w_var = z3.Const('w_beyan', self.core_solver.builder.WorldSort)
         tz_var = z3.Const('tz_beyan', self.core_solver.builder.TimeSortZati)
         tv_var = z3.Const('tv_beyan', self.core_solver.builder.TimeSortVasfi)
         x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
 
-        for i in range(len(chain) - 1):
-            source_id = chain[i]
-            target_id = chain[i+1]
+        for i in range(len(path) - 1):
+            source_id = path[i]
+            target_id = path[i+1]
             
-            bridge_id = f"AXIOM_MANA_EL_MANA_{source_id}_TO_{target_id}"
+            bridge_id = f"AXIOM_BEYAN_{alaka_type}_{source_id}_TO_{target_id}"
             
             if bridge_id in self._proven_bridges:
                 continue
@@ -187,12 +194,27 @@ class Layer3SMTCircuitBreaker:
             source_pred = self.core_solver.builder.get_or_create_predicate(source_id, arity=1)
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
 
-            # Lüzum-u Zihnî: Kaynağın (Lafz) var olduğu her olası dünya ve zamanda, 
-            # hedefin (Ma'nâ el-Ma'nâ) de var olması zorunludur.
-            bridge_axiom = z3.ForAll(
-                [w_var, tz_var, tv_var, x_var],
-                z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))
-            )
+            # [FAZ 3] İstiare (Müşabehet / Câmi') Ortak Özellik İspatı
+            if bridge_type == "Istiare":
+                mushabehat = chain_data.get("mushabehat", [])
+                for trait in mushabehat:
+                    trait_pred = self.core_solver.builder.get_or_create_predicate(trait, arity=1)
+                    trait_axiom_src = z3.ForAll([w_var, tz_var, tv_var, x_var], z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), trait_pred(w_var, tz_var, tv_var, x_var)))
+                    trait_axiom_tgt = z3.ForAll([w_var, tz_var, tv_var, x_var], z3.Implies(target_pred(w_var, tz_var, tv_var, x_var), trait_pred(w_var, tz_var, tv_var, x_var)))
+                    self._active_bridge_axioms.extend([trait_axiom_src, trait_axiom_tgt])
+
+            # Lüzum Derecesine Göre Kripke Niceleyicisi Optimizasyonu
+            if luzum_derecesi == "Luzum_u_Harici":
+                # Sadece mevcut dışsal dünyada geçerli olan ampirik/dışsal mülâzama (Zihinsel zorunluluk değil)
+                w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
+                bridge_axiom = z3.ForAll([tz_var, tv_var, x_var], 
+                    z3.Implies(source_pred(w_base, tz_var, tv_var, x_var), target_pred(w_base, tz_var, tv_var, x_var))
+                )
+            else:
+                # Luzum_u_Zihni veya Luzum_u_Beyyin: Tüm olası dünyalarda geçerli mutlak zihinsel geçiş (Külliyye/Sebebiyye vb.)
+                bridge_axiom = z3.ForAll([w_var, tz_var, tv_var, x_var],
+                    z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))
+                )
             
             self._active_bridge_axioms.append(bridge_axiom)
             self._proven_bridges.add(bridge_id)

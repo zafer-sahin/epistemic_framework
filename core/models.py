@@ -20,7 +20,8 @@ class RelationalConstraint(BaseModel):
     relation_type: str
     target_id: str  
     axiom: str
-    # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi ve Lüzumiyet Derecesi (Strictly-Typed)
+    
+    # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi Genişletmesi (Mecaz-ı Mürsel, İstiare, Kinaye)
     alaka_type: Optional[Literal[
         "Alaka_Sebebiyye", 
         "Alaka_Müsebbebiyye", 
@@ -30,8 +31,13 @@ class RelationalConstraint(BaseModel):
         "Alaka_Zarfiyye", 
         "Alaka_Mazrufiyye", 
         "İstiare_Tahkikiyye", 
-        "İstiare_Mekniyye"
-    ]] = Field(default=None, description="Mecaz-ı Mürsel veya İstiare alâkası")
+        "İstiare_Mekniyye",
+        "İstiare_Temsiliyye",
+        "Kinaye_Sifat",
+        "Kinaye_Mevsuf",
+        "Kinaye_Nisbet"
+    ]] = Field(default=None, description="Mecaz, İstiare veya Kinaye bağlamsal alâkası")
+    
     luzum_derecesi: Optional[Literal[
         "Luzum_u_Zihni", 
         "Luzum_u_Harici", 
@@ -46,28 +52,38 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
-    # [FAZ 1 ENTEGRASYONU]: Çifte Dönüşümü (Double Conversion) Engelleyen Diachronic Köken Mührü
-    origin_epoch: Literal["Classical", "Modern", "Unknown"] = Field(default="Classical", description="Ontolojik kökenin tarihsel (diachronic) zaman damgası. Sadece 'Classical' mühürlü düğümler Z3'e girebilir.")
-    provenance_locked: bool = Field(default=True, description="Dış LLM, aracı İngilizce API'ler veya MSA seküler sözlük sızıntılarını engellemek için kapatılmış düğüm mührü.")
+    origin_epoch: Literal["Classical", "Modern", "Unknown"] = Field(
+        default="Classical", 
+        description="Ontolojik kökenin tarihsel (diachronic) zaman damgası. Sadece 'Classical' mühürlü düğümler Z3'e girebilir."
+    )
+    provenance_locked: bool = Field(
+        default=True, 
+        description="Dış LLM, aracı İngilizce API'ler veya MSA seküler sözlük sızıntılarını engellemek için kapatılmış düğüm mührü."
+    )
     
-    # [FAZ 4 ENTEGRASYONU]: Şemsiyye Kiplikleri (Kâtibî'nin 13 Kipliği - Zât ve Vasıf Ayrımı)
     modal_status: Literal[
         "Wajib", "Mumkin", "Mustahil", 
         "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme",
         "Mesruta_i_Amme", "Orfiyye_i_Amme"
     ] = "Mumkin"
     
-    # Meşrûta ve Örfiyye kipliklerinde, mutlak Zâtî Zaman (t_zati) yerine 
-    # geçici Vasfî Zaman'ı (t_vasfi) tetikleyecek şart/nitelik ID'si.
-    modal_condition_id: Optional[str] = Field(default=None, description="Şarta bağlı De dicto kiplikler için ontolojik vasıf ID'si")
+    modal_condition_id: Optional[str] = Field(
+        default=None, 
+        description="Şarta bağlı De dicto kiplikler için ontolojik vasıf ID'si"
+    )
 
-    # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân ve Maksad-ı Şâri' metrikleri
     husn_u_mucerred: bool = Field(default=False, description="Mutlak ontolojik mükemmellik/noksansızlık kısıtı")
     karine_derecesi: Literal[0, 1, 2, 3] = Field(default=0, description="0: Yok, 1: Mutabakat, 2: Tazammun, 3: İltizam")
 
     differentia_id: Optional[str] = None
     propria_ids: List[str] = Field(default_factory=list)
     accidents_ids: List[str] = Field(default_factory=list)
+    
+    # [FAZ 3 ENTEGRASYONU]: İstiare-i Tahkikiyye için Müşabehet (Ortak Özellik) Havuzu
+    beyan_mushabehat_ids: List[str] = Field(
+        default_factory=list, 
+        description="İstiare lüzumiyet ispatında, Lafz ve Ma'nâ arasındaki zorunlu ortak ontolojik özelliklerin (Hâssa/Proprium) ID'leri."
+    )
     
     relations: List[RelationalConstraint] = Field(default_factory=list)
     children: List['EpistemicEntity'] = Field(default_factory=list)
