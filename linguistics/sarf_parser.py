@@ -1,52 +1,93 @@
-from typing import Dict, List, Any, Optional
-from pydantic import BaseModel
+from typing import Dict, List, Any, Optional, Union
+from pydantic import BaseModel, ConfigDict, Field
 
 class MorphologicalAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     original_word: str
     root: str           
     pattern: str        
     ontologic_type: str 
     thematic_role: Optional[str] = None  
 
+class OntoLexRule(BaseModel):
+    """OntoLex-Morph standardında kelime üretim/çekim kuralları"""
+    model_config = ConfigDict(extra="forbid")
+    rule_type: str
+    positions: List[Union[int, str]]
+
+class OntoLexMorphEntry(BaseModel):
+    """OntoLex-Morph RDF/Graf düğümü karşılığı"""
+    model_config = ConfigDict(extra="forbid")
+    pattern_id: str
+    ontologic_type: str
+    thematic_role: Optional[str] = None
+    extraction_rules: OntoLexRule
+
 class SarfEngine:
     """
     Üretken Morfoloji Motoru ('İlm-i Sarf).
-    Faz 1.1: Vaz' Nev'î (Kategorik Atama) matrisi entegre edildi.
-    Faz 2 - Adım 2.2: İlm-i Ma'ânî (Tevkîd) edatları ontolojik evrene tanıtıldı.
-    Faz 2 - Adım 2.3: Kasr (Hasr) edatları (İnnemâ, İllâ) sisteme eklendi.
-    [HATA GİDERME]: İstifham (Soru) ve Nefy (Olumsuzluk) edatları harf setine eklendi.
+    [FAZ 3 ENTEGRASYONU]: OntoLex-Morph RDF standartlarına uygun katı durum makinesi.
+    Statik wazan_matrix sözlüğü, manipüle edilemez OntoLex kural grafına dönüştürülmüştür.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
         
+        # Kapalı Küme (Closed-Set) Edatlar
         self.harf_set = {
             "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
-            "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  # İstifham Edatları
-            "illa", "lam", "lan"                               # Nefy Edatları
+            "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  
+            "illa", "lam", "lan"   
         }
         
-        # [FAZ 2.2] Tevkîd (Pekiştirme) Edatları
         self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
-        
-        # [FAZ 2.3] Kasr (Hasr/Kısıtlama) Edatları
         self.kasr_set = {"innema", "illa"}
         
-        # Wazan Matrix Formatı: (Vezin_Adı, Ontolojik_Tip, Kök_Çıkarma_Komutları, Thematic_Role)
-        self.wazan_matrix = {
-            "CaCaCa": ("Fa'ala", "Fiil", [0, 2, 4], "Action"),       
-            "yaCCiCu": ("Yaf'ilu", "Fiil", [2, 3, 5], "Action"),     
-            "yaCCaCu": ("Yaf'alu", "Fiil", [2, 3, 5], "Action"),     
-            "yaCCuCu": ("Yaf'ulu", "Fiil", [2, 3, 5], "Action"),     
-            
-            "CaaCa": ("Fa'ala_Ecvef", "Fiil", [0, 'W_Y', 3], "Action"),   
-            "yaCooCu": ("Yaf'ulu_Ecvef", "Fiil", [2, 'W', 4], "Action"),   
-            "yaCeeCu": ("Yaf'ilu_Ecvef", "Fiil", [2, 'Y', 4], "Action"),   
-            "CaCaa": ("Fa'ala_Nakis", "Fiil", [0, 2, 'W_Y'], "Action"),    
-            
-            "iCCaCaCa": ("Ifta'ala_Ibdal", "Fiil", ['IBDAL', 4, 6], "Action"), 
-            
-            "CaCiCun": ("Fâ'ilun", "Ism", [0, 2, 4], "Agent"),      
-            "maCCuCun": ("Maf'ûlun", "Ism", [2, 3, 5], "Patient"),    
+        # OntoLex-Morph Kural Grafı
+        self.ontolex_graph: Dict[str, OntoLexMorphEntry] = {
+            "CaCaCa": OntoLexMorphEntry(
+                pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
+            ),
+            "yaCCiCu": OntoLexMorphEntry(
+                pattern_id="Yaf'ilu", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
+            "yaCCaCu": OntoLexMorphEntry(
+                pattern_id="Yaf'alu", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
+            "yaCCuCu": OntoLexMorphEntry(
+                pattern_id="Yaf'ulu", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
+            "CaaCa": OntoLexMorphEntry(
+                pattern_id="Fa'ala_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[0, 'W_Y', 3])
+            ),
+            "yaCooCu": OntoLexMorphEntry(
+                pattern_id="Yaf'ulu_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'W', 4])
+            ),
+            "yaCeeCu": OntoLexMorphEntry(
+                pattern_id="Yaf'ilu_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'Y', 4])
+            ),
+            "CaCaa": OntoLexMorphEntry(
+                pattern_id="Fa'ala_Nakis", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Ilal_Nakis", positions=[0, 2, 'W_Y'])
+            ),
+            "iCCaCaCa": OntoLexMorphEntry(
+                pattern_id="Ifta'ala_Ibdal", ontologic_type="Fiil", thematic_role="Action",
+                extraction_rules=OntoLexRule(rule_type="Ibdal", positions=['IBDAL', 4, 6])
+            ),
+            "CaCiCun": OntoLexMorphEntry(
+                pattern_id="Fâ'ilun", ontologic_type="Ism", thematic_role="Agent",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
+            ),
+            "maCCuCun": OntoLexMorphEntry(
+                pattern_id="Maf'ûlun", ontologic_type="Ism", thematic_role="Patient",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
         }
 
     def _generate_structural_signature(self, word: str) -> str:
@@ -65,21 +106,21 @@ class SarfEngine:
                 sig += 'C'
         return sig
 
-    def _extract_root(self, word: str, root_commands: List[Any]) -> str:
+    def _apply_ontolex_rules(self, word: str, rule: OntoLexRule) -> str:
         word_lower = word.lower()
         resolved_root = ""
         
         try:
-            for cmd in root_commands:
-                if isinstance(cmd, int):
-                    resolved_root += word_lower[cmd]
-                elif cmd == 'W_Y':
+            for pos in rule.positions:
+                if isinstance(pos, int):
+                    resolved_root += word_lower[pos]
+                elif pos == 'W_Y':
                     resolved_root += "w" 
-                elif cmd == 'W':
+                elif pos == 'W':
                     resolved_root += "w"
-                elif cmd == 'Y':
+                elif pos == 'Y':
                     resolved_root += "y"
-                elif cmd == 'IBDAL':
+                elif pos == 'IBDAL':
                     if word_lower[1] == 't' and word_lower[2] == 't':
                         resolved_root += "w"
                     elif word_lower[1] == 'd' and word_lower[2] == 'd':
@@ -87,80 +128,54 @@ class SarfEngine:
                     else:
                         resolved_root += word_lower[1] 
                 else:
-                    raise ValueError(f"Geçersiz fonolojik komut: {cmd}")
-                    
+                    raise ValueError(f"Geçersiz OntoLex-Morph kural parametresi: {pos}")
             return resolved_root
         except IndexError:
-            raise ValueError(f"[İ'LÂL HATASI] '{word}' kelimesinin yapısal indeksi taştı.")
+            raise ValueError(f"[İ'LÂL HATASI] '{word}' kelimesinin yapısal indeksi OntoLex kural sınırlarını taştı.")
 
     def _derive_morphology(self, word: str) -> MorphologicalAnalysis:
         word_lower = word.lower()
         
-        # 0. Kasr (Hasr) Edatı Fallback
         if word_lower in self.kasr_set:
             return MorphologicalAnalysis(
-                original_word=word_lower,
-                root=word_lower,
-                pattern="Harf_Kasr",
-                ontologic_type="Harf_Kasr",
-                thematic_role=None
+                original_word=word_lower, root=word_lower, pattern="Harf_Kasr",
+                ontologic_type="Harf_Kasr", thematic_role=None
             )
 
-        # 1. Tevkîd Harfi Fallback
         if word_lower in self.tevkid_set:
             return MorphologicalAnalysis(
-                original_word=word_lower,
-                root=word_lower,
-                pattern="Harf_Tevkid",
-                ontologic_type="Harf_Tevkid",
-                thematic_role=None
+                original_word=word_lower, root=word_lower, pattern="Harf_Tevkid",
+                ontologic_type="Harf_Tevkid", thematic_role=None
             )
 
-        # 2. Harf (Particle) Fallback (İstifham ve Nefy edatları dahil)
         if word_lower in self.harf_set:
             return MorphologicalAnalysis(
-                original_word=word_lower, 
-                root=word_lower, 
-                pattern="Harf", 
-                ontologic_type="Harf",
-                thematic_role=None 
+                original_word=word_lower, root=word_lower, pattern="Harf",
+                ontologic_type="Harf", thematic_role=None 
             )
 
         signature = self._generate_structural_signature(word_lower)
         
-        # 3. Müştekk (Türemiş) Vezin Eşleşmesi ve Thematic Role Zerk Edilmesi
-        if signature in self.wazan_matrix:
-            vezin, ont_type, root_commands, thematic_role = self.wazan_matrix[signature]
-            extracted_root = self._extract_root(word_lower, root_commands)
+        if signature in self.ontolex_graph:
+            entry = self.ontolex_graph[signature]
+            extracted_root = self._apply_ontolex_rules(word_lower, entry.extraction_rules)
             return MorphologicalAnalysis(
-                original_word=word_lower,
-                root=extracted_root,
-                pattern=vezin,
-                ontologic_type=ont_type,
-                thematic_role=thematic_role
+                original_word=word_lower, root=extracted_root, pattern=entry.pattern_id,
+                ontologic_type=entry.ontologic_type, thematic_role=entry.thematic_role
             )
             
-        # 4. İ'rab Fallback (Câmid İsimler ve Mudaf Formları)
         if word_lower.endswith(("un", "an", "in")):
-            camid_root = word_lower[:-2] 
             return MorphologicalAnalysis(
-                original_word=word_lower, 
-                root=camid_root, 
-                pattern="Alem/Camid_Munevven", 
-                ontologic_type="Ism",
-                thematic_role=None 
+                original_word=word_lower, root=word_lower[:-2], pattern="Alem/Camid_Munevven",
+                ontologic_type="Ism", thematic_role=None 
             )
         elif word_lower.endswith(("u", "a", "i")):
-            camid_root = word_lower[:-1]
             return MorphologicalAnalysis(
-                original_word=word_lower, 
-                root=camid_root, 
-                pattern="Alem/Camid_Mudaf", 
-                ontologic_type="Ism",
-                thematic_role=None
+                original_word=word_lower, root=word_lower[:-1], pattern="Alem/Camid_Mudaf",
+                ontologic_type="Ism", thematic_role=None
             )
 
-        raise ValueError(f"[SARF ÇÖKÜŞÜ] '{word}' (İmza: {signature}) kelimesi ontolojik evrende tanımlanamadı.")
+        raise ValueError(f"[SARF ÇÖKÜŞÜ] '{word}' (İmza: {signature}) kelimesi OntoLex-Morph grafında doğrulanamadı. MSA/Modern türetim reddedildi.")
 
     def derive_lexicon(self, words: List[str]) -> Dict[str, MorphologicalAnalysis]:
         derived_lexicon = {}
