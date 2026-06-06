@@ -250,9 +250,10 @@ DOSYA: ./core/__init__.py
 DOSYA: ./core/epistemic_orchestrator.py
 ==================================================
 import z3
+import copy
 from typing import Dict, Any, List, Tuple
 import re
-from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
+from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR, NestedPredicate
 from linguistics.sarf_parser import MorphologicalAnalysis
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -268,7 +269,6 @@ class EpistemicOrchestrator:
 
     def _extract_conflict_nodes_from_core(self, unsat_core: str) -> List[str]:
         conflict_nodes = set()
-        # Z3 Core formatını (AXIOM_DISJOINT_Wajib_AND_Mumkin vb.) parse et
         matches = re.findall(r'AXIOM_[A-Z]+_([A-Za-z0-9_]+)', unsat_core)
         for match in matches:
             parts = match.split('_AND_')
@@ -285,7 +285,8 @@ class EpistemicOrchestrator:
         allowed_system_prefixes = ("Rel_", "Role_", "GrammarNode_")
         allowed_operators = {
             "Wajib_Fiqh", "Haram_Fiqh", "Istifham_Inkari", "Kasr_Universal_Exclusion", 
-            "Luzumi", "Inadi_Hakikiyye", "Inadi_Maniatul_Cem", "Inadi_Maniatul_Huluv"
+            "Luzumi", "Inadi_Hakikiyye", "Inadi_Maniatul_Cem", "Inadi_Maniatul_Huluv",
+            "Kasr_Sifat_to_Mevsuf", "Kasr_Mevsuf_to_Sifat"
         }
 
         def _scan_items(items):
@@ -293,7 +294,6 @@ class EpistemicOrchestrator:
                 if isinstance(item, tuple):
                     pred_id = item[0]
                     if not pred_id.startswith(allowed_system_prefixes) and pred_id not in allowed_operators:
-                        # Kavram statik Porphyrios haritasında yoksa ve bir Differentia (Fasıl) ID'si değilse patlat
                         if pred_id not in self.l1.entity_map:
                             is_differentia = any(ent.differentia_id == pred_id for ent in self.l1.entity_map.values() if ent.differentia_id)
                             if not is_differentia:
@@ -303,76 +303,132 @@ class EpistemicOrchestrator:
 
         _scan_items(ir_matrix.predicates)
 
+    def _resolve_ilm_i_beyan(self, ir_matrix: SemanticStatementIR, flagged_elements: List[str], school_rules: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """
+        [FAZ 3 ENTEGRASYONU] Deterministik Te'vil ve Ma'nâ el-Ma'nâ (İlm-i Beyân) İşlemcisi.
+        """
+        allow_tevil = school_rules.get("allow_tevil", False)
+        blocked_nodes = school_rules.get("blocked_nodes", [])
+        bridge_messages = []
+
+        if not allow_tevil:
+            return False, bridge_messages
+
+        tevil_basarili = False
+
+        for flagged in flagged_elements:
+            try:
+                amil_str, mamul_str = flagged.split("::", 1)
+            except ValueError:
+                continue
+
+            nodes_to_try = []
+            if amil_str not in blocked_nodes:
+                nodes_to_try.append(amil_str)
+            if mamul_str not in blocked_nodes:
+                nodes_to_try.append(mamul_str)
+
+            for node_str in nodes_to_try:
+                node_entity = self.l1.entity_map.get(node_str)
+                if not node_entity:
+                    continue
+
+                potential_targets = [rel.target_id for rel in node_entity.relations if getattr(rel, 'alaka_type', None) is not None]
+
+                for target_id in potential_targets:
+                    chain_data = self.l1.find_mana_el_mana_chain(node_str, target_id)
+                    
+                    if chain_data.get("is_found"):
+                        bridge_proved = self.l3.prove_metaphorical_bridge(chain_data)
+                        
+                        if bridge_proved:
+                            # MATRİS MUTASYONU ÖNCESİ ORİJİNAL DURUMU YEDEKLE (BACKTRACKING)
+                            original_predicates = copy.deepcopy(ir_matrix.predicates)
+                            
+                            if hasattr(self.adapter, 'update_ir_predicate'):
+                                self.adapter.update_ir_predicate(ir_matrix, node_str, target_id)
+                            else:
+                                def _replace_in_tuple(tup: Tuple[str, str, int]) -> Tuple[str, str, int]:
+                                    p_id, a_id, arity = tup
+                                    new_pred = target_id if p_id == node_str else p_id
+                                    if arity == 1:
+                                        new_arg = target_id if a_id == node_str else a_id
+                                    else:
+                                        args = a_id.split("::")
+                                        new_args = [target_id if a == node_str else a for a in args]
+                                        new_arg = "::".join(new_args)
+                                    return (new_pred, new_arg, arity)
+                                
+                                def _traverse_and_replace(preds):
+                                    new_preds = []
+                                    for item in preds:
+                                        if isinstance(item, tuple):
+                                            new_preds.append(_replace_in_tuple(item))
+                                        elif hasattr(item, 'args'): 
+                                            new_item = copy.deepcopy(item)
+                                            new_item.args = _traverse_and_replace(new_item.args)
+                                            new_preds.append(new_item)
+                                    return new_preds
+                                
+                                ir_matrix.predicates = _traverse_and_replace(ir_matrix.predicates)
+                            
+                            # YENİ MATRİSİN SAT KONTROLÜ
+                            l3_result = self.l3.execute_sat_check(ir_matrix)
+                            if l3_result["status"] == "SAT":
+                                alaka_str = chain_data.get("alaka_type", "Unknown")
+                                bridge_messages.append(f"İlm-i Beyân Çıkarımı: {node_str} -> {target_id} ({alaka_str}) zihinsel köprüsü Z3'e ispatlatıldı.")
+                                tevil_basarili = True
+                                break 
+                            else:
+                                # UNSAT ALINDI: MATRİSİ ESKİ HALİNE DÖNDÜR VE SIRADAKİ ADAYA GEÇ (ROLLBACK)
+                                ir_matrix.predicates = original_predicates
+                                
+                if tevil_basarili:
+                    break
+                    
+        return tevil_basarili, bridge_messages
+
     def process_statement(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], usul_profile: AbstractSchoolUsul, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
         max_tevil_retries = usul_profile.dsl_ruleset.get("max_tevil_retries", 1)
         current_attempt = 0
         tevil_flagged_nodes = []
-        bridge_messages = []
         
         has_condition = any(t.lower() in ["in", "iza", "law", "amma", "imma", "aw", "ya"] for t in tokens)
         proposition_type = "Kadiyye-i_Sartiyye" if has_condition else "Kadiyye-i_Hamliyye"
         
         try:
-            while current_attempt <= max_tevil_retries:
-                # [FAZ 1 ENTEGRASYONU] Zorunlu "Classical" zaman damgası (Epoch)
-                ir_matrix = self.adapter.generate_ir(
-                    tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type, epoch="Classical"
-                )
+            ir_matrix = self.adapter.generate_ir(
+                tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type, epoch="Classical"
+            )
+            
+            if not ir_matrix.is_valid_for_z3:
+                return {
+                    "status": "PRAGMATICS_REJECT", 
+                    "message": "İlm-i Ma'ânî İhlali: İnşâî form (İstifham-ı Hakikî) veya Muktazâ el-Hâl uyumsuzluğu."
+                }
+            
+            self._verify_air_gapped_ontology(ir_matrix)
+            
+            execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
+            
+            if execution_result.get("status") == "FALLBACK_TRIGGERED" and current_attempt < max_tevil_retries:
+                l1_analysis = self.l1.analyze_ir(ir_matrix)
+                flagged = l1_analysis.get("flagged_elements", [])
                 
-                if not ir_matrix.is_valid_for_z3:
-                    return {
-                        "status": "PRAGMATICS_REJECT", 
-                        "message": "İlm-i Ma'ânî İhlali: İnşâî form (İstifham-ı Hakikî) veya Muktazâ el-Hâl uyumsuzluğu."
-                    }
+                resolved, bridge_messages = self._resolve_ilm_i_beyan(ir_matrix, flagged, usul_profile.dsl_ruleset)
                 
-                # Air-Gapped Ontology Mührü Denetimi
-                self._verify_air_gapped_ontology(ir_matrix)
-                
-                execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
-                
-                # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Te'vil (Metaphorical Bridge) Çıkarımı
-                if execution_result.get("status") == "FALLBACK_TRIGGERED" and current_attempt < max_tevil_retries:
-                    if usul_profile.dsl_ruleset.get("allow_tevil", False):
-                        unsat_core_str = str(execution_result.get("unsat_core", ""))
-                        conflicts = self._extract_conflict_nodes_from_core(unsat_core_str)
-                        
-                        # Eğer doğrudan UNSAT core okunamadıysa, IR Matrisindeki Literal nodeları tespit et
-                        for item in ir_matrix.predicates:
-                            if isinstance(item, tuple) and len(item) == 3:
-                                args = item[1].split("::")
-                                for arg in args:
-                                    if "Literal" in arg and arg not in conflicts:
-                                        conflicts.append(arg)
-                        
-                        if conflicts:
-                            for conflict_node in conflicts:
-                                if "Literal" in conflict_node:
-                                    target_metaphor = conflict_node.replace("Literal", "Metaphor")
-                                    
-                                    # 1. L1 Graph üzerinden deterministik Alâka (Nexus) yolunu bul
-                                    chain = self.l1.find_mana_el_mana_chain(conflict_node, target_metaphor)
-                                    if chain:
-                                        # 2. Bulunan Alâka yolunu L3 Z3 motoruna Köprü Aksiyomu olarak zerk et
-                                        if self.l3.prove_metaphorical_bridge(chain):
-                                            bridge_messages.append(f"İlm-i Beyân Çıkarımı: {chain} ardışık lüzumiyeti Z3'e ispatlatıldı.")
-                                        
-                            tevil_flagged_nodes.extend(conflicts)
-                            current_attempt += 1
-                            continue
-                        else:
-                            break
-                    else:
-                        break
-
-                if current_attempt > 0 and execution_result.get("status") == "SAT":
-                    execution_result["tevil_applied"] = True
-                    msg_append = f" (Te'vil uygulandı: {tevil_flagged_nodes})"
-                    if bridge_messages:
-                        msg_append += " | " + " | ".join(bridge_messages)
-                    execution_result["message"] += msg_append
-                    
-                return execution_result
-                
+                if resolved:
+                    # SAT DOĞRULAMASI ARTIK _resolve_ilm_i_beyan İÇERİSİNDE YAPILIYOR
+                    l3_result = self.l3.execute_sat_check(ir_matrix)
+                    if l3_result["status"] == "SAT":
+                        execution_result["status"] = "SAT"
+                        execution_result["tevil_applied"] = True
+                        msg_append = f" (Te'vil uygulandı)"
+                        if bridge_messages:
+                            msg_append += " | " + " | ".join(bridge_messages)
+                        execution_result["message"] = execution_result.get("message", "") + msg_append
+                        return execution_result
+            
             return execution_result
             
         except (DiachronicViolationError, OutOfOntologyError) as e:
@@ -387,7 +443,6 @@ class EpistemicOrchestrator:
                                       sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
         
         try:
-            # [FAZ 1 ENTEGRASYONU] Zorunlu "Classical" zaman damgası (Epoch)
             sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon, epoch="Classical")
             self._verify_air_gapped_ontology(sail_native_ir)
             
@@ -402,19 +457,16 @@ class EpistemicOrchestrator:
             cross_injected_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, mujib_usul.namespace, sail_auto_lexicon, epoch="Classical")
             self._verify_air_gapped_ontology(cross_injected_ir)
             
-            # SMT Solver yerine SMT Optimizer kullanarak ontolojik önceliklendirme
             optimizer = z3.Optimize()
             
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
             tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
             
-            # Mucîb'in iddiaları Soft Constraint (Ödünç alınmış uzay) olarak düşük maliyetle eklenir
             for item in mujib_claim_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 optimizer.add_soft(z3_expr, weight=1)
                 
-            # Sâil'in anti-tezi Hard Constraint (Mutlak İhlal) olarak eklenir
             for item in cross_injected_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 optimizer.add(z3_expr)
@@ -422,11 +474,9 @@ class EpistemicOrchestrator:
             cross_status = optimizer.check()
 
             if cross_status == z3.sat:
-                # Soft Constraint'lerin ne kadarının ihlal edildiğini ölç
                 model = optimizer.model()
                 penalty_score = optimizer.objectives()[0]
                 
-                # Eğer maliyet 0 ise tamamen paralel, çelişmeyen iddialardır.
                 if model.eval(penalty_score).as_long() == 0:
                     return {
                         "status": "MUARADAH_INEFFECTIVE",
@@ -498,7 +548,7 @@ class CombinatorialExplosionError(EpistemicEngineError):
 ==================================================
 DOSYA: ./core/layer1_graph.py
 ==================================================
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 from core.models import BaseOntology, EpistemicEntity
 
@@ -529,7 +579,6 @@ class Layer1HeuristicGraph:
            (mamul_entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"] and amil_entity.modal_status in ["Mumkin", "Mumkine_i_Amme"]):
             conflict_score += 0.6
             
-
         # Kural 2: Hüsn-ü Mücerred (Soyut Mükemmellik) İhlali
         if amil_entity.husn_u_mucerred and not mamul_entity.husn_u_mucerred:
             conflict_score += 0.4
@@ -542,19 +591,61 @@ class Layer1HeuristicGraph:
             conflict_score += (max_karine * 0.2)
 
         return min(conflict_score, 1.0)
+
+    def _find_istiare_mushabehat(self, source_id: str, target_id: str) -> List[str]:
+        """
+        [FAZ 3] İstiare (Müşabehet) için Kesişim (Intersection) Algoritması.
+        Kaynak (Müsteâr'un Minh) ve hedef (Müsteâr'un Leh) arasındaki ortak 
+        'beyan_mushabehat_ids' veya 'propria_ids' (Hâssa) kesişimini bulur.
+        """
+        source_ent = self.entity_map.get(source_id)
+        target_ent = self.entity_map.get(target_id)
         
-    def find_mana_el_mana_chain(self, source_id: str, target_id: str) -> List[str]:
+        if not source_ent or not target_ent:
+            return []
+            
+        source_traits = set(source_ent.beyan_mushabehat_ids + source_ent.propria_ids)
+        target_traits = set(target_ent.beyan_mushabehat_ids + target_ent.propria_ids)
+        
+        return list(source_traits.intersection(target_traits))
+
+    def find_mana_el_mana_chain(self, source_id: str, target_id: str) -> Dict[str, Any]:
         """
         [FAZ 3 ENTEGRASYONU] İlm-i Beyân Alâka İzi (Deterministic Path).
-        Abdülkâhir el-Cürcânî'nin 'Ma'nâ el-Ma'nâ' teorisine uygun olarak; 
-        rastgele (fallback) veya serbest hiyerarşik (BFS) arama yerine, doğrudan 
-        'alaka_type' (Sebebiyye, Mülâzemet vb.) ile etiketlenmiş kenarları VE 
-        Alâka-i Cüz'iyye/Külliyye'yi (hiyerarşik alt türleri) takip ederek nedensellik vektörü çıkarır.
+        Mecaz-ı Mürsel (DFS nedensellik) ve İstiare (Proprium Kesişimi) algoritmalarını ayırır.
+        Kinaye rotaları da ilişki (relation) bazlı taranır. Z3 ispatı için Lüzum Derecesini tespit eder.
         """
+        # 1. İstiare Kontrolü (Müşabehet / Benzerlik Taraması)
+        mushabehat = self._find_istiare_mushabehat(source_id, target_id)
+        if mushabehat:
+            source_ent = self.entity_map.get(source_id)
+            luzum_derecesi = "Luzum_u_Zihni" # İstiare varsayılan olarak zihinsel lüzumiyet taşır.
+            alaka_type = "İstiare_Tahkikiyye"
+            
+            if source_ent:
+                for rel in source_ent.relations:
+                    if rel.target_id == target_id and rel.alaka_type and "İstiare" in rel.alaka_type:
+                        luzum_derecesi = rel.luzum_derecesi or "Luzum_u_Zihni"
+                        alaka_type = rel.alaka_type
+                        break
+                        
+            return {
+                "is_found": True,
+                "type": "Istiare",
+                "path": [source_id, target_id],
+                "alaka_type": alaka_type,
+                "mushabehat": mushabehat,
+                "luzum_derecesi": luzum_derecesi
+            }
+
+        # 2. Mecaz-ı Mürsel / Kinaye Kontrolü (DFS Nedensellik Ağı Taraması)
         visited = set()
         path = []
+        found_alaka_type = None
+        found_luzum = None
 
         def _trace_alaka_path(current_node: str) -> bool:
+            nonlocal found_alaka_type, found_luzum
             if current_node == target_id:
                 path.append(current_node)
                 return True
@@ -570,24 +661,35 @@ class Layer1HeuristicGraph:
                 path.pop()
                 return False
 
-            # 1. Öncelik: Doğrudan İlm-i Beyân Alâka tiplerine sahip yatay ilişkiler (Sebebiyye/Mülâzemet vb.)
+            # Yatay Öncelikli Tarama: Kinaye ve Mecaz-ı Mürsel İlişkileri
             for rel in entity.relations:
-                if getattr(rel, 'alaka_type', None):
+                if rel.alaka_type and ("Alaka" in rel.alaka_type or "Kinaye" in rel.alaka_type):
                     if _trace_alaka_path(rel.target_id):
+                        found_alaka_type = rel.alaka_type
+                        found_luzum = rel.luzum_derecesi
                         return True
 
-            # 2. Öncelik: İlm-i Beyân Alâka-i Cüz'iyye / Külliyye (Hiyerarşik Alt/Üst Bağlantılar)
-            # Kudret -> Sifat_Yed_Metaphor gibi spesifik alt türlere inmek için zorunludur.
+            # Dikey Tarama: Alâka-i Cüz'iyye / Külliyye (Hiyerarşik İniş)
             for child in entity.children:
                 if _trace_alaka_path(child.ontologic_id):
+                    if not found_alaka_type:
+                        found_alaka_type = "Alaka_Cüziyye"
+                        found_luzum = "Luzum_u_Zihni"
                     return True
 
             path.pop()
             return False
 
         if _trace_alaka_path(source_id):
-            return path
-        return []
+            return {
+                "is_found": True,
+                "type": "Mecaz_Kinaye",
+                "path": path,
+                "alaka_type": found_alaka_type,
+                "luzum_derecesi": found_luzum or "Luzum_u_Zihni"
+            }
+
+        return {"is_found": False}
 
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
         if not ir_matrix.is_valid_for_z3:
@@ -852,26 +954,33 @@ class Layer3SMTCircuitBreaker:
         )
         self.core_solver.solver.add(patient_axiom)
         
-    def prove_metaphorical_bridge(self, chain: List[str]) -> bool:
+    def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> bool:
         """
         [FAZ 3 ENTEGRASYONU] İlm-i Beyân Ma'nâ el-Ma'nâ İspatı.
-        L1'den gelen deterministik nedensellik (Alâka) zincirini (Örn: Yed -> Bats -> Kudret) 
+        L1'den gelen İlm-i Beyân analiz paketini (İstiare Müşabehetleri, Lüzumiyet Dereceleri) 
         Kripke Semantiğine (Olası Dünyalar ve Çift Zaman) uygun Z3 aksiyomlarına dönüştürür.
-        Bu sayede te'vil (metaphor), mantıksal bir sıçrama olmaktan çıkıp ispatlanabilir bir lüzumiyet halini alır.
         """
-        if not chain or len(chain) < 2:
+        if not chain_data or not chain_data.get("is_found"):
             return False
+
+        path = chain_data.get("path", [])
+        if not path or len(path) < 2:
+            return False
+
+        alaka_type = chain_data.get("alaka_type", "Unknown")
+        luzum_derecesi = chain_data.get("luzum_derecesi", "Luzum_u_Zihni")
+        bridge_type = chain_data.get("type")
 
         w_var = z3.Const('w_beyan', self.core_solver.builder.WorldSort)
         tz_var = z3.Const('tz_beyan', self.core_solver.builder.TimeSortZati)
         tv_var = z3.Const('tv_beyan', self.core_solver.builder.TimeSortVasfi)
         x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
 
-        for i in range(len(chain) - 1):
-            source_id = chain[i]
-            target_id = chain[i+1]
+        for i in range(len(path) - 1):
+            source_id = path[i]
+            target_id = path[i+1]
             
-            bridge_id = f"AXIOM_MANA_EL_MANA_{source_id}_TO_{target_id}"
+            bridge_id = f"AXIOM_BEYAN_{alaka_type}_{source_id}_TO_{target_id}"
             
             if bridge_id in self._proven_bridges:
                 continue
@@ -879,12 +988,27 @@ class Layer3SMTCircuitBreaker:
             source_pred = self.core_solver.builder.get_or_create_predicate(source_id, arity=1)
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
 
-            # Lüzum-u Zihnî: Kaynağın (Lafz) var olduğu her olası dünya ve zamanda, 
-            # hedefin (Ma'nâ el-Ma'nâ) de var olması zorunludur.
-            bridge_axiom = z3.ForAll(
-                [w_var, tz_var, tv_var, x_var],
-                z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))
-            )
+            # [FAZ 3] İstiare (Müşabehet / Câmi') Ortak Özellik İspatı
+            if bridge_type == "Istiare":
+                mushabehat = chain_data.get("mushabehat", [])
+                for trait in mushabehat:
+                    trait_pred = self.core_solver.builder.get_or_create_predicate(trait, arity=1)
+                    trait_axiom_src = z3.ForAll([w_var, tz_var, tv_var, x_var], z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), trait_pred(w_var, tz_var, tv_var, x_var)))
+                    trait_axiom_tgt = z3.ForAll([w_var, tz_var, tv_var, x_var], z3.Implies(target_pred(w_var, tz_var, tv_var, x_var), trait_pred(w_var, tz_var, tv_var, x_var)))
+                    self._active_bridge_axioms.extend([trait_axiom_src, trait_axiom_tgt])
+
+            # Lüzum Derecesine Göre Kripke Niceleyicisi Optimizasyonu
+            if luzum_derecesi == "Luzum_u_Harici":
+                # Sadece mevcut dışsal dünyada geçerli olan ampirik/dışsal mülâzama (Zihinsel zorunluluk değil)
+                w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
+                bridge_axiom = z3.ForAll([tz_var, tv_var, x_var], 
+                    z3.Implies(source_pred(w_base, tz_var, tv_var, x_var), target_pred(w_base, tz_var, tv_var, x_var))
+                )
+            else:
+                # Luzum_u_Zihni veya Luzum_u_Beyyin: Tüm olası dünyalarda geçerli mutlak zihinsel geçiş (Külliyye/Sebebiyye vb.)
+                bridge_axiom = z3.ForAll([w_var, tz_var, tv_var, x_var],
+                    z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))
+                )
             
             self._active_bridge_axioms.append(bridge_axiom)
             self._proven_bridges.add(bridge_id)
@@ -1267,7 +1391,8 @@ class RelationalConstraint(BaseModel):
     relation_type: str
     target_id: str  
     axiom: str
-    # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi ve Lüzumiyet Derecesi (Strictly-Typed)
+    
+    # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Alâka Tipi Genişletmesi (Mecaz-ı Mürsel, İstiare, Kinaye)
     alaka_type: Optional[Literal[
         "Alaka_Sebebiyye", 
         "Alaka_Müsebbebiyye", 
@@ -1277,8 +1402,13 @@ class RelationalConstraint(BaseModel):
         "Alaka_Zarfiyye", 
         "Alaka_Mazrufiyye", 
         "İstiare_Tahkikiyye", 
-        "İstiare_Mekniyye"
-    ]] = Field(default=None, description="Mecaz-ı Mürsel veya İstiare alâkası")
+        "İstiare_Mekniyye",
+        "İstiare_Temsiliyye",
+        "Kinaye_Sifat",
+        "Kinaye_Mevsuf",
+        "Kinaye_Nisbet"
+    ]] = Field(default=None, description="Mecaz, İstiare veya Kinaye bağlamsal alâkası")
+    
     luzum_derecesi: Optional[Literal[
         "Luzum_u_Zihni", 
         "Luzum_u_Harici", 
@@ -1293,28 +1423,38 @@ class EpistemicEntity(BaseModel):
     terms: TermModel
     level: Optional[int] = None
     
-    # [FAZ 1 ENTEGRASYONU]: Çifte Dönüşümü (Double Conversion) Engelleyen Diachronic Köken Mührü
-    origin_epoch: Literal["Classical", "Modern", "Unknown"] = Field(default="Classical", description="Ontolojik kökenin tarihsel (diachronic) zaman damgası. Sadece 'Classical' mühürlü düğümler Z3'e girebilir.")
-    provenance_locked: bool = Field(default=True, description="Dış LLM, aracı İngilizce API'ler veya MSA seküler sözlük sızıntılarını engellemek için kapatılmış düğüm mührü.")
+    origin_epoch: Literal["Classical", "Modern", "Unknown"] = Field(
+        default="Classical", 
+        description="Ontolojik kökenin tarihsel (diachronic) zaman damgası. Sadece 'Classical' mühürlü düğümler Z3'e girebilir."
+    )
+    provenance_locked: bool = Field(
+        default=True, 
+        description="Dış LLM, aracı İngilizce API'ler veya MSA seküler sözlük sızıntılarını engellemek için kapatılmış düğüm mührü."
+    )
     
-    # [FAZ 4 ENTEGRASYONU]: Şemsiyye Kiplikleri (Kâtibî'nin 13 Kipliği - Zât ve Vasıf Ayrımı)
     modal_status: Literal[
         "Wajib", "Mumkin", "Mustahil", 
         "Zaruriyye_i_Mutlaka", "Daime_i_Mutlaka", "Mumkine_i_Amme",
         "Mesruta_i_Amme", "Orfiyye_i_Amme"
     ] = "Mumkin"
     
-    # Meşrûta ve Örfiyye kipliklerinde, mutlak Zâtî Zaman (t_zati) yerine 
-    # geçici Vasfî Zaman'ı (t_vasfi) tetikleyecek şart/nitelik ID'si.
-    modal_condition_id: Optional[str] = Field(default=None, description="Şarta bağlı De dicto kiplikler için ontolojik vasıf ID'si")
+    modal_condition_id: Optional[str] = Field(
+        default=None, 
+        description="Şarta bağlı De dicto kiplikler için ontolojik vasıf ID'si"
+    )
 
-    # [FAZ 2 ENTEGRASYONU]: İlm-i Beyân ve Maksad-ı Şâri' metrikleri
     husn_u_mucerred: bool = Field(default=False, description="Mutlak ontolojik mükemmellik/noksansızlık kısıtı")
     karine_derecesi: Literal[0, 1, 2, 3] = Field(default=0, description="0: Yok, 1: Mutabakat, 2: Tazammun, 3: İltizam")
 
     differentia_id: Optional[str] = None
     propria_ids: List[str] = Field(default_factory=list)
     accidents_ids: List[str] = Field(default_factory=list)
+    
+    # [FAZ 3 ENTEGRASYONU]: İstiare-i Tahkikiyye için Müşabehet (Ortak Özellik) Havuzu
+    beyan_mushabehat_ids: List[str] = Field(
+        default_factory=list, 
+        description="İstiare lüzumiyet ispatında, Lafz ve Ma'nâ arasındaki zorunlu ortak ontolojik özelliklerin (Hâssa/Proprium) ID'leri."
+    )
     
     relations: List[RelationalConstraint] = Field(default_factory=list)
     children: List['EpistemicEntity'] = Field(default_factory=list)
@@ -1445,6 +1585,7 @@ DOSYA: ./data/base_ontology.json
                 "differentia_id": null,
                 "propria_ids": [],
                 "accidents_ids": [],
+                "beyan_mushabehat_ids": [],
                 "relations": [],
                 "children": [
                     {
@@ -1460,6 +1601,7 @@ DOSYA: ./data/base_ontology.json
                         "differentia_id": "Mutlak_Kemal",
                         "propria_ids": ["Ezeliyyet", "Ebediyyet"],
                         "accidents_ids": [],
+                        "beyan_mushabehat_ids": [],
                         "relations": [],
                         "children": [
                             {
@@ -1475,6 +1617,7 @@ DOSYA: ./data/base_ontology.json
                                 "differentia_id": "La_Yusbeh",
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -1490,6 +1633,7 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     }
@@ -1508,6 +1652,7 @@ DOSYA: ./data/base_ontology.json
                                 "differentia_id": null,
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -1523,6 +1668,7 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     }
@@ -1543,6 +1689,7 @@ DOSYA: ./data/base_ontology.json
                         "differentia_id": "Hudus",
                         "propria_ids": [],
                         "accidents_ids": [],
+                        "beyan_mushabehat_ids": [],
                         "relations": [],
                         "children": [
                             {
@@ -1558,6 +1705,7 @@ DOSYA: ./data/base_ontology.json
                                 "differentia_id": "Kaim_Bi_Zatihi",
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -1573,6 +1721,7 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": "Mutahayyiz",
                                         "propria_ids": [ "el_Ebadus_selase" ],
                                         "accidents_ids": [ "el_Levn" ],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": [
                                             {
@@ -1588,6 +1737,7 @@ DOSYA: ./data/base_ontology.json
                                                 "differentia_id": "Gazi",
                                                 "propria_ids": [ "et_Tenasul" ],
                                                 "accidents_ids": [ "es_Sihha_vel_Marad" ],
+                                                "beyan_mushabehat_ids": [],
                                                 "relations": [],
                                                 "children": [
                                                     {
@@ -1603,6 +1753,7 @@ DOSYA: ./data/base_ontology.json
                                                         "differentia_id": "Mudrik_Hassas",
                                                         "propria_ids": [ "en_Nevm" ],
                                                         "accidents_ids": [ "el_Cu" ],
+                                                        "beyan_mushabehat_ids": [],
                                                         "relations": [],
                                                         "children": [
                                                             {
@@ -1618,8 +1769,27 @@ DOSYA: ./data/base_ontology.json
                                                                 "differentia_id": "Natik",
                                                                 "propria_ids": [ "ed_Dahik", "el_Baki" ],
                                                                 "accidents_ids": [ "el_Katib", "el_Kaim" ],
+                                                                "beyan_mushabehat_ids": [],
                                                                 "relations": [],
-                                                                "children": []
+                                                                "children": [
+                                                                    {
+                                                                        "ontologic_id": "Cesur_Insan",
+                                                                        "namespace": "Base",
+                                                                        "terms": { "ar": "Eş-Şücâ" },
+                                                                        "level": 7,
+                                                                        "origin_epoch": "Classical",
+                                                                        "provenance_locked": true,
+                                                                        "modal_status": "Mumkine_i_Amme",
+                                                                        "husn_u_mucerred": false,
+                                                                        "karine_derecesi": 0,
+                                                                        "differentia_id": null,
+                                                                        "propria_ids": ["Secaat"],
+                                                                        "accidents_ids": [],
+                                                                        "beyan_mushabehat_ids": [],
+                                                                        "relations": [],
+                                                                        "children": []
+                                                                    }
+                                                                ]
                                                             },
                                                             {
                                                                 "ontologic_id": "Feres",
@@ -1634,7 +1804,33 @@ DOSYA: ./data/base_ontology.json
                                                                 "differentia_id": "Sahil",
                                                                 "propria_ids": [ "et_Tesfih" ],
                                                                 "accidents_ids": [ "el_Udme" ],
+                                                                "beyan_mushabehat_ids": [],
                                                                 "relations": [],
+                                                                "children": []
+                                                            },
+                                                            {
+                                                                "ontologic_id": "Esed",
+                                                                "namespace": "Base",
+                                                                "terms": { "ar": "Esed (Aslan)" },
+                                                                "level": 6,
+                                                                "origin_epoch": "Classical",
+                                                                "provenance_locked": true,
+                                                                "modal_status": "Mumkine_i_Amme",
+                                                                "husn_u_mucerred": false,
+                                                                "karine_derecesi": 0,
+                                                                "differentia_id": "Zaer",
+                                                                "propria_ids": ["Secaat"],
+                                                                "accidents_ids": [],
+                                                                "beyan_mushabehat_ids": ["Secaat"],
+                                                                "relations": [
+                                                                    {
+                                                                        "relation_type": "Istiare",
+                                                                        "target_id": "Cesur_Insan",
+                                                                        "axiom": "Implies",
+                                                                        "alaka_type": "İstiare_Tahkikiyye",
+                                                                        "luzum_derecesi": "Luzum_u_Zihni"
+                                                                    }
+                                                                ],
                                                                 "children": []
                                                             }
                                                         ]
@@ -1654,6 +1850,7 @@ DOSYA: ./data/base_ontology.json
                                                 "differentia_id": "La_Nami",
                                                 "propria_ids": [ "el_Hareketul_kasriyye" ],
                                                 "accidents_ids": [],
+                                                "beyan_mushabehat_ids": [],
                                                 "relations": [],
                                                 "children": []
                                             }
@@ -1674,6 +1871,7 @@ DOSYA: ./data/base_ontology.json
                                 "differentia_id": "Kaim_Bi_Ghayrihi",
                                 "propria_ids": [],
                                 "accidents_ids": [],
+                                "beyan_mushabehat_ids": [],
                                 "relations": [],
                                 "children": [
                                     {
@@ -1689,18 +1887,21 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [
                                             {
                                                 "relation_type": "Luzum_Araz",
                                                 "target_id": "Bats",
                                                 "axiom": "Implies",
-                                                "alaka_type": "Alaka_Mülazemet"
+                                                "alaka_type": "Alaka_Mülazemet",
+                                                "luzum_derecesi": "Luzum_u_Beyyin"
                                             },
                                             {
                                                 "relation_type": "Luzum_Zati",
                                                 "target_id": "Kudret",
                                                 "axiom": "Implies",
-                                                "alaka_type": "Alaka_Sebebiyye"
+                                                "alaka_type": "Alaka_Sebebiyye",
+                                                "luzum_derecesi": "Luzum_u_Zihni"
                                             }
                                         ],
                                         "children": []
@@ -1718,11 +1919,14 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [
                                             {
                                                 "relation_type": "Luzum_Zati",
                                                 "target_id": "Kudret",
-                                                "axiom": "Implies"
+                                                "axiom": "Implies",
+                                                "alaka_type": "Alaka_Sebebiyye",
+                                                "luzum_derecesi": "Luzum_u_Zihni"
                                             }
                                         ],
                                         "children": []
@@ -1740,6 +1944,7 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     },
@@ -1756,6 +1961,7 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": [
                                             {
@@ -1772,10 +1978,70 @@ DOSYA: ./data/base_ontology.json
                                                 "differentia_id": null,
                                                 "propria_ids": [],
                                                 "accidents_ids": [],
+                                                "beyan_mushabehat_ids": [],
                                                 "relations": [],
                                                 "children": []
                                             }
                                         ]
+                                    },
+                                    {
+                                        "ontologic_id": "Secaat",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Şecaat (Cesaret)" },
+                                        "level": 3,
+                                        "origin_epoch": "Classical",
+                                        "provenance_locked": true,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
+                                        "relations": [],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Tavil_un_Necad",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Tavîlu'n-Necâd (Kılıç kını uzun)" },
+                                        "level": 3,
+                                        "origin_epoch": "Classical",
+                                        "provenance_locked": true,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 3,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
+                                        "relations": [
+                                            {
+                                                "relation_type": "Kinaye",
+                                                "target_id": "Tavil_ul_Kame",
+                                                "axiom": "Implies",
+                                                "alaka_type": "Kinaye_Sifat",
+                                                "luzum_derecesi": "Luzum_u_Harici"
+                                            }
+                                        ],
+                                        "children": []
+                                    },
+                                    {
+                                        "ontologic_id": "Tavil_ul_Kame",
+                                        "namespace": "Base",
+                                        "terms": { "ar": "Tavîlu'l-Kâme (Boyu uzun)" },
+                                        "level": 3,
+                                        "origin_epoch": "Classical",
+                                        "provenance_locked": true,
+                                        "modal_status": "Mumkine_i_Amme",
+                                        "husn_u_mucerred": false,
+                                        "karine_derecesi": 0,
+                                        "differentia_id": null,
+                                        "propria_ids": [],
+                                        "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
+                                        "relations": [],
+                                        "children": []
                                     },
                                     {
                                         "ontologic_id": "Harf_Kasr_Innema",
@@ -1790,6 +2056,7 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     },
@@ -1806,6 +2073,7 @@ DOSYA: ./data/base_ontology.json
                                         "differentia_id": null,
                                         "propria_ids": [],
                                         "accidents_ids": [],
+                                        "beyan_mushabehat_ids": [],
                                         "relations": [],
                                         "children": []
                                     }

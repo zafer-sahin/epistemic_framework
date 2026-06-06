@@ -62,7 +62,7 @@ class NahivDependencyCompiler:
                         kasr_direction = 'Mevsuf_to_Sifat'
                 # İllâ (Nefy ile birlikte), kendisinden sonra gelene hasreder.
                 elif t1.lower() == "illa":
-                    kasr_direction = 'Sifat_to_Mevsuf'
+                        kasr_direction = 'Sifat_to_Mevsuf'
 
                 # Tuple aritesini korumak adına irab parametresi (4. indis) kasr yönünü taşımak için aşırı yüklenir (overloaded).
                 dependencies.append((t2, t1, 'Kasr_Modifier', kasr_direction))

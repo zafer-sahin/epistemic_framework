@@ -1,6 +1,7 @@
 from typing import List, Optional, Literal, Dict
 from pydantic import BaseModel
 from enum import IntEnum
+from core.exceptions import ContextPoisoningError
 
 class DenialLevel(IntEnum):
     KHALI_AL_ZIHN = 0  # Zihin boş, nötr durum. Tevkîd (pekiştirme) yasaktır.
@@ -12,13 +13,13 @@ class EntityMention(BaseModel):
     ontologic_id: str
     timestamp: int
     agent: Literal["Mujib", "Sail"]
-    sealed_namespace: str  # [FAZ 4] Yalıtım Zırhı: Hangi usûl uzayında üretildi?
+    sealed_namespace: str  # [FAZ 4] Yalıtım Zırhı: Hangi usûl uzayında (Namespace) üretildiğini mühürler.
 
 class DiscourseRegister:
     """
     Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
-    Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı eklendi.
-    Faz 2 - Adım 1: Epistemik Durum (Muktazâ el-Hâl) matrisi eklendi.
+    Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı.
+    Faz 2 - Adım 1: Epistemik Durum (Muktazâ el-Hâl) matrisi.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
@@ -26,7 +27,7 @@ class DiscourseRegister:
         self.sail_frames: List[List[EntityMention]] = [[]]  
         self.clock: int = 0
         self.pronouns = {"huve", "hiye", "huma", "hum", "hunne"}
-        self.active_agent: Literal["Mujib", "Sail"] = "Mujib" # Varsayılan aktör iddia sahibidir
+        self.active_agent: Literal["Mujib", "Sail"] = "Mujib" # Varsayılan aktör iddia sahibidir (Mucîb)
         
         # [FAZ 2.1] Epistemik Durum Matrisi (Muktazâ el-Hâl)
         self.epistemic_state: Dict[Literal["Mujib", "Sail"], DenialLevel] = {
@@ -81,7 +82,7 @@ class DiscourseRegister:
 
     def resolve_pronoun(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[str]:
         """
-        Aktör-Spesifik ve Uzay-Korumalı Zamir (Anafora) tespiti.
+        [FAZ 4] Aktör-Spesifik ve Uzay-Korumalı Zamir (Anafora) tespiti.
         Sadece konuşan aktörün kendi yığıtındaki (LIFO) geçmiş kabulleri (Müsellemat) taranır.
         Eğer çapraz sorguda (Mu'aradah) bağlam zehirlenmesi saptanırsa motor durdurulur.
         """
@@ -95,14 +96,14 @@ class DiscourseRegister:
             if frame:
                 resolved_mention = frame[-1]
                 
-                # [FAZ 4] Context Sealing (Bağlam Zehirlenmesi Koruması)
+                # Context Sealing (Bağlam Zehirlenmesi Koruması)
                 if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
-                    raise ValueError(
+                    raise ContextPoisoningError(
                         f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
                         f"'{pronoun}' zamiri '{resolved_mention.sealed_namespace}' uzayında üretildi, "
-                        f"ancak şu an '{enforcement_namespace}' uzayına sızmaya/bağlanmaya çalışıyor."
+                        f"ancak şu an '{enforcement_namespace}' uzayına sızmaya/bağlanmaya çalışıyor. Mu'aradah çapraz izolasyonu ihlal edildi."
                     )
-                    
+                
                 return resolved_mention.ontologic_id
                 
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")

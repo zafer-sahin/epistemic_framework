@@ -25,7 +25,8 @@ class AristotelianSolver:
     def _inject_kalamic_causality(self) -> None:
         """
         [FAZ 4 - Tamamlama] İmkân ve Nedensellik (Kalamic Causality)
-        SMT motorunun olasılık çöküşü yaşamaması için, Kripke uzayındaki her Mümkin varlık Zorunlu varlığa bağlanır.
+        SMT motorunun olasılık çöküşü yaşamaması için, Kripke uzayındaki 
+        her Mümkin varlık Zorunlu varlığa bağlanır.
         """
         try:
             wajib_pred = self.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
