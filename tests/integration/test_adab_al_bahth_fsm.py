@@ -74,6 +74,7 @@ class TestDialecticsFSM(unittest.TestCase):
         
         self.assertEqual(attack_result["status"], "NAKZ_SUCCESS")
         self.assertEqual(self.engine.current_state, "RESOLVED")
+        self.assertIn("counter_model_extract", attack_result)
 
     def test_cross_school_muaradah_dynamic_weight_optimization(self):
         """[Faz 5 Refaktör] Mu'aradah çapraz-ekol çarpışmasında ontolojik derinliğe göre dinamik ağırlık cezası ölçümü."""
@@ -99,6 +100,60 @@ class TestDialecticsFSM(unittest.TestCase):
         self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE"])
         if result["status"] == "MUARADAH_SUCCESS":
             self.assertIn("ontolojik ağırlık maliyetiyle", result["message"])
+
+    def test_tahsil_i_hasil_rejection(self):
+        """[Faz 5] Tautoloji içeren (Z3'te kendi içinde ispatlı) aksiyomların reddi."""
+        tautology_claim = "Forall([x_env], Or(Cism(x_env), Not(Cism(x_env))))"
+        response = self.engine.submit_claim(tautology_claim)
+        
+        self.assertEqual(response["status"], "TAHSIL_I_HASIL")
+        self.assertEqual(self.engine.current_state, "RESOLVED")
+
+    def test_recursive_men_stack_operation(self):
+        """[Faz 5] Rekürsif 'Men' saldırısı ve yığıt (stack) yönetimi."""
+        # İddia: Her Cemad Nami'dir. (Ontolojide geçersiz olduğu için Tahsîl-i Hâsıl'a takılmaz)
+        main_claim = "Forall([x_env], Implies(Cemad(x_env), Nami(x_env)))"
+        self.engine.submit_claim(main_claim)
+        self.engine.tahrir_i_niza(["Cevher"], ["Cemad", "Nami"])
+        
+        # Yanıltıcı delil
+        p1 = "Forall([x_env], Implies(Cemad(x_env), Hayvan(x_env)))"
+        p2 = "Forall([x_env], Implies(Hayvan(x_env), Nami(x_env)))"
+        self.engine.submit_evidence([p1, p2])
+        
+        men_response = self.engine.attack_evidence("Men", target_premise=p1)
+        
+        self.assertEqual(men_response["status"], "MEN_ON_PREMISE")
+        self.assertEqual(len(self.engine.claim_stack), 1)
+        self.assertEqual(self.engine.active_claim, p1)
+        self.assertEqual(self.engine.current_state, "ISOLATING_CONTENTION")
+        
+        self.engine.tahrir_i_niza([], ["Cemad", "Hayvan"])
+        sub_p1 = "Forall([x_env], Implies(Cemad(x_env), Insan(x_env)))"
+        sub_p2 = "Forall([x_env], Implies(Insan(x_env), Hayvan(x_env)))"
+        self.engine.submit_evidence([sub_p1, sub_p2])
+        
+        nakz_response = self.engine.attack_evidence("Nakz")
+        
+        self.assertEqual(nakz_response["status"], "SUB_CLAIM_PROVEN")
+        self.assertEqual(len(self.engine.claim_stack), 0)
+        self.assertEqual(self.engine.active_claim, main_claim)
+        self.assertEqual(self.engine.current_state, "AWAITING_ATTACK")
+
+    def test_mukabere_self_contradiction(self):
+        """[Faz 5] Mucîb'in kendi öncüllerinin çelişmesi durumu (UNSAT öngörüsü)."""
+        claim = "Forall([x_env], Implies(Cemad(x_env), Hayvan(x_env)))"
+        self.engine.submit_claim(claim)
+        self.engine.tahrir_i_niza([], ["Cemad"])
+        
+        # Z3'ün boş küme (vacuously true) ile kaçmasını engellemek için varoluşsal bir çelişki sunuyoruz.
+        p1 = "Exists([x_env], And(Cemad(x_env), Cism(x_env)))"
+        p2 = "Forall([x_env], Not(Cism(x_env)))"
+        
+        response = self.engine.submit_evidence([p1, p2])
+        
+        self.assertEqual(response["status"], "MUKABERE")
+        self.assertEqual(self.engine.current_state, "RESOLVED")
 
 if __name__ == '__main__':
     unittest.main()

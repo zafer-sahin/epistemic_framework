@@ -167,7 +167,6 @@ class EpistemicOrchestrator:
                 resolved, bridge_messages = self._resolve_ilm_i_beyan(ir_matrix, flagged, usul_profile.dsl_ruleset)
                 
                 if resolved:
-                    # SAT DOĞRULAMASI ARTIK _resolve_ilm_i_beyan İÇERİSİNDE YAPILIYOR
                     l3_result = self.l3.execute_sat_check(ir_matrix)
                     if l3_result["status"] == "SAT":
                         execution_result["status"] = "SAT"
@@ -189,7 +188,19 @@ class EpistemicOrchestrator:
                                       sail_tokens: List[str],
                                       sail_dependencies: List[Tuple[str, str, str, str]],
                                       sail_usul: AbstractSchoolUsul,
-                                      sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
+                                      sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None,
+                                      fsm_engine: Any = None) -> Dict[str, Any]:
+        """
+        [FAZ 5 ENTEGRASYONU] FSM Asenkron Mu'aradah Tetikleyicisi.
+        Sâil'in 'AWAITING_ATTACK' durumunda gönderdiği karşı-argümanı (Anti-Tez) Z3 Optimize 
+        motorunda Mucîb'in argümanıyla çarpıştırır. Çapraz ekol kilitlenmesi FSM durumunu günceller.
+        """
+        
+        if fsm_engine and getattr(fsm_engine, "current_state", None) != "AWAITING_ATTACK":
+            return {
+                "status": "FSM_VIOLATION",
+                "message": "[DİYALEKTİK İHLAL] Mu'aradah saldırısı sadece Sâil'in 'AWAITING_ATTACK' evresinde yapılabilir."
+            }
         
         try:
             sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon, epoch="Classical")
@@ -227,16 +238,29 @@ class EpistemicOrchestrator:
                 penalty_score = optimizer.objectives()[0]
                 
                 if model.eval(penalty_score).as_long() == 0:
+                    if fsm_engine:
+                        fsm_engine.current_state = "RESOLVED"
                     return {
                         "status": "MUARADAH_INEFFECTIVE",
-                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik)."
+                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik). Mucîb kazandı (İlzam)."
                     }
                 else:
+                    if fsm_engine:
+                        # Çapraz kilitlenme sağlandı, FSM diyalektiği sonuçlandırır.
+                        try:
+                            fsm_engine.solver.solver.pop()
+                            fsm_engine.discourse.pop_scope()
+                        except z3.Z3Exception:
+                            pass
+                        fsm_engine.current_state = "RESOLVED"
+                        
                     return {
                         "status": "MUARADAH_SUCCESS",
-                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate)."
+                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ontolojik ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate)."
                     }
             else:
+                if fsm_engine:
+                    fsm_engine.current_state = "RESOLVED"
                 return {
                     "status": "MUJIB_INVALID",
                     "message": "Mucîb'in argümanları ile Sâil'in iddiaları yapısal olarak z3.Optimize düzleminde bile çözülemez bir kilitlenme yarattı."

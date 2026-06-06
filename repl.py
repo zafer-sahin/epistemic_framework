@@ -33,7 +33,7 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
 Çıkmak için 'exit'.
 =============================================================================
 """
-    prompt = "Epistemic-Engine [Ashari]> "
+    prompt = "Epistemic-Engine [Ashari | AWAITING_CLAIM]> "
 
     def __init__(self):
         super().__init__()
@@ -94,11 +94,18 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             print(f"[KRİTİK HATA] Motor mimarisi başlatılamadı: {e}")
             sys.exit(1)
 
+    def postcmd(self, stop, line):
+        """Her komut sonrası FSM durumunu ve Men' derinliğini promta yansıtır."""
+        depth = len(self.fsm.claim_stack) if self.fsm and hasattr(self.fsm, 'claim_stack') else 0
+        depth_str = f" | Men' Derinliği: {depth}" if depth > 0 else ""
+        state_str = f" | {self.fsm.current_state}" if self.fsm else ""
+        self.prompt = f"Epistemic-Engine [{self.active_usul.namespace}{depth_str}{state_str}]> "
+        return stop
+
     def do_set_usul(self, arg):
         target = arg.strip().lower()
         if target in self.available_schools:
             self.active_usul = self.available_schools[target]
-            self.prompt = f"Epistemic-Engine [{self.active_usul.namespace}]> "
             self.discourse.clear_memory()
             self.fsm.reset_session()
             self.last_ir = None
@@ -164,7 +171,7 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) z3.Optimize çapraz saldırı protokolü başlatıldı...")
             
             result = self.orchestrator.execute_cross_school_muaradah(
-                self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon
+                self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon, fsm_engine=self.fsm
             )
             
             if result.get("status") == "EPISTEMIC_BREACH":
@@ -235,6 +242,10 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
         try:
             res = self.fsm.attack_evidence(attack_type, target)
             print(f"[{res['status']}] {res['message']}")
+            
+            if "counter_model_extract" in res:
+                print("\n[KARŞI-MODEL (COUNTER-MODEL) BİLEŞENİ]:")
+                print(res["counter_model_extract"])
         except Exception as e:
             print(f"[FSM ÇÖKÜŞÜ] {e}")
 
