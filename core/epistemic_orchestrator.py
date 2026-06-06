@@ -1,7 +1,8 @@
 import z3
+import copy
 from typing import Dict, Any, List, Tuple
 import re
-from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
+from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR, NestedPredicate
 from linguistics.sarf_parser import MorphologicalAnalysis
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
@@ -54,8 +55,6 @@ class EpistemicOrchestrator:
     def _resolve_ilm_i_beyan(self, ir_matrix: SemanticStatementIR, flagged_elements: List[str], school_rules: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """
         [FAZ 3 ENTEGRASYONU] Deterministik Te'vil ve Ma'nâ el-Ma'nâ (İlm-i Beyân) İşlemcisi.
-        Hardcoded (statik) string manipülasyonu yerine, L1 grafından gelen nedensellik ve Müşabehet 
-        vektörlerini (İstiare/Mecaz/Kinaye) kullanarak dinamik Z3 ispat rotaları oluşturur.
         """
         allow_tevil = school_rules.get("allow_tevil", False)
         blocked_nodes = school_rules.get("blocked_nodes", [])
@@ -72,61 +71,70 @@ class EpistemicOrchestrator:
             except ValueError:
                 continue
 
-            if amil_str in blocked_nodes or mamul_str in blocked_nodes:
-                continue
+            nodes_to_try = []
+            if amil_str not in blocked_nodes:
+                nodes_to_try.append(amil_str)
+            if mamul_str not in blocked_nodes:
+                nodes_to_try.append(mamul_str)
 
-            amil_entity = self.l1.entity_map.get(amil_str)
-            if not amil_entity:
-                continue
-
-            potential_targets = [rel.target_id for rel in amil_entity.relations if rel.alaka_type is not None]
-
-            for target_id in potential_targets:
-                if target_id in blocked_nodes:
+            for node_str in nodes_to_try:
+                node_entity = self.l1.entity_map.get(node_str)
+                if not node_entity:
                     continue
 
-                # 1. L1 Grafı üzerinden Mecaz/İstiare zincirini talep et
-                chain_data = self.l1.find_mana_el_mana_chain(amil_str, target_id)
-                
-                if chain_data.get("is_found"):
-                    # 2. L3 Z3 SMT üzerinden Kripke semantiği aksiyomlarını ispatla
-                    bridge_proved = self.l3.prove_metaphorical_bridge(chain_data)
-                    
-                    if bridge_proved:
-                        alaka_str = chain_data.get("alaka_type", "Unknown")
-                        bridge_messages.append(f"İlm-i Beyân Çıkarımı: {amil_str} -> {target_id} ({alaka_str}) zihinsel köprüsü Z3'e ispatlatıldı.")
-                        
-                        # 3. IR Matrisi üzerinde Literal -> Mecaz sessiz mutasyonu (In-place)
-                        if hasattr(self.adapter, 'update_ir_predicate'):
-                            self.adapter.update_ir_predicate(ir_matrix, amil_str, target_id)
-                        else:
-                            def _replace_in_tuple(tup: Tuple[str, str, int]) -> Tuple[str, str, int]:
-                                p_id, a_id, arity = tup
-                                new_pred = target_id if p_id == amil_str else p_id
-                                if arity == 1:
-                                    new_arg = target_id if a_id == amil_str else a_id
-                                else:
-                                    args = a_id.split("::")
-                                    new_args = [target_id if a == amil_str else a for a in args]
-                                    new_arg = "::".join(new_args)
-                                return (new_pred, new_arg, arity)
-                            
-                            def _traverse_and_replace(predicates):
-                                new_preds = []
-                                from linguistics.ilm_wad_adapter import NestedPredicate
-                                for item in predicates:
-                                    if isinstance(item, tuple):
-                                        new_preds.append(_replace_in_tuple(item))
-                                    elif isinstance(item, NestedPredicate):
-                                        item.args = _traverse_and_replace(item.args)
-                                        new_preds.append(item)
-                                return new_preds
-                            
-                            ir_matrix.predicates = _traverse_and_replace(ir_matrix.predicates)
-                            
-                        tevil_basarili = True
-                        break 
+                potential_targets = [rel.target_id for rel in node_entity.relations if getattr(rel, 'alaka_type', None) is not None]
 
+                for target_id in potential_targets:
+                    chain_data = self.l1.find_mana_el_mana_chain(node_str, target_id)
+                    
+                    if chain_data.get("is_found"):
+                        bridge_proved = self.l3.prove_metaphorical_bridge(chain_data)
+                        
+                        if bridge_proved:
+                            # MATRİS MUTASYONU ÖNCESİ ORİJİNAL DURUMU YEDEKLE (BACKTRACKING)
+                            original_predicates = copy.deepcopy(ir_matrix.predicates)
+                            
+                            if hasattr(self.adapter, 'update_ir_predicate'):
+                                self.adapter.update_ir_predicate(ir_matrix, node_str, target_id)
+                            else:
+                                def _replace_in_tuple(tup: Tuple[str, str, int]) -> Tuple[str, str, int]:
+                                    p_id, a_id, arity = tup
+                                    new_pred = target_id if p_id == node_str else p_id
+                                    if arity == 1:
+                                        new_arg = target_id if a_id == node_str else a_id
+                                    else:
+                                        args = a_id.split("::")
+                                        new_args = [target_id if a == node_str else a for a in args]
+                                        new_arg = "::".join(new_args)
+                                    return (new_pred, new_arg, arity)
+                                
+                                def _traverse_and_replace(preds):
+                                    new_preds = []
+                                    for item in preds:
+                                        if isinstance(item, tuple):
+                                            new_preds.append(_replace_in_tuple(item))
+                                        elif hasattr(item, 'args'): 
+                                            new_item = copy.deepcopy(item)
+                                            new_item.args = _traverse_and_replace(new_item.args)
+                                            new_preds.append(new_item)
+                                    return new_preds
+                                
+                                ir_matrix.predicates = _traverse_and_replace(ir_matrix.predicates)
+                            
+                            # YENİ MATRİSİN SAT KONTROLÜ
+                            l3_result = self.l3.execute_sat_check(ir_matrix)
+                            if l3_result["status"] == "SAT":
+                                alaka_str = chain_data.get("alaka_type", "Unknown")
+                                bridge_messages.append(f"İlm-i Beyân Çıkarımı: {node_str} -> {target_id} ({alaka_str}) zihinsel köprüsü Z3'e ispatlatıldı.")
+                                tevil_basarili = True
+                                break 
+                            else:
+                                # UNSAT ALINDI: MATRİSİ ESKİ HALİNE DÖNDÜR VE SIRADAKİ ADAYA GEÇ (ROLLBACK)
+                                ir_matrix.predicates = original_predicates
+                                
+                if tevil_basarili:
+                    break
+                    
         return tevil_basarili, bridge_messages
 
     def process_statement(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], usul_profile: AbstractSchoolUsul, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
@@ -138,7 +146,6 @@ class EpistemicOrchestrator:
         proposition_type = "Kadiyye-i_Sartiyye" if has_condition else "Kadiyye-i_Hamliyye"
         
         try:
-            # [FAZ 1 ENTEGRASYONU] Zorunlu "Classical" zaman damgası (Epoch)
             ir_matrix = self.adapter.generate_ir(
                 tokens, dependencies, usul_profile.namespace, auto_lexicon, tevil_flagged_nodes, proposition_type, epoch="Classical"
             )
@@ -149,20 +156,18 @@ class EpistemicOrchestrator:
                     "message": "İlm-i Ma'ânî İhlali: İnşâî form (İstifham-ı Hakikî) veya Muktazâ el-Hâl uyumsuzluğu."
                 }
             
-            # Air-Gapped Ontology Mührü Denetimi
             self._verify_air_gapped_ontology(ir_matrix)
             
             execution_result = usul_profile.execute_dag(ir_matrix, self.l1, self.l2, self.l3, current_attempt)
             
-            # [FAZ 3 ENTEGRASYONU]: İlm-i Beyân Te'vil Çıkarımı
             if execution_result.get("status") == "FALLBACK_TRIGGERED" and current_attempt < max_tevil_retries:
                 l1_analysis = self.l1.analyze_ir(ir_matrix)
                 flagged = l1_analysis.get("flagged_elements", [])
                 
-                # Dinamik graf tabanlı Müşabehet / Nedensellik çözümü
                 resolved, bridge_messages = self._resolve_ilm_i_beyan(ir_matrix, flagged, usul_profile.dsl_ruleset)
                 
                 if resolved:
+                    # SAT DOĞRULAMASI ARTIK _resolve_ilm_i_beyan İÇERİSİNDE YAPILIYOR
                     l3_result = self.l3.execute_sat_check(ir_matrix)
                     if l3_result["status"] == "SAT":
                         execution_result["status"] = "SAT"
@@ -170,7 +175,7 @@ class EpistemicOrchestrator:
                         msg_append = f" (Te'vil uygulandı)"
                         if bridge_messages:
                             msg_append += " | " + " | ".join(bridge_messages)
-                        execution_result["message"] += msg_append
+                        execution_result["message"] = execution_result.get("message", "") + msg_append
                         return execution_result
             
             return execution_result
@@ -187,7 +192,6 @@ class EpistemicOrchestrator:
                                       sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
         
         try:
-            # [FAZ 1 ENTEGRASYONU] Zorunlu "Classical" zaman damgası (Epoch)
             sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon, epoch="Classical")
             self._verify_air_gapped_ontology(sail_native_ir)
             
@@ -202,19 +206,16 @@ class EpistemicOrchestrator:
             cross_injected_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, mujib_usul.namespace, sail_auto_lexicon, epoch="Classical")
             self._verify_air_gapped_ontology(cross_injected_ir)
             
-            # SMT Solver yerine SMT Optimizer kullanarak ontolojik önceliklendirme
             optimizer = z3.Optimize()
             
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
             tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
             
-            # Mucîb'in iddiaları Soft Constraint (Ödünç alınmış uzay) olarak düşük maliyetle eklenir
             for item in mujib_claim_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 optimizer.add_soft(z3_expr, weight=1)
                 
-            # Sâil'in anti-tezi Hard Constraint (Mutlak İhlal) olarak eklenir
             for item in cross_injected_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
                 optimizer.add(z3_expr)
@@ -222,7 +223,6 @@ class EpistemicOrchestrator:
             cross_status = optimizer.check()
 
             if cross_status == z3.sat:
-                # Soft Constraint'lerin ne kadarının ihlal edildiğini ölç
                 model = optimizer.model()
                 penalty_score = optimizer.objectives()[0]
                 
