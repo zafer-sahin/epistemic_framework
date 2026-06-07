@@ -8,6 +8,7 @@ class MorphologicalAnalysis(BaseModel):
     pattern: str        
     ontologic_type: str 
     thematic_role: Optional[str] = None  
+    is_diptote: bool = Field(default=False, description="Gayri Munsarif (Diptote) morfolojik kısıt bayrağı")
 
 class OntoLexRule(BaseModel):
     """OntoLex-Morph standardında kelime üretim/çekim kuralları"""
@@ -28,6 +29,7 @@ class SarfEngine:
     Üretken Morfoloji Motoru ('İlm-i Sarf).
     [FAZ 3 ENTEGRASYONU]: OntoLex-Morph RDF standartlarına uygun katı durum makinesi.
     Statik wazan_matrix sözlüğü, manipüle edilemez OntoLex kural grafına dönüştürülmüştür.
+    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) bükün sınıfları ve morfolojik kısıt bayrakları eklendi.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
@@ -41,6 +43,13 @@ class SarfEngine:
         
         self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
         self.kasr_set = {"innema", "illa"}
+        
+        # FAZ 1: Gayri Munsarif (Diptote) Gövde/Kök Havuzu. (Alem, Acemî, Müennes, Udûl formları)
+        # İleriki fazlarda bu yapı OntoLex RDF grafına dinamik olarak bağlanacaktır.
+        self.diptote_stems = {
+            "makkat", "ibrahim", "ismail", "umar", "ahmad", 
+            "mesacid", "masabih", "fatimat", "ayishat", "makkah"
+        }
         
         # OntoLex-Morph Kural Grafı
         self.ontolex_graph: Dict[str, OntoLexMorphEntry] = {
@@ -139,19 +148,19 @@ class SarfEngine:
         if word_lower in self.kasr_set:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf_Kasr",
-                ontologic_type="Harf_Kasr", thematic_role=None
+                ontologic_type="Harf_Kasr", thematic_role=None, is_diptote=False
             )
 
         if word_lower in self.tevkid_set:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf_Tevkid",
-                ontologic_type="Harf_Tevkid", thematic_role=None
+                ontologic_type="Harf_Tevkid", thematic_role=None, is_diptote=False
             )
 
         if word_lower in self.harf_set:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf",
-                ontologic_type="Harf", thematic_role=None 
+                ontologic_type="Harf", thematic_role=None, is_diptote=False
             )
 
         signature = self._generate_structural_signature(word_lower)
@@ -161,18 +170,28 @@ class SarfEngine:
             extracted_root = self._apply_ontolex_rules(word_lower, entry.extraction_rules)
             return MorphologicalAnalysis(
                 original_word=word_lower, root=extracted_root, pattern=entry.pattern_id,
-                ontologic_type=entry.ontologic_type, thematic_role=entry.thematic_role
+                ontologic_type=entry.ontologic_type, thematic_role=entry.thematic_role, is_diptote=False
+            )
+            
+        # FAZ 1: Gayri Munsarif (Diptote) İzolasyon Kısıtı.
+        # Bu kısıt, sentaktik derleyicinin (Nahiv) cer durumunda bile fetha alan
+        # kelimeleri meful (Patient) zannetmesini engellemek için tasarlanmıştır.
+        stem_1 = word_lower[:-1]
+        if stem_1 in self.diptote_stems and word_lower[-1] in ("u", "a"):
+            return MorphologicalAnalysis(
+                original_word=word_lower, root=stem_1, pattern="Gayri_Munsarif",
+                ontologic_type="Ism", thematic_role=None, is_diptote=True
             )
             
         if word_lower.endswith(("un", "an", "in")):
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower[:-2], pattern="Alem/Camid_Munevven",
-                ontologic_type="Ism", thematic_role=None 
+                ontologic_type="Ism", thematic_role=None, is_diptote=False
             )
         elif word_lower.endswith(("u", "a", "i")):
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower[:-1], pattern="Alem/Camid_Mudaf",
-                ontologic_type="Ism", thematic_role=None
+                ontologic_type="Ism", thematic_role=None, is_diptote=False
             )
 
         raise ValueError(f"[SARF ÇÖKÜŞÜ] '{word}' (İmza: {signature}) kelimesi OntoLex-Morph grafında doğrulanamadı. MSA/Modern türetim reddedildi.")

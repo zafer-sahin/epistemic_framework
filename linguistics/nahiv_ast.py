@@ -9,6 +9,7 @@ class NahivDependencyCompiler:
     Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
     Faz 2 - Adım 2.5: Takdim (Pre-positioning) ve İhtisas (Kasr) tespiti.
     Faz 2 - Adım 2.6: Kasr (Hasr) Operatörlerinde Yön Tespiti (Sıfat/Mevsuf) ve Harf-i Atıf (Fasıl/Vasıl) Entegrasyonu.
+    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) kelimelerin cer durumundaki (fetha) i'rab istisnaları AST mantığına işlendi.
     İzafet (İsim Tamlaması), Sıfat-Mevsuf, Hal ve Atıf ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
@@ -78,7 +79,9 @@ class NahivDependencyCompiler:
 
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
                 # İzafet (Mudaf - Mudaf İleyh) Matrisi
-                if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i'))):
+                # [FAZ 1 - GAYRİ MUNSARİF YAMASI]: Mudaf_Ilayh olan diptote kelime fetha (-a) ile bitebilir.
+                is_diptote_majrur = getattr(m2, 'is_diptote', False) and t2.lower().endswith('a')
+                if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i')) or is_diptote_majrur):
                     dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
                 
                 # [FAZ 4 ENTEGRASYONU] Hal ve Zarf-ı Zaman (Vasfî Zaman Tetiği) - [ÖNCELİKLİ]
@@ -87,8 +90,16 @@ class NahivDependencyCompiler:
                     dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
 
                 # Sıfat-Mevsuf (Na't - Man'ut) Matrisi
-                # [LOGIC FIX]: Sadece marife/nekra uyumu yetmez, kesin İ'rab (son iki harf: un/an/in) uyumu şarttır.
-                elif self._is_definite(t1) == self._is_definite(t2) and t1[-2:] == t2[-2:]:
+                # [LOGIC FIX]: Sadece marife/nekra uyumu yetmez, kesin İ'rab uyumu şarttır.
+                is_sifat_uyumu = False
+                if self._is_definite(t1) == self._is_definite(t2):
+                    if t1[-2:] == t2[-2:]:
+                        is_sifat_uyumu = True
+                    # [FAZ 1 - GAYRİ MUNSARİF YAMASI]: Triptote mevsuf (mecrur) + Diptote sıfat (mecrur '-a' ile)
+                    elif getattr(m2, 'is_diptote', False) and t1.lower().endswith(('in', 'i')) and t2.lower().endswith('a'):
+                        is_sifat_uyumu = True
+                
+                if is_sifat_uyumu:
                     dependencies.append((t1, t2, 'Sifat_Mevsuf', 'Tabi'))
                     
             # Şart Edatları (İn, İza, Lev, Amma)
@@ -126,12 +137,17 @@ class NahivDependencyCompiler:
             if not morph or morph.ontologic_type != "Ism":
                 continue
 
-            if token.lower().endswith('un'):
+            is_diptote = getattr(morph, 'is_diptote', False)
+
+            if token.lower().endswith('un') or (is_diptote and token.lower().endswith('u')):
                 dependencies.append((amil_token, token, 'Fail', 'Marfu'))
-            elif token.lower().endswith('an'):
+            elif token.lower().endswith('an') or (is_diptote and token.lower().endswith('a')):
                 # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
+                # [FAZ 1 - GAYRİ MUNSARİF KORUMASI]: Eğer kelime diptote ise ve zaten Majrur (Mudaf_Ilayh) olarak bağlandıysa Meful OLAMAZ.
                 is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
-                if not is_hal:
+                is_majrur = any(mamul == token and irab == 'Majrur' for _, mamul, rel, irab in dependencies)
+                
+                if not is_hal and not is_majrur:
                     # [FAZ 2.5] İlm-i Ma'ânî İhtisas (Takdim) Kontrolü
                     # Eğer meful, fiilden (amil) önce gelmişse bu bir İhtisas/Kasr durumudur.
                     if idx < amil_index:
@@ -155,7 +171,7 @@ class NahivDependencyCompiler:
             self.dependency_graph.add_edge(amil, mamul, relation=rel, irab=irab)
             
         return self.dependency_graph
-        
+    
     def extract_temporal_conditions(self, ast: nx.DiGraph) -> Dict[str, str]:
         """
         AST üzerinden Vasfî Zamanı (t_vasfi) tetikleyen düğümleri çeker.
