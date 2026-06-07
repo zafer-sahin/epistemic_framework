@@ -9,6 +9,8 @@ class MaaniSpeechActAnalyzer:
     Faz 2 - Adım 2.4: İstifham-ı İnkârî (Reddedici Soru) tespiti.
     Faz 2 - Adım 2.5: Kasr/Hasr (Kısıtlama) ve İhtisas (Takdim/Te'hir) tespiti.
     Faz 2 - Adım 2.6: Kasr Operatörlerinde Yön Yitimi Onarımı (Kasr-ı Sıfat ale'l-Mevsuf / Kasr-ı Mevsuf ale's-Sıfat).
+    [FAZ 3 ENTEGRASYONU]: 'İnne ve Kardeşleri'nin Tevkîd gücü korunurken (Muktazâ el-Hâl), 
+    Kripke uzayı için 'Epistemic_Necessity' (Tahkik/Yakîn) sinyali üretmesi sağlandı.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
@@ -46,8 +48,9 @@ class MaaniSpeechActAnalyzer:
             is_prohibitive = first_token.startswith("la_")
             return {"is_valid": True, "type": "Deontic", "operator": "Nehiy" if is_prohibitive else "Emir"}
             
-        # 3. Muktazâ el-Hâl (Bağlamsal Gereklilik) Denetimi (Faz 2.3)
-        tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier')
+        # 3. Muktazâ el-Hâl (Bağlamsal Gereklilik) Denetimi (Faz 2.3 & FAZ 3)
+        # [FAZ 3 GÜNCELLEMESİ]: 'Amel_Inne_Ism' veya 'Amel_Inne_Haber' bağımlılıkları da güçlü bir Tevkid (Pekiştirme) sayılır.
+        tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier' or rel.startswith('Amel_Inne_'))
         opponent_denial_level = self.discourse.get_opponent_epistemic_state()
 
         if opponent_denial_level == DenialLevel.KHALI_AL_ZIHN and tevkid_count > 0:
@@ -97,8 +100,19 @@ class MaaniSpeechActAnalyzer:
                 }
 
         response = {"is_valid": True, "type": "Khabari"}
+        
+        # [FAZ 3 ENTEGRASYONU]: Epistemic Necessity (Tahkik) Tespiti
+        has_epistemic_necessity = any(rel.startswith('Amel_Inne_') for _, _, rel, _ in dependencies)
+        if has_epistemic_necessity:
+            response["epistemic_modality"] = "Epistemic_Necessity"
+            response["message"] = "İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil) tespit edildi: Tahkik (Epistemic Necessity) uygulanacak."
+
         if kasr_data:
             response["kasr_data"] = kasr_data
+            if "message" in response:
+                response["message"] += f" | {kasr_data['message']}"
+            else:
+                response["message"] = kasr_data['message']
 
         return response
         

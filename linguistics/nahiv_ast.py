@@ -11,6 +11,7 @@ class NahivDependencyCompiler:
     Faz 2 - Adım 2.6: Kasr (Hasr) Operatörlerinde Yön Tespiti (Sıfat/Mevsuf) ve Harf-i Atıf (Fasıl/Vasıl) Entegrasyonu.
     [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) kelimelerin cer durumundaki (fetha) i'rab istisnaları AST mantığına işlendi.
     [FAZ 2 ENTEGRASYONU]: Müstatir Zamir (Hidden Pronoun) otonom düğüm enjeksiyonu eklendi (Zero-Node Agent).
+    [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Amel Statüleri) cümlenin ana amili olarak AST'ye eklendi.
     İzafet (İsim Tamlaması), Sıfat-Mevsuf, Hal ve Atıf ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
@@ -28,15 +29,21 @@ class NahivDependencyCompiler:
     def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, str, str]]:
         dependencies = []
         
-        # 1. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL KONTROLÜ (Erken Tespit)
+        # 1. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL VE İNNE KONTROLÜ (Erken Tespit)
         amil_token = None
         amil_index = -1
+        inne_token = None
+        inne_index = -1
+        
         for idx, token in enumerate(tokens):
             morph = lexicon.get(token)
-            if morph and morph.ontologic_type == "Fiil":
-                amil_token = token
-                amil_index = idx
-                break
+            if morph:
+                if morph.ontologic_type == "Fiil":
+                    amil_token = token
+                    amil_index = idx
+                elif morph.ontologic_type == "Harf_Inne":
+                    inne_token = token
+                    inne_index = idx
                 
         # 2. ALT-AĞAÇ (PHRASE/TERKİB) ÇÖZÜMLEMESİ (Sliding Window)
         for i in range(len(tokens) - 1):
@@ -107,8 +114,31 @@ class NahivDependencyCompiler:
             elif t1.lower() in ["in", "iza", "law", "amma"]:
                 dependencies.append((t1, t2, "Rel_Shart", "Majzum"))
         
-        # 3. İSİM CÜMLESİ (Kadiyye-i Hamliyye) ZİNCİRİ
-        if not amil_token:
+        # [FAZ 3 ENTEGRASYONU] 3. İNNE VE KARDEŞLERİ (Amel Statüleri - Epistemic Necessity)
+        if inne_token:
+            ism_tokens_after = [t for idx, t in enumerate(tokens) if idx > inne_index and lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
+            
+            if ism_tokens_after:
+                ism_inne = ism_tokens_after[0]
+                dependencies.append((inne_token, ism_inne, 'Amel_Inne_Ism', 'Mansub'))
+                
+                if amil_token and amil_index > inne_index:
+                    # Fiil cümlesi haber konumunda
+                    dependencies.append((inne_token, amil_token, 'Amel_Inne_Haber', 'Marfu_Mahallen'))
+                elif len(ism_tokens_after) >= 2:
+                    haber_inne = None
+                    for ism in ism_tokens_after[1:]:
+                        is_mudaf_ilayh = any(rel == 'Mudaf_MudafIlayh' and t_sub == ism for _, t_sub, rel, _ in dependencies)
+                        if not is_mudaf_ilayh:
+                            haber_inne = ism
+                            break
+                    if not haber_inne:
+                        haber_inne = ism_tokens_after[-1]
+                    
+                    dependencies.append((inne_token, haber_inne, 'Amel_Inne_Haber', 'Marfu'))
+
+        # 4. İSİM CÜMLESİ (Kadiyye-i Hamliyye) ZİNCİRİ
+        if not amil_token and not inne_token:
             ism_tokens = [t for t in tokens if lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
             
             if len(ism_tokens) >= 2:
@@ -128,8 +158,11 @@ class NahivDependencyCompiler:
                     dependencies.append((haber, mubteda, 'Mubteda_Haber', 'Marfu'))
             
             return dependencies
+            
+        if not amil_token and inne_token:
+            return dependencies # Inne already structured the nominal sentence
 
-        # 4. FİİL CÜMLESİ (Verbal Sentence) ZİNCİRİ
+        # 5. FİİL CÜMLESİ (Verbal Sentence) ZİNCİRİ
         has_explicit_fail = False
         for idx, token in enumerate(tokens):
             if token == amil_token: 
@@ -142,15 +175,21 @@ class NahivDependencyCompiler:
             is_diptote = getattr(morph, 'is_diptote', False)
 
             if token.lower().endswith('un') or (is_diptote and token.lower().endswith('u')):
-                dependencies.append((amil_token, token, 'Fail', 'Marfu'))
-                has_explicit_fail = True
+                # [FAZ 3 KORUMASI]: Haber Inne zaten Marfu'dur. Fail ile çakışmamalı.
+                is_inne_haber = any(rel == 'Amel_Inne_Haber' and mamul == token for _, mamul, rel, _ in dependencies)
+                if not is_inne_haber:
+                    dependencies.append((amil_token, token, 'Fail', 'Marfu'))
+                    has_explicit_fail = True
             elif token.lower().endswith('an') or (is_diptote and token.lower().endswith('a')):
                 # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
                 # [FAZ 1 - GAYRİ MUNSARİF KORUMASI]: Eğer kelime diptote ise ve zaten Majrur (Mudaf_Ilayh) olarak bağlandıysa Meful OLAMAZ.
                 is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
                 is_majrur = any(mamul == token and irab == 'Majrur' for _, mamul, rel, irab in dependencies)
                 
-                if not is_hal and not is_majrur:
+                # [FAZ 3 KORUMASI]: Ism Inne zaten Mansub'dur. Meful ile çakışmamalı.
+                is_inne_ism = any(rel == 'Amel_Inne_Ism' and mamul == token for _, mamul, rel, _ in dependencies)
+                
+                if not is_hal and not is_majrur and not is_inne_ism:
                     # [FAZ 2.5] İlm-i Ma'ânî İhtisas (Takdim) Kontrolü
                     # Eğer meful, fiilden (amil) önce gelmişse bu bir İhtisas/Kasr durumudur.
                     if idx < amil_index:

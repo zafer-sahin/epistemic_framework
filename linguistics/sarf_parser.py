@@ -35,6 +35,7 @@ class SarfEngine:
     Üretken Morfoloji Motoru ('İlm-i Sarf).
     [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) bükün sınıfları eklendi.
     [FAZ 2 ENTEGRASYONU]: Müstatir zamirler (Hidden Pronouns), Cinsiyet (Gender) ve Sayı (Number) HPSG kısıtları OntoLex grafına işlendi.
+    [FAZ 3 ENTEGRASYONU]: Huruf-u Müşebbehe bil-Fiil (İnne ve kardeşleri) izole edilerek Epistemic Operator sınıfı tanımlandı.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
@@ -46,7 +47,12 @@ class SarfEngine:
             "illa", "lam", "lan"   
         }
         
-        self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
+        # [FAZ 3 ENTEGRASYONU]: "inna" buradan çıkarılarak inne_set'e aktarıldı.
+        self.tevkid_set = {"kad", "qad", "la", "nun"}
+        
+        # [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil)
+        self.inne_set = {"inna", "anna", "kaanna", "lakinna", "layta", "laalla"}
+        
         self.kasr_set = {"innema", "illa"}
         
         # FAZ 1: Gayri Munsarif (Diptote) Gövde/Kök Havuzu.
@@ -187,6 +193,12 @@ class SarfEngine:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf_Kasr",
                 ontologic_type="Harf_Kasr", thematic_role=None, is_diptote=False
+            )
+
+        if word_lower in self.inne_set:
+            return MorphologicalAnalysis(
+                original_word=word_lower, root=word_lower, pattern="Harf_Inne",
+                ontologic_type="Harf_Inne", thematic_role="Epistemic_Operator", is_diptote=False
             )
 
         if word_lower in self.tevkid_set:

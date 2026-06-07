@@ -419,7 +419,6 @@ class EpistemicOrchestrator:
                 resolved, bridge_messages = self._resolve_ilm_i_beyan(ir_matrix, flagged, usul_profile.dsl_ruleset)
                 
                 if resolved:
-                    # SAT DOĞRULAMASI ARTIK _resolve_ilm_i_beyan İÇERİSİNDE YAPILIYOR
                     l3_result = self.l3.execute_sat_check(ir_matrix)
                     if l3_result["status"] == "SAT":
                         execution_result["status"] = "SAT"
@@ -441,7 +440,19 @@ class EpistemicOrchestrator:
                                       sail_tokens: List[str],
                                       sail_dependencies: List[Tuple[str, str, str, str]],
                                       sail_usul: AbstractSchoolUsul,
-                                      sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
+                                      sail_auto_lexicon: Dict[str, MorphologicalAnalysis] = None,
+                                      fsm_engine: Any = None) -> Dict[str, Any]:
+        """
+        [FAZ 5 ENTEGRASYONU] FSM Asenkron Mu'aradah Tetikleyicisi.
+        Sâil'in 'AWAITING_ATTACK' durumunda gönderdiği karşı-argümanı (Anti-Tez) Z3 Optimize 
+        motorunda Mucîb'in argümanıyla çarpıştırır. Çapraz ekol kilitlenmesi FSM durumunu günceller.
+        """
+        
+        if fsm_engine and getattr(fsm_engine, "current_state", None) != "AWAITING_ATTACK":
+            return {
+                "status": "FSM_VIOLATION",
+                "message": "[DİYALEKTİK İHLAL] Mu'aradah saldırısı sadece Sâil'in 'AWAITING_ATTACK' evresinde yapılabilir."
+            }
         
         try:
             sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon, epoch="Classical")
@@ -479,16 +490,29 @@ class EpistemicOrchestrator:
                 penalty_score = optimizer.objectives()[0]
                 
                 if model.eval(penalty_score).as_long() == 0:
+                    if fsm_engine:
+                        fsm_engine.current_state = "RESOLVED"
                     return {
                         "status": "MUARADAH_INEFFECTIVE",
-                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik)."
+                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik). Mucîb kazandı (İlzam)."
                     }
                 else:
+                    if fsm_engine:
+                        # Çapraz kilitlenme sağlandı, FSM diyalektiği sonuçlandırır.
+                        try:
+                            fsm_engine.solver.solver.pop()
+                            fsm_engine.discourse.pop_scope()
+                        except z3.Z3Exception:
+                            pass
+                        fsm_engine.current_state = "RESOLVED"
+                        
                     return {
                         "status": "MUARADAH_SUCCESS",
-                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate)."
+                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ontolojik ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate)."
                     }
             else:
+                if fsm_engine:
+                    fsm_engine.current_state = "RESOLVED"
                 return {
                     "status": "MUJIB_INVALID",
                     "message": "Mucîb'in argümanları ile Sâil'in iddiaları yapısal olarak z3.Optimize düzleminde bile çözülemez bir kilitlenme yarattı."
@@ -799,6 +823,13 @@ from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
 class Layer3SMTCircuitBreaker:
+    """
+    Z3 Birinci Dereceden Mantık (FOL) Derleyicisi ve Devre Kesici.
+    [FAZ 1 ENTEGRASYONU - BİLGİ]: Gayr-i Munsarif (Diptote) zırhı upstream (Sarf ve Nahiv) 
+    katmanlarında çözümlendiği için, bu katmanın deterministik _build_z3_expr metodu 
+    hiçbir ek koda ihtiyaç duymadan Semantic Shift'i (Fail-Meful kaymasını) matematiksel 
+    olarak engeller. Kripke Semantiği (w, tz, tv) saflığı korunmuştur.
+    """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
         self.core_solver = solver
         
@@ -2306,19 +2337,32 @@ class EntityMention(BaseModel):
     timestamp: int
     agent: Literal["Mujib", "Sail"]
     sealed_namespace: str  # [FAZ 4] Yalıtım Zırhı: Hangi usûl uzayında (Namespace) üretildiğini mühürler.
+    # [FAZ 2 ENTEGRASYONU]: HPSG (Cinsiyet ve Sayı) Kısıt Yapıları
+    gender: Optional[str] = None
+    number: Optional[str] = None
 
 class DiscourseRegister:
     """
     Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
     Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı.
     Faz 2 - Adım 1: Epistemik Durum (Muktazâ el-Hâl) matrisi.
+    [FAZ 2 ENTEGRASYONU]: HPSG Kısıtları ile Discourse Representation Theory (DRT) Anaphora çözümlemesi.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
         self.mujib_frames: List[List[EntityMention]] = [[]]  
         self.sail_frames: List[List[EntityMention]] = [[]]  
         self.clock: int = 0
-        self.pronouns = {"huve", "hiye", "huma", "hum", "hunne"}
+        
+        # [FAZ 2 ENTEGRASYONU]: Munfasıl/Muttasıl Zamirlerin HPSG Cinsiyet ve Sayı Matrisi
+        self.pronouns = {
+            "huve": {"gender": "Muzekker", "number": "Mufred"},
+            "hiye": {"gender": "Muennes", "number": "Mufred"},
+            "huma": {"gender": None, "number": "Tesniye"},  # Tesniye (İkil) her iki cinsiyeti de kapsayabilir.
+            "hum": {"gender": "Muzekker", "number": "Cemi"},
+            "hunne": {"gender": "Muennes", "number": "Cemi"}
+        }
+        
         self.active_agent: Literal["Mujib", "Sail"] = "Mujib" # Varsayılan aktör iddia sahibidir (Mucîb)
         
         # [FAZ 2.1] Epistemik Durum Matrisi (Muktazâ el-Hâl)
@@ -2359,14 +2403,16 @@ class DiscourseRegister:
         else:
             raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
 
-    def add_mention(self, word: str, ontologic_id: str, active_namespace: str) -> None:
+    def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None) -> None:
         """Aktif aktörün kapsamına, aktif uzayın mührüyle (namespace) yeni bir ontolojik varlık ataması yapar."""
         mention = EntityMention(
             word=word, 
             ontologic_id=ontologic_id, 
             timestamp=self.clock,
             agent=self.active_agent,
-            sealed_namespace=active_namespace
+            sealed_namespace=active_namespace,
+            gender=gender,
+            number=number
         )
         frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
         frames[-1].append(mention)
@@ -2375,6 +2421,7 @@ class DiscourseRegister:
     def resolve_pronoun(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[str]:
         """
         [FAZ 4] Aktör-Spesifik ve Uzay-Korumalı Zamir (Anafora) tespiti.
+        [FAZ 2 ENTEGRASYONU] HPSG Feature Structures (Cinsiyet ve Sayı) üzerinden DRT Geriye Dönük Çözümlemesi.
         Sadece konuşan aktörün kendi yığıtındaki (LIFO) geçmiş kabulleri (Müsellemat) taranır.
         Eğer çapraz sorguda (Mu'aradah) bağlam zehirlenmesi saptanırsa motor durdurulur.
         """
@@ -2382,11 +2429,15 @@ class DiscourseRegister:
         if pronoun_lower not in self.pronouns:
             return None
 
+        target_gender = self.pronouns[pronoun_lower]["gender"]
+        target_number = self.pronouns[pronoun_lower]["number"]
+
         frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
 
+        # Yığıt içerisinde sondan başa (LIFO) doğru ilerleyerek en yakın mantıksal uyumu (Unification) arar.
         for frame in reversed(frames):
-            if frame:
-                resolved_mention = frame[-1]
+            # [LOGIC FIX]: Yalnızca frame'in son elemanı değil, frame içindeki tüm aktörler sondan başa taranmalıdır.
+            for resolved_mention in reversed(frame):
                 
                 # Context Sealing (Bağlam Zehirlenmesi Koruması)
                 if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
@@ -2395,10 +2446,17 @@ class DiscourseRegister:
                         f"'{pronoun}' zamiri '{resolved_mention.sealed_namespace}' uzayında üretildi, "
                         f"ancak şu an '{enforcement_namespace}' uzayına sızmaya/bağlanmaya çalışıyor. Mu'aradah çapraz izolasyonu ihlal edildi."
                     )
+
+                # [FAZ 2] HPSG Kısıt Doğrulaması (Cinsiyet ve Sayı Uyumu)
+                if target_gender and resolved_mention.gender and target_gender != resolved_mention.gender:
+                    continue  # Cinsiyet uyuşmazlığı, önceki adaylara bak.
                 
+                if target_number and resolved_mention.number and target_number != resolved_mention.number:
+                    continue  # Sayı uyuşmazlığı, önceki adaylara bak.
+               
                 return resolved_mention.ontologic_id
                 
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş. Referans (Antecedent) tanımsız.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş veya ontolojik kısıtlar (HPSG) uyumsuz. Referans (Antecedent) tanımsız.")
         
     def clear_memory(self) -> None:
         """Mezhep (Usûl) profili değiştiğinde veya diyalektik oturum sıfırlandığında belleği donanımsal olarak temizler."""
@@ -2625,6 +2683,8 @@ class NahivDependencyCompiler:
     Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
     Faz 2 - Adım 2.5: Takdim (Pre-positioning) ve İhtisas (Kasr) tespiti.
     Faz 2 - Adım 2.6: Kasr (Hasr) Operatörlerinde Yön Tespiti (Sıfat/Mevsuf) ve Harf-i Atıf (Fasıl/Vasıl) Entegrasyonu.
+    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) kelimelerin cer durumundaki (fetha) i'rab istisnaları AST mantığına işlendi.
+    [FAZ 2 ENTEGRASYONU]: Müstatir Zamir (Hidden Pronoun) otonom düğüm enjeksiyonu eklendi (Zero-Node Agent).
     İzafet (İsim Tamlaması), Sıfat-Mevsuf, Hal ve Atıf ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
@@ -2694,7 +2754,9 @@ class NahivDependencyCompiler:
 
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
                 # İzafet (Mudaf - Mudaf İleyh) Matrisi
-                if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i'))):
+                # [FAZ 1 - GAYRİ MUNSARİF YAMASI]: Mudaf_Ilayh olan diptote kelime fetha (-a) ile bitebilir.
+                is_diptote_majrur = getattr(m2, 'is_diptote', False) and t2.lower().endswith('a')
+                if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i')) or is_diptote_majrur):
                     dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
                 
                 # [FAZ 4 ENTEGRASYONU] Hal ve Zarf-ı Zaman (Vasfî Zaman Tetiği) - [ÖNCELİKLİ]
@@ -2703,8 +2765,16 @@ class NahivDependencyCompiler:
                     dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
 
                 # Sıfat-Mevsuf (Na't - Man'ut) Matrisi
-                # [LOGIC FIX]: Sadece marife/nekra uyumu yetmez, kesin İ'rab (son iki harf: un/an/in) uyumu şarttır.
-                elif self._is_definite(t1) == self._is_definite(t2) and t1[-2:] == t2[-2:]:
+                # [LOGIC FIX]: Sadece marife/nekra uyumu yetmez, kesin İ'rab uyumu şarttır.
+                is_sifat_uyumu = False
+                if self._is_definite(t1) == self._is_definite(t2):
+                    if t1[-2:] == t2[-2:]:
+                        is_sifat_uyumu = True
+                    # [FAZ 1 - GAYRİ MUNSARİF YAMASI]: Triptote mevsuf (mecrur) + Diptote sıfat (mecrur '-a' ile)
+                    elif getattr(m2, 'is_diptote', False) and t1.lower().endswith(('in', 'i')) and t2.lower().endswith('a'):
+                        is_sifat_uyumu = True
+                
+                if is_sifat_uyumu:
                     dependencies.append((t1, t2, 'Sifat_Mevsuf', 'Tabi'))
                     
             # Şart Edatları (İn, İza, Lev, Amma)
@@ -2734,6 +2804,7 @@ class NahivDependencyCompiler:
             return dependencies
 
         # 4. FİİL CÜMLESİ (Verbal Sentence) ZİNCİRİ
+        has_explicit_fail = False
         for idx, token in enumerate(tokens):
             if token == amil_token: 
                 continue
@@ -2742,12 +2813,18 @@ class NahivDependencyCompiler:
             if not morph or morph.ontologic_type != "Ism":
                 continue
 
-            if token.lower().endswith('un'):
+            is_diptote = getattr(morph, 'is_diptote', False)
+
+            if token.lower().endswith('un') or (is_diptote and token.lower().endswith('u')):
                 dependencies.append((amil_token, token, 'Fail', 'Marfu'))
-            elif token.lower().endswith('an'):
+                has_explicit_fail = True
+            elif token.lower().endswith('an') or (is_diptote and token.lower().endswith('a')):
                 # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
+                # [FAZ 1 - GAYRİ MUNSARİF KORUMASI]: Eğer kelime diptote ise ve zaten Majrur (Mudaf_Ilayh) olarak bağlandıysa Meful OLAMAZ.
                 is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
-                if not is_hal:
+                is_majrur = any(mamul == token and irab == 'Majrur' for _, mamul, rel, irab in dependencies)
+                
+                if not is_hal and not is_majrur:
                     # [FAZ 2.5] İlm-i Ma'ânî İhtisas (Takdim) Kontrolü
                     # Eğer meful, fiilden (amil) önce gelmişse bu bir İhtisas/Kasr durumudur.
                     if idx < amil_index:
@@ -2759,19 +2836,36 @@ class NahivDependencyCompiler:
                 is_sub_tree_child = any((rel == 'Mudaf_MudafIlayh' or rel == 'Rel_Atif') and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
+
+        # [FAZ 2 ENTEGRASYONU] Müstatir (Gizli) Zamir Tespiti ve AST'ye Zero-Node Enjeksiyonu
+        if amil_token and not has_explicit_fail:
+            amil_morph = lexicon.get(amil_token)
+            hidden_pronoun = getattr(amil_morph, 'hidden_pronoun', None)
+            if hidden_pronoun:
+                # Gerçek metinde olmayan sanal bir fail (Agent) düğümü yaratılır ve fiile bağlanır.
+                # IlmWadAdapter bu zamiri gördüğünde DiscourseRegister üzerinden HPSG eşleşmesiyle çözecektir.
+                dependencies.append((amil_token, hidden_pronoun, 'Fail', 'Marfu_Virtual'))
                     
         return dependencies
 
     def build_ast(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> nx.DiGraph:
         self.dependency_graph.clear()
+        
+        # Orijinal tokenları grafiğe ekle
         for token in tokens:
             self.dependency_graph.add_node(token)
             
         for amil, mamul, rel, irab in dependencies:
+            # [FAZ 2 YAMASI] Sanal (Zero-Node) zamirler (Örn: 'huve') tokens listesinde olmadığı için hata vermemesi adına açıkça eklenir.
+            if mamul not in self.dependency_graph:
+                self.dependency_graph.add_node(mamul, virtual=True)
+            if amil not in self.dependency_graph:
+                self.dependency_graph.add_node(amil, virtual=True)
+                
             self.dependency_graph.add_edge(amil, mamul, relation=rel, irab=irab)
             
         return self.dependency_graph
-        
+    
     def extract_temporal_conditions(self, ast: nx.DiGraph) -> Dict[str, str]:
         """
         AST üzerinden Vasfî Zamanı (t_vasfi) tetikleyen düğümleri çeker.
@@ -2910,6 +3004,10 @@ class MorphologicalAnalysis(BaseModel):
     pattern: str        
     ontologic_type: str 
     thematic_role: Optional[str] = None  
+    is_diptote: bool = Field(default=False, description="Gayri Munsarif (Diptote) morfolojik kısıt bayrağı")
+    gender: Optional[str] = Field(default=None, description="HPSG Kısıtı: Muzekker veya Muennes")
+    number: Optional[str] = Field(default=None, description="HPSG Kısıtı: Mufred, Tesniye, Cemi")
+    hidden_pronoun: Optional[str] = Field(default=None, description="DRT Matrisi: Müstatir Zamir (Huve, Hiye vb.)")
 
 class OntoLexRule(BaseModel):
     """OntoLex-Morph standardında kelime üretim/çekim kuralları"""
@@ -2923,13 +3021,16 @@ class OntoLexMorphEntry(BaseModel):
     pattern_id: str
     ontologic_type: str
     thematic_role: Optional[str] = None
+    gender: Optional[str] = None
+    number: Optional[str] = None
+    hidden_pronoun: Optional[str] = None
     extraction_rules: OntoLexRule
 
 class SarfEngine:
     """
     Üretken Morfoloji Motoru ('İlm-i Sarf).
-    [FAZ 3 ENTEGRASYONU]: OntoLex-Morph RDF standartlarına uygun katı durum makinesi.
-    Statik wazan_matrix sözlüğü, manipüle edilemez OntoLex kural grafına dönüştürülmüştür.
+    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) bükün sınıfları eklendi.
+    [FAZ 2 ENTEGRASYONU]: Müstatir zamirler (Hidden Pronouns), Cinsiyet (Gender) ve Sayı (Number) HPSG kısıtları OntoLex grafına işlendi.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
@@ -2944,50 +3045,87 @@ class SarfEngine:
         self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
         self.kasr_set = {"innema", "illa"}
         
-        # OntoLex-Morph Kural Grafı
+        # FAZ 1: Gayri Munsarif (Diptote) Gövde/Kök Havuzu.
+        self.diptote_stems = {
+            "makkat", "ibrahim", "ismail", "umar", "ahmad", 
+            "mesacid", "masabih", "fatimat", "ayishat", "makkah"
+        }
+        
+        # OntoLex-Morph Kural Grafı - [FAZ 2]: Gender, Number, Hidden Pronoun Eklentileri
         self.ontolex_graph: Dict[str, OntoLexMorphEntry] = {
             "CaCaCa": OntoLexMorphEntry(
                 pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
+            ),
+            "CaCaCat": OntoLexMorphEntry(
+                pattern_id="Fa'alat", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muennes", number="Mufred", hidden_pronoun="Hiye",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
             ),
             "yaCCiCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ilu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
+            "taCCiCu": OntoLexMorphEntry(
+                pattern_id="Taf'ilu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muennes", number="Mufred", hidden_pronoun="Hiye",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
             "yaCCaCu": OntoLexMorphEntry(
                 pattern_id="Yaf'alu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
             "yaCCuCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ulu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
             "CaaCa": OntoLexMorphEntry(
                 pattern_id="Fa'ala_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[0, 'W_Y', 3])
             ),
             "yaCooCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ulu_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'W', 4])
             ),
             "yaCeeCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ilu_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'Y', 4])
             ),
             "CaCaa": OntoLexMorphEntry(
                 pattern_id="Fa'ala_Nakis", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Nakis", positions=[0, 2, 'W_Y'])
             ),
             "iCCaCaCa": OntoLexMorphEntry(
                 pattern_id="Ifta'ala_Ibdal", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ibdal", positions=['IBDAL', 4, 6])
             ),
             "CaCiCun": OntoLexMorphEntry(
                 pattern_id="Fâ'ilun", ontologic_type="Ism", thematic_role="Agent",
+                gender="Muzekker", number="Mufred",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
+            ),
+            "CaCiCaCun": OntoLexMorphEntry(
+                pattern_id="Fâ'ilatun", ontologic_type="Ism", thematic_role="Agent",
+                gender="Muennes", number="Mufred",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
             ),
             "maCCuCun": OntoLexMorphEntry(
                 pattern_id="Maf'ûlun", ontologic_type="Ism", thematic_role="Patient",
+                gender="Muzekker", number="Mufred",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
+            "maCCuCaCun": OntoLexMorphEntry(
+                pattern_id="Maf'ûlatun", ontologic_type="Ism", thematic_role="Patient",
+                gender="Muennes", number="Mufred",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
         }
@@ -3003,6 +3141,9 @@ class SarfEngine:
             elif char in ['m', 'y', 'a', 't'] and i == 0:
                 sig += char
             elif char == 'n' and i == length - 1 and word_lower[i-1] in ['u', 'a', 'i']:
+                sig += char
+            elif char == 't' and i == length - 1 and word_lower[i-1] == 'a':
+                # [FAZ 2 YAMASI]: Fiil-i Mazi Müennes kalıplarının (Fa'alat) Tâ-i Te'nîs (t) tespit koruması.
                 sig += char
             else:
                 sig += 'C'
@@ -3041,19 +3182,19 @@ class SarfEngine:
         if word_lower in self.kasr_set:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf_Kasr",
-                ontologic_type="Harf_Kasr", thematic_role=None
+                ontologic_type="Harf_Kasr", thematic_role=None, is_diptote=False
             )
 
         if word_lower in self.tevkid_set:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf_Tevkid",
-                ontologic_type="Harf_Tevkid", thematic_role=None
+                ontologic_type="Harf_Tevkid", thematic_role=None, is_diptote=False
             )
 
         if word_lower in self.harf_set:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf",
-                ontologic_type="Harf", thematic_role=None 
+                ontologic_type="Harf", thematic_role=None, is_diptote=False
             )
 
         signature = self._generate_structural_signature(word_lower)
@@ -3063,18 +3204,30 @@ class SarfEngine:
             extracted_root = self._apply_ontolex_rules(word_lower, entry.extraction_rules)
             return MorphologicalAnalysis(
                 original_word=word_lower, root=extracted_root, pattern=entry.pattern_id,
-                ontologic_type=entry.ontologic_type, thematic_role=entry.thematic_role
+                ontologic_type=entry.ontologic_type, thematic_role=entry.thematic_role, 
+                is_diptote=False, gender=entry.gender, number=entry.number, hidden_pronoun=entry.hidden_pronoun
+            )
+            
+        # FAZ 1: Gayri Munsarif (Diptote) İzolasyon Kısıtı.
+        stem_1 = word_lower[:-1]
+        if stem_1 in self.diptote_stems and word_lower[-1] in ("u", "a"):
+            return MorphologicalAnalysis(
+                original_word=word_lower, root=stem_1, pattern="Gayri_Munsarif",
+                ontologic_type="Ism", thematic_role=None, is_diptote=True,
+                gender="Muzekker", number="Mufred" # Çoğunlukla Alem (Özel İsim) varsayımı
             )
             
         if word_lower.endswith(("un", "an", "in")):
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower[:-2], pattern="Alem/Camid_Munevven",
-                ontologic_type="Ism", thematic_role=None 
+                ontologic_type="Ism", thematic_role=None, is_diptote=False,
+                gender="Muzekker", number="Mufred"
             )
         elif word_lower.endswith(("u", "a", "i")):
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower[:-1], pattern="Alem/Camid_Mudaf",
-                ontologic_type="Ism", thematic_role=None
+                ontologic_type="Ism", thematic_role=None, is_diptote=False,
+                gender="Muzekker", number="Mufred"
             )
 
         raise ValueError(f"[SARF ÇÖKÜŞÜ] '{word}' (İmza: {signature}) kelimesi OntoLex-Morph grafında doğrulanamadı. MSA/Modern türetim reddedildi.")
@@ -3181,7 +3334,7 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
 Çıkmak için 'exit'.
 =============================================================================
 """
-    prompt = "Epistemic-Engine [Ashari]> "
+    prompt = "Epistemic-Engine [Ashari | AWAITING_CLAIM]> "
 
     def __init__(self):
         super().__init__()
@@ -3242,11 +3395,18 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             print(f"[KRİTİK HATA] Motor mimarisi başlatılamadı: {e}")
             sys.exit(1)
 
+    def postcmd(self, stop, line):
+        """Her komut sonrası FSM durumunu ve Men' derinliğini promta yansıtır."""
+        depth = len(self.fsm.claim_stack) if self.fsm and hasattr(self.fsm, 'claim_stack') else 0
+        depth_str = f" | Men' Derinliği: {depth}" if depth > 0 else ""
+        state_str = f" | {self.fsm.current_state}" if self.fsm else ""
+        self.prompt = f"Epistemic-Engine [{self.active_usul.namespace}{depth_str}{state_str}]> "
+        return stop
+
     def do_set_usul(self, arg):
         target = arg.strip().lower()
         if target in self.available_schools:
             self.active_usul = self.available_schools[target]
-            self.prompt = f"Epistemic-Engine [{self.active_usul.namespace}]> "
             self.discourse.clear_memory()
             self.fsm.reset_session()
             self.last_ir = None
@@ -3312,7 +3472,7 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) z3.Optimize çapraz saldırı protokolü başlatıldı...")
             
             result = self.orchestrator.execute_cross_school_muaradah(
-                self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon
+                self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon, fsm_engine=self.fsm
             )
             
             if result.get("status") == "EPISTEMIC_BREACH":
@@ -3383,6 +3543,10 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
         try:
             res = self.fsm.attack_evidence(attack_type, target)
             print(f"[{res['status']}] {res['message']}")
+            
+            if "counter_model_extract" in res:
+                print("\n[KARŞI-MODEL (COUNTER-MODEL) BİLEŞENİ]:")
+                print(res["counter_model_extract"])
         except Exception as e:
             print(f"[FSM ÇÖKÜŞÜ] {e}")
 
@@ -3866,14 +4030,15 @@ DOSYA: ./schools/taftazani/adab_al_bahth.py
 ==================================================
 import z3
 import re
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Optional, Literal, Tuple
 from core.logic_engine import AristotelianSolver
 from linguistics.discourse_state import DiscourseRegister
 
 class AdabAlBahthEngine:
     """
     Taftâzânî, Cürcânî ve Gelenbevî temelli Münazara Sonlu Durum Makinesi (FSM).
-    Faz 5: Tahrîr-i Mahall-i Niza' Z3 Aksiyom Enjeksiyonu (Kompleks FOL Destekli) ve Mülâzama Counter-Model Çözümlemesi.
+    Faz 5: Rekürsif Men' (İç içe İspat Yükümlülüğü), Mülâzama Counter-Model Çözümlemesi 
+    ve Tahrîr-i Mahall-i Niza' Z3 Aksiyom Enjeksiyonu.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
@@ -3883,12 +4048,15 @@ class AdabAlBahthEngine:
         self.active_claim: Optional[str] = None
         self.active_premises: List[str] = []
         
+        # Rekürsif diyalektik için yığıt (Stack) mimarisi
+        self.claim_stack: List[Tuple[str, List[str], List[str], List[str]]] = [] 
+        
         self.musellemat: List[str] = [] 
         self.niza_terms: List[str] = [] 
 
     def _auto_register_predicates(self, fol_str: str) -> None:
         """
-        [MANTIKSAL YAMA]: Z3 Parser'ın tanımsız yüklem (Unknown Predicate) hatası vermesini engellemek için, 
+        Z3 Parser'ın tanımsız yüklem (Unknown Predicate) hatası vermesini engellemek için, 
         kompleks FOL stringleri içindeki tüm felsefi kavramları parse edilmeden önce SMT Builder'a kaydeder.
         """
         matches = re.findall(r'([A-Z][a-zA-Z0-9_]*)\s*\(', fol_str)
@@ -3898,7 +4066,7 @@ class AdabAlBahthEngine:
                 self.solver.builder.get_or_create_predicate(match, arity=1)
 
     def submit_claim(self, claim: str) -> Dict[str, Any]:
-        if self.current_state != "AWAITING_CLAIM":
+        if self.current_state not in ["AWAITING_CLAIM", "AWAITING_EVIDENCE"]:
             raise ValueError(f"[DİYALEKTİK İHLAL] Mevcut durum '{self.current_state}'. Yeni iddia sunulamaz.")
             
         self.discourse.set_agent("Mujib")
@@ -3907,8 +4075,11 @@ class AdabAlBahthEngine:
         is_already_valid = self.solver.verify_syllogism([], claim)
         
         if is_already_valid:
-            self.current_state = "RESOLVED"
-            return {"status": "TAHSIL_I_HASIL", "message": "İddia ontolojik bir aksiyomdur (Tahsîl-i Hâsıl), ispat gerektirmez."}
+            if self.claim_stack:
+                return self._resolve_sub_claim()
+            else:
+                self.current_state = "RESOLVED"
+                return {"status": "TAHSIL_I_HASIL", "message": "İddia ontolojik bir aksiyomdur (Tahsîl-i Hâsıl), ispat gerektirmez."}
         
         self.active_claim = claim
         
@@ -3925,8 +4096,11 @@ class AdabAlBahthEngine:
             raise ValueError(f"[DİYALEKTİK İHLAL] Tahrîr-i Niza' yalnızca 'ISOLATING_CONTENTION' aşamasında yapılabilir.")
             
         if not niza_terms:
-            self.current_state = "RESOLVED"
-            return {"status": "NO_CONTENTION", "message": "Tartışılacak (Niza') hiçbir kavram bildirilmedi, uyuşmazlık yoktur."}
+            if self.claim_stack:
+                return self._resolve_sub_claim()
+            else:
+                self.current_state = "RESOLVED"
+                return {"status": "NO_CONTENTION", "message": "Tartışılacak (Niza') hiçbir kavram bildirilmedi, uyuşmazlık yoktur."}
 
         self.musellemat = musellemat
         self.niza_terms = niza_terms
@@ -3955,7 +4129,6 @@ class AdabAlBahthEngine:
             x_env = z3.Const('x_env', self.solver.builder.EntitySort)
             
             for m_term in self.musellemat:
-                # [FAZ 5 REFAKTÖR] Kompleks FOL Önermeleri ve Salt Varlıkların Tespiti
                 if "(" in m_term and ")" in m_term:
                     self._auto_register_predicates(m_term)
                     self.solver.solver.add(self.solver.builder.parse(m_term))
@@ -3976,8 +4149,11 @@ class AdabAlBahthEngine:
         if not is_consistent:
             self.solver.solver.pop()
             self.discourse.pop_scope()
-            self.current_state = "RESOLVED"
-            return {"status": "MUKABERE", "message": "Mucîb'in kendi öncülleri (veya Müsellemât) birbiriyle çelişiyor. İddia baştan çöktü."}
+            if self.claim_stack:
+                return self._revert_sub_claim_failure("Mucîb'in delilleri tutarsız (Mukabere). Alt-iddia çöktü.")
+            else:
+                self.current_state = "RESOLVED"
+                return {"status": "MUKABERE", "message": "Mucîb'in kendi öncülleri (veya Müsellemât) birbiriyle çelişiyor. İddia baştan çöktü."}
             
         self.active_premises = premises
         self.current_state = "AWAITING_ATTACK"
@@ -4002,8 +4178,16 @@ class AdabAlBahthEngine:
             self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
             
-            self.current_state = "AWAITING_EVIDENCE"
-            return {"status": "MEN_ON_PREMISE", "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti (Mutareddit). Mucîb bu öncülü ara-iddia olarak ispatlamalıdır."}
+            # Rekürsif İspat Yükümlülüğü: Hedef öncül yeni Da'vâ olur.
+            self.claim_stack.append((self.active_claim, self.active_premises, self.musellemat, self.niza_terms))
+            self.active_claim = target_premise
+            self.active_premises = []
+            self.current_state = "ISOLATING_CONTENTION"
+            
+            return {
+                "status": "MEN_ON_PREMISE", 
+                "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti (Men'). Lüzum zinciri askıya alındı. Mucîb, reddedilen bu öncülü yeni bir Da'vâ olarak ispatlamak zorundadır. Tahrîr-i Niza' bekleniyor."
+            }
             
         elif attack_type == "Nakz":
             from linguistics.discourse_state import DenialLevel
@@ -4016,6 +4200,7 @@ class AdabAlBahthEngine:
                     self.solver.solver.add(self.solver.builder.parse(p))
                 
                 self._auto_register_predicates(self.active_claim)
+                # İddianın değili eklenerek karşı-model (Counter-Model) aranır
                 self.solver.solver.add(z3.Not(self.solver.builder.parse(self.active_claim)))
                 
                 check_result = self.solver.solver.check()
@@ -4026,9 +4211,11 @@ class AdabAlBahthEngine:
                         "message": "Sâil'in Nakz girişimi başarısız. Mülâzama (Lüzum bağı) ontolojik olarak geçerli. Öncüller zorunlu olarak neticeyi veriyor. Mucîb kazandı (İlzam)."
                     }
                 else:
+                    counter_model = self.solver.solver.model()
                     response = {
                         "status": "NAKZ_SUCCESS", 
-                        "message": "Fâsid İstidlâl kanıtlandı. Öncüller doğru olduğu halde neticenin yanlış olabildiği bir model (Counter-Model) bulundu. Mülâzama koptu."
+                        "message": "Fâsid İstidlâl kanıtlandı. Öncüller doğru olduğu halde neticenin yanlış olabildiği bir model (Counter-Model) bulundu. Mülâzama koptu.",
+                        "counter_model_extract": str(counter_model)
                     }
             finally:
                 self.solver.solver.pop()
@@ -4036,26 +4223,58 @@ class AdabAlBahthEngine:
             self.solver.solver.pop()
             self.discourse.set_agent("Mujib")
             self.discourse.pop_scope()
-            self.current_state = "RESOLVED"
             
-            return response
+            if self.claim_stack and response["status"] == "ILZAM":
+                return self._resolve_sub_claim()
+            elif self.claim_stack and response["status"] == "NAKZ_SUCCESS":
+                return self._revert_sub_claim_failure("Alt-iddianın delili Nakz edildi. Üst iddia kanıtsız kaldı.")
+            else:
+                self.current_state = "RESOLVED"
+                return response
                 
         elif attack_type == "Muaradah":
             return {"status": "PENDING_CROSS_SCHOOL", "message": "Mu'aradah saldırısı için Orkestratör üzerinden çapraz-ekol (z3.Optimize) izolasyon motoru tetiklenmelidir."}
         else:
             return {"status": "ERROR", "message": "Geçersiz Âdâb-ı Bahs saldırı tipi."}
-            
+
+    def _resolve_sub_claim(self) -> Dict[str, Any]:
+        """Alt-iddia başarıyla ispatlandığında yığıttan ana iddiaya geri dönüş yapar."""
+        prev_claim, prev_premises, prev_musellemat, prev_niza = self.claim_stack.pop()
+        self.active_claim = prev_claim
+        self.active_premises = prev_premises
+        self.musellemat = prev_musellemat
+        self.niza_terms = prev_niza
+        self.current_state = "AWAITING_ATTACK"
+        
+        return {
+            "status": "SUB_CLAIM_PROVEN",
+            "message": "Mucîb, Men' edilen öncülü başarıyla ispatladı. Ana iddiaya geri dönüldü. Sâil'in diğer öncüllere saldırısı (Men'/Nakz/Muaradah) bekleniyor."
+        }
+
+    def _revert_sub_claim_failure(self, reason: str) -> Dict[str, Any]:
+        """Alt-iddia çürütüldüğünde zincirleme reaksiyonla ana iddiayı da iptal eder."""
+        self.claim_stack.clear()
+        self.current_state = "RESOLVED"
+        return {
+            "status": "CHAIN_FAILURE",
+            "message": f"Diyalektik zincir koptu: {reason} Ana iddia da geçersiz sayıldı."
+        }
+
     def reset_session(self) -> None:
-        if self.current_state == "AWAITING_ATTACK":
-            self.solver.solver.pop()
-            self.discourse.set_agent("Mujib")
-            self.discourse.pop_scope()
+        if self.current_state == "AWAITING_ATTACK" or self.current_state == "AWAITING_EVIDENCE":
+            try:
+                self.solver.solver.pop()
+                self.discourse.pop_scope()
+            except z3.Z3Exception:
+                pass
             
         self.current_state = "AWAITING_CLAIM"
         self.active_claim = None
         self.active_premises = []
+        self.claim_stack.clear()
         self.musellemat = []
         self.niza_terms = []
+        self.discourse.set_agent("Mujib")
         self.discourse.clear_memory()
 
 
@@ -4150,6 +4369,7 @@ class TestDialecticsFSM(unittest.TestCase):
         
         self.assertEqual(attack_result["status"], "NAKZ_SUCCESS")
         self.assertEqual(self.engine.current_state, "RESOLVED")
+        self.assertIn("counter_model_extract", attack_result)
 
     def test_cross_school_muaradah_dynamic_weight_optimization(self):
         """[Faz 5 Refaktör] Mu'aradah çapraz-ekol çarpışmasında ontolojik derinliğe göre dinamik ağırlık cezası ölçümü."""
@@ -4175,6 +4395,60 @@ class TestDialecticsFSM(unittest.TestCase):
         self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE"])
         if result["status"] == "MUARADAH_SUCCESS":
             self.assertIn("ontolojik ağırlık maliyetiyle", result["message"])
+
+    def test_tahsil_i_hasil_rejection(self):
+        """[Faz 5] Tautoloji içeren (Z3'te kendi içinde ispatlı) aksiyomların reddi."""
+        tautology_claim = "Forall([x_env], Or(Cism(x_env), Not(Cism(x_env))))"
+        response = self.engine.submit_claim(tautology_claim)
+        
+        self.assertEqual(response["status"], "TAHSIL_I_HASIL")
+        self.assertEqual(self.engine.current_state, "RESOLVED")
+
+    def test_recursive_men_stack_operation(self):
+        """[Faz 5] Rekürsif 'Men' saldırısı ve yığıt (stack) yönetimi."""
+        # İddia: Her Cemad Nami'dir. (Ontolojide geçersiz olduğu için Tahsîl-i Hâsıl'a takılmaz)
+        main_claim = "Forall([x_env], Implies(Cemad(x_env), Nami(x_env)))"
+        self.engine.submit_claim(main_claim)
+        self.engine.tahrir_i_niza(["Cevher"], ["Cemad", "Nami"])
+        
+        # Yanıltıcı delil
+        p1 = "Forall([x_env], Implies(Cemad(x_env), Hayvan(x_env)))"
+        p2 = "Forall([x_env], Implies(Hayvan(x_env), Nami(x_env)))"
+        self.engine.submit_evidence([p1, p2])
+        
+        men_response = self.engine.attack_evidence("Men", target_premise=p1)
+        
+        self.assertEqual(men_response["status"], "MEN_ON_PREMISE")
+        self.assertEqual(len(self.engine.claim_stack), 1)
+        self.assertEqual(self.engine.active_claim, p1)
+        self.assertEqual(self.engine.current_state, "ISOLATING_CONTENTION")
+        
+        self.engine.tahrir_i_niza([], ["Cemad", "Hayvan"])
+        sub_p1 = "Forall([x_env], Implies(Cemad(x_env), Insan(x_env)))"
+        sub_p2 = "Forall([x_env], Implies(Insan(x_env), Hayvan(x_env)))"
+        self.engine.submit_evidence([sub_p1, sub_p2])
+        
+        nakz_response = self.engine.attack_evidence("Nakz")
+        
+        self.assertEqual(nakz_response["status"], "SUB_CLAIM_PROVEN")
+        self.assertEqual(len(self.engine.claim_stack), 0)
+        self.assertEqual(self.engine.active_claim, main_claim)
+        self.assertEqual(self.engine.current_state, "AWAITING_ATTACK")
+
+    def test_mukabere_self_contradiction(self):
+        """[Faz 5] Mucîb'in kendi öncüllerinin çelişmesi durumu (UNSAT öngörüsü)."""
+        claim = "Forall([x_env], Implies(Cemad(x_env), Hayvan(x_env)))"
+        self.engine.submit_claim(claim)
+        self.engine.tahrir_i_niza([], ["Cemad"])
+        
+        # Z3'ün boş küme (vacuously true) ile kaçmasını engellemek için varoluşsal bir çelişki sunuyoruz.
+        p1 = "Exists([x_env], And(Cemad(x_env), Cism(x_env)))"
+        p2 = "Forall([x_env], Not(Cism(x_env)))"
+        
+        response = self.engine.submit_evidence([p1, p2])
+        
+        self.assertEqual(response["status"], "MUKABERE")
+        self.assertEqual(self.engine.current_state, "RESOLVED")
 
 if __name__ == '__main__':
     unittest.main()
@@ -4294,7 +4568,10 @@ from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.discourse_state import DiscourseRegister, DenialLevel
 from linguistics.pragmatics import MaaniSpeechActAnalyzer
 from linguistics.ilm_wad_adapter import IlmWadAdapter
-from core.exceptions import DiachronicViolationError
+from linguistics.tokenizer import EpistemicTokenizer
+from linguistics.sarf_parser import SarfEngine
+from linguistics.nahiv_ast import NahivDependencyCompiler
+from core.exceptions import DiachronicViolationError, ContextPoisoningError
 
 class TestSemanticPipeline(unittest.TestCase):
     def setUp(self):
@@ -4302,10 +4579,15 @@ class TestSemanticPipeline(unittest.TestCase):
         self.discourse = DiscourseRegister()
         self.pragmatics = MaaniSpeechActAnalyzer(self.discourse)
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
+        self.tokenizer = EpistemicTokenizer()
+        self.sarf = SarfEngine()
+        self.nahiv = NahivDependencyCompiler()
 
         # [FAZ 1] Epoch parametreleri zorunlu kılındı.
         self.lexicon.register_word("Zeydun", "Base", "Zeyd_Entity", epoch="Classical")
+        self.lexicon.register_word("Fatimat", "Base", "Fatima_Entity", epoch="Classical")
         self.lexicon.register_word("Daraba", "Base", "Fiil_Daraba", epoch="Classical")
+        self.lexicon.register_word("Darabat", "Base", "Fiil_Darabat", epoch="Classical")
         
         self.lexicon.register_word("Istiva", "Salafi", "Istiva_Literal", proposition_type="Kadiyye-i_Hamliyye", epoch="Classical")
         self.lexicon.register_word("Istiva", "Ashari", "Istiva_Metaphor", proposition_type="Kadiyye-i_Hamliyye", epoch="Classical")
@@ -4325,7 +4607,6 @@ class TestSemanticPipeline(unittest.TestCase):
 
     def test_diachronic_violation_rejection(self):
         """[FAZ 1] Leksikonun seküler/MSA kelimeleri (Epoch: Modern) Z3 motoruna sızdırmasını engeller."""
-        # Sistem Classical beklerken modern kelime kaydı reddedilmelidir.
         with self.assertRaises(DiachronicViolationError):
             self.lexicon.register_word("demokrasi", "Base", "Sekuler_Otorite", epoch="Modern")
             
@@ -4339,14 +4620,33 @@ class TestSemanticPipeline(unittest.TestCase):
             # Adaptör dışarıdan modern kelime işlemeyi tamamen reddetmelidir.
             self.adapter.generate_ir(["demokrasi"], [], "Base", epoch="Modern")
 
-    def test_anaphoric_discourse_binding(self):
-        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base")
-        resolved_id = self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
-        self.assertEqual(resolved_id, "Zeyd_Entity")
+    def test_anaphoric_discourse_binding_with_hpsg(self):
+        """[FAZ 2] HPSG (Cinsiyet/Sayı) Kısıtlı DRT Anaphora Çözümlemesi."""
+        # Zeyd (Muzekker) ve Fatima (Muennes) söylem belleğine eklenir.
+        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base", gender="Muzekker", number="Mufred")
+        self.discourse.add_mention("Fatimat", "Fatima_Entity", "Base", gender="Muennes", number="Mufred")
         
-        self.discourse.clear_memory()
-        with self.assertRaises(ValueError):
-            self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
+        # 'Huve' (O - Muzekker) zamiri geriye dönük taramada Fatima'yı atlayıp Zeyd'i bulmalıdır.
+        resolved_huve = self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
+        self.assertEqual(resolved_huve, "Zeyd_Entity", "[DRT ÇÖKÜŞÜ] Muzekker zamir (Huve) HPSG uyum kısıtını atlayarak yanlış referansa bağlandı.")
+        
+        # 'Hiye' (O - Muennes) zamiri doğrudan Fatima'yı bulmalıdır.
+        resolved_hiye = self.discourse.resolve_pronoun("Hiye", enforcement_namespace="Base")
+        self.assertEqual(resolved_hiye, "Fatima_Entity", "[DRT ÇÖKÜŞÜ] Muennes zamir (Hiye) HPSG uyum kısıtını atlayarak yanlış referansa bağlandı.")
+
+    def test_zero_node_agent_injection(self):
+        """[FAZ 2] Failsiz (Gizli Zamirli) fiillerde AST'ye otonom Zero-Node (Müstatir Zamir) enjeksiyonu."""
+        tokens = ["daraba"] # Sadece eylem var, açık (zahir) fail yok. (İçinde gizli 'huve' var)
+        morph_lexicon = self.sarf.derive_lexicon(tokens)
+        
+        # Morfoloji motorunun gizli zamiri tespit edip etmediğinin doğrulanması
+        self.assertEqual(morph_lexicon["daraba"].hidden_pronoun, "Huve", "[MORFOLOJİ ZAFİYETİ] Fiil içerisindeki müstatir zamir (hidden_pronoun) çıkarılamadı.")
+        
+        deps = self.nahiv.suggest_dependencies(tokens, morph_lexicon)
+        
+        # AST'nin bu gizli zamiri yakalayıp 'Marfu_Virtual' irabıyla sanal bir fail ataması yapıp yapmadığı kontrol edilir.
+        has_virtual_agent = any(amil == "daraba" and mamul == "Huve" and rel == "Fail" and irab == "Marfu_Virtual" for amil, mamul, rel, irab in deps)
+        self.assertTrue(has_virtual_agent, "[SENTAKS İHLALİ] Nahiv AST, failsiz eyleme Zero-Node Agent (sanal fail) zerk edemedi. Kripke nedenselliği koptu.")
 
     def test_khabari_propositional_isolation(self):
         khabari_tokens = ["Daraba", "Zeydun", "Amran"]
@@ -4910,6 +5210,7 @@ class TestGrammarEngine(unittest.TestCase):
     """
     Sarf, Nahiv ve Tokenizer katmanlarındaki İ'lâl, İbdâl ve Terkib
     (Alt-Ağaç) çözümleyicilerini test eden Red-Teaming (Stres) paketi.
+    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) i'rab koruması ve sentaktik rol (Meful kayması) testleri eklendi.
     """
     def setUp(self):
         self.sarf = SarfEngine()
@@ -4949,6 +5250,38 @@ class TestGrammarEngine(unittest.TestCase):
         # Beklenen: ('yadu', 'allahi', 'Mudaf_MudafIlayh', 'Majrur')
         has_izafet = any(rel == 'Mudaf_MudafIlayh' for amil, mamul, rel, irab in deps)
         self.assertTrue(has_izafet, "[NAHİV ÇÖKÜŞÜ] Terkib-i İzafî (İsim Tamlaması) alt-ağacı (AST) kurulamadı.")
+
+    def test_diptote_morphological_flag(self):
+        """[FAZ 1] Gayri Munsarif kelimelerin morfolojik üreticide (SarfEngine) doğru işaretlenmesi."""
+        # 'makkata' kelimesi fetha ile biter (Meful gibi görünür) ancak diptote havuzundadır.
+        morph = self.sarf._derive_morphology("makkata")
+        self.assertTrue(getattr(morph, 'is_diptote', False), "[MORFOLOJİ ÇÖKÜŞÜ] Gayri Munsarif (Diptote) kelime tespit edilemedi.")
+        self.assertEqual(morph.pattern, "Gayri_Munsarif")
+        self.assertEqual(morph.root, "makkat")
+
+        # Standart bir Triptote kelimesinin bayrak almadığının doğrulanması
+        morph_normal = self.sarf._derive_morphology("zeydan")
+        self.assertFalse(getattr(morph_normal, 'is_diptote', False), "[MORFOLOJİ ÇÖKÜŞÜ] Standart kelime yanlışlıkla Diptote işaretlendi.")
+
+    def test_diptote_semantic_shift_prevention(self):
+        """[FAZ 1] Gayri Munsarif kelimelerin Nahiv (Sentaks) katmanında yanlışlıkla Meful (Patient) atanmasının engellenmesi."""
+        # Cümle: "fî makkata" (Mekke'de). 'makkata' fetha ile bitmesine rağmen harf-i cerden dolayı Majrur olmalıdır.
+        tokens = ["fi", "makkata"]
+        lexicon = self.sarf.derive_lexicon(tokens)
+        deps = self.nahiv.suggest_dependencies(tokens, lexicon)
+        
+        # Fi harfi kapalı kümedir, AST'de amil-mamul bağı yerine İlm-i Ma'ani katmanında çözülür,
+        # Ancak Nahiv katmanının 'makkata'yı otonom olarak 'Meful' (Mansub) ilan etmemesi gerekir.
+        is_meful = any(rel == 'Meful' for amil, mamul, rel, irab in deps)
+        self.assertFalse(is_meful, "[SEMANTİK KAYMA İHLALİ] Gayri Munsarif kelime (fetha bitişli) yanlışlıkla Meful (Patient) olarak atandı.")
+
+        # İzafet Testi: "rabbu makkata" (Mekke'nin Rabbi). 'makkata' fetha ile bitse de Mudaf_Ilayh olmalıdır.
+        tokens_izafet = ["rabbu", "makkata"]
+        lexicon_izafet = self.sarf.derive_lexicon(tokens_izafet)
+        deps_izafet = self.nahiv.suggest_dependencies(tokens_izafet, lexicon_izafet)
+        
+        has_izafet = any(rel == 'Mudaf_MudafIlayh' and mamul == 'makkata' for amil, mamul, rel, irab in deps_izafet)
+        self.assertTrue(has_izafet, "[NAHİV ÇÖKÜŞÜ] Gayri Munsarif kelimenin fetha alması, İzafet (Tamlama) zincirini kopardı.")
 
 if __name__ == '__main__':
     unittest.main()

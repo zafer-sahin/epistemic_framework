@@ -37,6 +37,7 @@ class IlmWadAdapter:
     Faz 2 - Adım 3.2: Harf-i Atıf (Fasıl/Vasıl) edatlarını Kadiyye-i Şartiyye (Inadi/Luzumi) düğümlerine dönüştürür.
     [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 
     'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
+    [FAZ 3 ENTEGRASYONU]: Amel_Inne AST bağları çözümlenerek Kripke uzayı için Epistemic_Necessity operatörüne sarmalanır.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -72,10 +73,28 @@ class IlmWadAdapter:
         
         processed_roles = set()
 
+        # [FAZ 3 ENTEGRASYONU] Amel_Inne İlişkilerini Kadiyye-i Hamliyye'ye (Mubteda_Haber) Döndürme
+        inne_relations = {}
         for amil, mamul, rel_type, irab in dependencies:
-            # [FAZ 2 ENTEGRASYONU] Tevkid, Kasr ve İhtisas (Takdim) kenarları atomik ilişkiler (Rel_X) 
-            # olarak Z3'e gönderilmez; Pragmatics katmanında yakalanıp NestedPredicate'e sarmalanır.
-            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas']:
+            if rel_type == 'Amel_Inne_Ism':
+                if amil not in inne_relations: inne_relations[amil] = {}
+                inne_relations[amil]['ism'] = mamul
+            elif rel_type == 'Amel_Inne_Haber':
+                if amil not in inne_relations: inne_relations[amil] = {}
+                inne_relations[amil]['haber'] = mamul
+
+        for inne_token, rels in inne_relations.items():
+            if 'ism' in rels and 'haber' in rels:
+                ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                # Haber -> Mubteda (Amil -> Mamul) as per Nahiv logic where Haber is the predicate.
+                atomic_predicates.append(("Rel_Mubteda_Haber", f"{haber_id}::{ism_id}", 2))
+                atomic_predicates.append((ism_id, ism_id, 1))
+                atomic_predicates.append((haber_id, haber_id, 1))
+
+        for amil, mamul, rel_type, irab in dependencies:
+            # [FAZ 3 ENTEGRASYONU] Amel_Inne_ bağları yukarıda çözüldüğü için standart döngüde es geçilir.
+            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas'] or rel_type.startswith('Amel_Inne_'):
                 continue
             
             # [FAZ 2.6] Harf-i Atıf (Fasıl/Vasıl) Doğrudan Kadiyye-i Şartiyye'ye (NestedPredicate) dönüştürülür
@@ -138,22 +157,27 @@ class IlmWadAdapter:
         else:
             ir_predicates.extend(atomic_predicates)
 
-        if pragmatics_res["type"] == "Deontic":
-            op = "Wajib_Fiqh" if pragmatics_res["operator"] == "Emir" else "Haram_Fiqh"
+        if pragmatics_res.get("type") == "Deontic":
+            op = "Wajib_Fiqh" if pragmatics_res.get("operator") == "Emir" else "Haram_Fiqh"
             deontic_logic = NestedPredicate(operator=op, args=ir_predicates)
             ir_predicates = [deontic_logic]
             
-        elif pragmatics_res["type"] == "Istifham_i_Inkari":
+        elif pragmatics_res.get("type") == "Istifham_i_Inkari":
             inkari_logic = NestedPredicate(operator="Istifham_Inkari", args=ir_predicates)
             ir_predicates = [inkari_logic]
 
         # [FAZ 2 ENTEGRASYONU] İlm-i Ma'ânî Yönlü Kasr (Hasr) İşlemesi
         kasr_data = pragmatics_res.get("kasr_data")
         if kasr_data:
-            # Kasr (Kısıtlama) yönüne göre (Sıfat->Mevsuf veya Mevsuf->Sıfat) operatör sarmalanır.
             kasr_dir = kasr_data.get("kasr_direction", "Mevsuf_to_Sifat")
             kasr_logic = NestedPredicate(operator=f"Kasr_{kasr_dir}", args=ir_predicates)
             ir_predicates = [kasr_logic]
+
+        # [FAZ 3 ENTEGRASYONU] Epistemic Necessity (Tahkik) Sarmalaması
+        epistemic_modality = pragmatics_res.get("epistemic_modality")
+        if epistemic_modality == "Epistemic_Necessity":
+            epistemic_logic = NestedPredicate(operator="Epistemic_Necessity", args=ir_predicates)
+            ir_predicates = [epistemic_logic]
 
         unique_predicates = []
         seen = set()
@@ -179,6 +203,10 @@ class IlmWadAdapter:
             return f"GrammarNode_{search_key.capitalize()}"
             
         if morph_data and morph_data.ontologic_type == "Harf_Kasr":
+            return f"GrammarNode_{search_key.capitalize()}"
+
+        # [FAZ 3 ENTEGRASYONU] Inne operatörü Leksikon hatası vermemesi için GrammarNode sarmalaması
+        if morph_data and morph_data.ontologic_type == "Harf_Inne":
             return f"GrammarNode_{search_key.capitalize()}"
 
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch)

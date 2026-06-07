@@ -4,6 +4,15 @@ from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
 class Layer3SMTCircuitBreaker:
+    """
+    Z3 Birinci Dereceden Mantık (FOL) Derleyicisi ve Devre Kesici.
+    [FAZ 1 ENTEGRASYONU - BİLGİ]: Gayr-i Munsarif (Diptote) zırhı upstream (Sarf ve Nahiv) 
+    katmanlarında çözümlendiği için, bu katmanın deterministik _build_z3_expr metodu 
+    hiçbir ek koda ihtiyaç duymadan Semantic Shift'i (Fail-Meful kaymasını) matematiksel 
+    olarak engeller. Kripke Semantiği (w, tz, tv) saflığı korunmuştur.
+    [FAZ 3 ENTEGRASYONU]: 'İnne' ve kardeşlerinin ürettiği 'Epistemic_Necessity' operatörü 
+    Zorunluluk Operatörü (□) olarak Kripke uzayına (z3.ForAll ile) işlenmiştir.
+    """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
         self.core_solver = solver
         
@@ -74,6 +83,11 @@ class Layer3SMTCircuitBreaker:
             elif item.operator == "Istifham_Inkari":
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, tz_const, tv_const], z3.Not(body))
+            elif item.operator == "Epistemic_Necessity":
+                # [FAZ 3 ENTEGRASYONU] İnne ve Kardeşleri (Tahkik / Yakîn Makamı)
+                # Modal Mantıktaki Zorunluluk Operatörü (□): Kripke uzayında hiçbir şüpheye mahal vermeyecek şekilde mühürler.
+                body = args[0] if len(args) == 1 else z3.And(args)
+                return z3.ForAll([w_const, tz_const, tv_const], body)
             elif item.operator == "Kasr_Sifat_to_Mevsuf":
                 # [FAZ 2 ENTEGRASYONU] Yönlü Kasr (Sıfatın Mevsufa Hasredilmesi)
                 # ∀y (y ≠ Target ⇒ ¬Predicate(w, tz, tv, Amil, y))
