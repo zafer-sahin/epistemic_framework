@@ -9,6 +9,9 @@ class MorphologicalAnalysis(BaseModel):
     ontologic_type: str 
     thematic_role: Optional[str] = None  
     is_diptote: bool = Field(default=False, description="Gayri Munsarif (Diptote) morfolojik kısıt bayrağı")
+    gender: Optional[str] = Field(default=None, description="HPSG Kısıtı: Muzekker veya Muennes")
+    number: Optional[str] = Field(default=None, description="HPSG Kısıtı: Mufred, Tesniye, Cemi")
+    hidden_pronoun: Optional[str] = Field(default=None, description="DRT Matrisi: Müstatir Zamir (Huve, Hiye vb.)")
 
 class OntoLexRule(BaseModel):
     """OntoLex-Morph standardında kelime üretim/çekim kuralları"""
@@ -22,14 +25,16 @@ class OntoLexMorphEntry(BaseModel):
     pattern_id: str
     ontologic_type: str
     thematic_role: Optional[str] = None
+    gender: Optional[str] = None
+    number: Optional[str] = None
+    hidden_pronoun: Optional[str] = None
     extraction_rules: OntoLexRule
 
 class SarfEngine:
     """
     Üretken Morfoloji Motoru ('İlm-i Sarf).
-    [FAZ 3 ENTEGRASYONU]: OntoLex-Morph RDF standartlarına uygun katı durum makinesi.
-    Statik wazan_matrix sözlüğü, manipüle edilemez OntoLex kural grafına dönüştürülmüştür.
-    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) bükün sınıfları ve morfolojik kısıt bayrakları eklendi.
+    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) bükün sınıfları eklendi.
+    [FAZ 2 ENTEGRASYONU]: Müstatir zamirler (Hidden Pronouns), Cinsiyet (Gender) ve Sayı (Number) HPSG kısıtları OntoLex grafına işlendi.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
@@ -44,57 +49,87 @@ class SarfEngine:
         self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
         self.kasr_set = {"innema", "illa"}
         
-        # FAZ 1: Gayri Munsarif (Diptote) Gövde/Kök Havuzu. (Alem, Acemî, Müennes, Udûl formları)
-        # İleriki fazlarda bu yapı OntoLex RDF grafına dinamik olarak bağlanacaktır.
+        # FAZ 1: Gayri Munsarif (Diptote) Gövde/Kök Havuzu.
         self.diptote_stems = {
             "makkat", "ibrahim", "ismail", "umar", "ahmad", 
             "mesacid", "masabih", "fatimat", "ayishat", "makkah"
         }
         
-        # OntoLex-Morph Kural Grafı
+        # OntoLex-Morph Kural Grafı - [FAZ 2]: Gender, Number, Hidden Pronoun Eklentileri
         self.ontolex_graph: Dict[str, OntoLexMorphEntry] = {
             "CaCaCa": OntoLexMorphEntry(
                 pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
+            ),
+            "CaCaCat": OntoLexMorphEntry(
+                pattern_id="Fa'alat", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muennes", number="Mufred", hidden_pronoun="Hiye",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
             ),
             "yaCCiCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ilu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
+            "taCCiCu": OntoLexMorphEntry(
+                pattern_id="Taf'ilu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muennes", number="Mufred", hidden_pronoun="Hiye",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
             "yaCCaCu": OntoLexMorphEntry(
                 pattern_id="Yaf'alu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
             "yaCCuCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ulu", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
             "CaaCa": OntoLexMorphEntry(
                 pattern_id="Fa'ala_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[0, 'W_Y', 3])
             ),
             "yaCooCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ulu_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'W', 4])
             ),
             "yaCeeCu": OntoLexMorphEntry(
                 pattern_id="Yaf'ilu_Ecvef", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'Y', 4])
             ),
             "CaCaa": OntoLexMorphEntry(
                 pattern_id="Fa'ala_Nakis", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ilal_Nakis", positions=[0, 2, 'W_Y'])
             ),
             "iCCaCaCa": OntoLexMorphEntry(
                 pattern_id="Ifta'ala_Ibdal", ontologic_type="Fiil", thematic_role="Action",
+                gender="Muzekker", number="Mufred", hidden_pronoun="Huve",
                 extraction_rules=OntoLexRule(rule_type="Ibdal", positions=['IBDAL', 4, 6])
             ),
             "CaCiCun": OntoLexMorphEntry(
                 pattern_id="Fâ'ilun", ontologic_type="Ism", thematic_role="Agent",
+                gender="Muzekker", number="Mufred",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
+            ),
+            "CaCiCaCun": OntoLexMorphEntry(
+                pattern_id="Fâ'ilatun", ontologic_type="Ism", thematic_role="Agent",
+                gender="Muennes", number="Mufred",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])
             ),
             "maCCuCun": OntoLexMorphEntry(
                 pattern_id="Maf'ûlun", ontologic_type="Ism", thematic_role="Patient",
+                gender="Muzekker", number="Mufred",
+                extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
+            ),
+            "maCCuCaCun": OntoLexMorphEntry(
+                pattern_id="Maf'ûlatun", ontologic_type="Ism", thematic_role="Patient",
+                gender="Muennes", number="Mufred",
                 extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])
             ),
         }
@@ -110,6 +145,9 @@ class SarfEngine:
             elif char in ['m', 'y', 'a', 't'] and i == 0:
                 sig += char
             elif char == 'n' and i == length - 1 and word_lower[i-1] in ['u', 'a', 'i']:
+                sig += char
+            elif char == 't' and i == length - 1 and word_lower[i-1] == 'a':
+                # [FAZ 2 YAMASI]: Fiil-i Mazi Müennes kalıplarının (Fa'alat) Tâ-i Te'nîs (t) tespit koruması.
                 sig += char
             else:
                 sig += 'C'
@@ -170,28 +208,30 @@ class SarfEngine:
             extracted_root = self._apply_ontolex_rules(word_lower, entry.extraction_rules)
             return MorphologicalAnalysis(
                 original_word=word_lower, root=extracted_root, pattern=entry.pattern_id,
-                ontologic_type=entry.ontologic_type, thematic_role=entry.thematic_role, is_diptote=False
+                ontologic_type=entry.ontologic_type, thematic_role=entry.thematic_role, 
+                is_diptote=False, gender=entry.gender, number=entry.number, hidden_pronoun=entry.hidden_pronoun
             )
             
         # FAZ 1: Gayri Munsarif (Diptote) İzolasyon Kısıtı.
-        # Bu kısıt, sentaktik derleyicinin (Nahiv) cer durumunda bile fetha alan
-        # kelimeleri meful (Patient) zannetmesini engellemek için tasarlanmıştır.
         stem_1 = word_lower[:-1]
         if stem_1 in self.diptote_stems and word_lower[-1] in ("u", "a"):
             return MorphologicalAnalysis(
                 original_word=word_lower, root=stem_1, pattern="Gayri_Munsarif",
-                ontologic_type="Ism", thematic_role=None, is_diptote=True
+                ontologic_type="Ism", thematic_role=None, is_diptote=True,
+                gender="Muzekker", number="Mufred" # Çoğunlukla Alem (Özel İsim) varsayımı
             )
             
         if word_lower.endswith(("un", "an", "in")):
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower[:-2], pattern="Alem/Camid_Munevven",
-                ontologic_type="Ism", thematic_role=None, is_diptote=False
+                ontologic_type="Ism", thematic_role=None, is_diptote=False,
+                gender="Muzekker", number="Mufred"
             )
         elif word_lower.endswith(("u", "a", "i")):
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower[:-1], pattern="Alem/Camid_Mudaf",
-                ontologic_type="Ism", thematic_role=None, is_diptote=False
+                ontologic_type="Ism", thematic_role=None, is_diptote=False,
+                gender="Muzekker", number="Mufred"
             )
 
         raise ValueError(f"[SARF ÇÖKÜŞÜ] '{word}' (İmza: {signature}) kelimesi OntoLex-Morph grafında doğrulanamadı. MSA/Modern türetim reddedildi.")

@@ -3,7 +3,10 @@ from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.discourse_state import DiscourseRegister, DenialLevel
 from linguistics.pragmatics import MaaniSpeechActAnalyzer
 from linguistics.ilm_wad_adapter import IlmWadAdapter
-from core.exceptions import DiachronicViolationError
+from linguistics.tokenizer import EpistemicTokenizer
+from linguistics.sarf_parser import SarfEngine
+from linguistics.nahiv_ast import NahivDependencyCompiler
+from core.exceptions import DiachronicViolationError, ContextPoisoningError
 
 class TestSemanticPipeline(unittest.TestCase):
     def setUp(self):
@@ -11,10 +14,15 @@ class TestSemanticPipeline(unittest.TestCase):
         self.discourse = DiscourseRegister()
         self.pragmatics = MaaniSpeechActAnalyzer(self.discourse)
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
+        self.tokenizer = EpistemicTokenizer()
+        self.sarf = SarfEngine()
+        self.nahiv = NahivDependencyCompiler()
 
         # [FAZ 1] Epoch parametreleri zorunlu kılındı.
         self.lexicon.register_word("Zeydun", "Base", "Zeyd_Entity", epoch="Classical")
+        self.lexicon.register_word("Fatimat", "Base", "Fatima_Entity", epoch="Classical")
         self.lexicon.register_word("Daraba", "Base", "Fiil_Daraba", epoch="Classical")
+        self.lexicon.register_word("Darabat", "Base", "Fiil_Darabat", epoch="Classical")
         
         self.lexicon.register_word("Istiva", "Salafi", "Istiva_Literal", proposition_type="Kadiyye-i_Hamliyye", epoch="Classical")
         self.lexicon.register_word("Istiva", "Ashari", "Istiva_Metaphor", proposition_type="Kadiyye-i_Hamliyye", epoch="Classical")
@@ -34,7 +42,6 @@ class TestSemanticPipeline(unittest.TestCase):
 
     def test_diachronic_violation_rejection(self):
         """[FAZ 1] Leksikonun seküler/MSA kelimeleri (Epoch: Modern) Z3 motoruna sızdırmasını engeller."""
-        # Sistem Classical beklerken modern kelime kaydı reddedilmelidir.
         with self.assertRaises(DiachronicViolationError):
             self.lexicon.register_word("demokrasi", "Base", "Sekuler_Otorite", epoch="Modern")
             
@@ -48,14 +55,33 @@ class TestSemanticPipeline(unittest.TestCase):
             # Adaptör dışarıdan modern kelime işlemeyi tamamen reddetmelidir.
             self.adapter.generate_ir(["demokrasi"], [], "Base", epoch="Modern")
 
-    def test_anaphoric_discourse_binding(self):
-        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base")
-        resolved_id = self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
-        self.assertEqual(resolved_id, "Zeyd_Entity")
+    def test_anaphoric_discourse_binding_with_hpsg(self):
+        """[FAZ 2] HPSG (Cinsiyet/Sayı) Kısıtlı DRT Anaphora Çözümlemesi."""
+        # Zeyd (Muzekker) ve Fatima (Muennes) söylem belleğine eklenir.
+        self.discourse.add_mention("Zeydun", "Zeyd_Entity", "Base", gender="Muzekker", number="Mufred")
+        self.discourse.add_mention("Fatimat", "Fatima_Entity", "Base", gender="Muennes", number="Mufred")
         
-        self.discourse.clear_memory()
-        with self.assertRaises(ValueError):
-            self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
+        # 'Huve' (O - Muzekker) zamiri geriye dönük taramada Fatima'yı atlayıp Zeyd'i bulmalıdır.
+        resolved_huve = self.discourse.resolve_pronoun("Huve", enforcement_namespace="Base")
+        self.assertEqual(resolved_huve, "Zeyd_Entity", "[DRT ÇÖKÜŞÜ] Muzekker zamir (Huve) HPSG uyum kısıtını atlayarak yanlış referansa bağlandı.")
+        
+        # 'Hiye' (O - Muennes) zamiri doğrudan Fatima'yı bulmalıdır.
+        resolved_hiye = self.discourse.resolve_pronoun("Hiye", enforcement_namespace="Base")
+        self.assertEqual(resolved_hiye, "Fatima_Entity", "[DRT ÇÖKÜŞÜ] Muennes zamir (Hiye) HPSG uyum kısıtını atlayarak yanlış referansa bağlandı.")
+
+    def test_zero_node_agent_injection(self):
+        """[FAZ 2] Failsiz (Gizli Zamirli) fiillerde AST'ye otonom Zero-Node (Müstatir Zamir) enjeksiyonu."""
+        tokens = ["daraba"] # Sadece eylem var, açık (zahir) fail yok. (İçinde gizli 'huve' var)
+        morph_lexicon = self.sarf.derive_lexicon(tokens)
+        
+        # Morfoloji motorunun gizli zamiri tespit edip etmediğinin doğrulanması
+        self.assertEqual(morph_lexicon["daraba"].hidden_pronoun, "Huve", "[MORFOLOJİ ZAFİYETİ] Fiil içerisindeki müstatir zamir (hidden_pronoun) çıkarılamadı.")
+        
+        deps = self.nahiv.suggest_dependencies(tokens, morph_lexicon)
+        
+        # AST'nin bu gizli zamiri yakalayıp 'Marfu_Virtual' irabıyla sanal bir fail ataması yapıp yapmadığı kontrol edilir.
+        has_virtual_agent = any(amil == "daraba" and mamul == "Huve" and rel == "Fail" and irab == "Marfu_Virtual" for amil, mamul, rel, irab in deps)
+        self.assertTrue(has_virtual_agent, "[SENTAKS İHLALİ] Nahiv AST, failsiz eyleme Zero-Node Agent (sanal fail) zerk edemedi. Kripke nedenselliği koptu.")
 
     def test_khabari_propositional_isolation(self):
         khabari_tokens = ["Daraba", "Zeydun", "Amran"]

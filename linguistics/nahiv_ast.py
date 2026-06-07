@@ -10,6 +10,7 @@ class NahivDependencyCompiler:
     Faz 2 - Adım 2.5: Takdim (Pre-positioning) ve İhtisas (Kasr) tespiti.
     Faz 2 - Adım 2.6: Kasr (Hasr) Operatörlerinde Yön Tespiti (Sıfat/Mevsuf) ve Harf-i Atıf (Fasıl/Vasıl) Entegrasyonu.
     [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) kelimelerin cer durumundaki (fetha) i'rab istisnaları AST mantığına işlendi.
+    [FAZ 2 ENTEGRASYONU]: Müstatir Zamir (Hidden Pronoun) otonom düğüm enjeksiyonu eklendi (Zero-Node Agent).
     İzafet (İsim Tamlaması), Sıfat-Mevsuf, Hal ve Atıf ilişkilerini saptayarak,
     ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
     """
@@ -129,6 +130,7 @@ class NahivDependencyCompiler:
             return dependencies
 
         # 4. FİİL CÜMLESİ (Verbal Sentence) ZİNCİRİ
+        has_explicit_fail = False
         for idx, token in enumerate(tokens):
             if token == amil_token: 
                 continue
@@ -141,6 +143,7 @@ class NahivDependencyCompiler:
 
             if token.lower().endswith('un') or (is_diptote and token.lower().endswith('u')):
                 dependencies.append((amil_token, token, 'Fail', 'Marfu'))
+                has_explicit_fail = True
             elif token.lower().endswith('an') or (is_diptote and token.lower().endswith('a')):
                 # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
                 # [FAZ 1 - GAYRİ MUNSARİF KORUMASI]: Eğer kelime diptote ise ve zaten Majrur (Mudaf_Ilayh) olarak bağlandıysa Meful OLAMAZ.
@@ -159,15 +162,32 @@ class NahivDependencyCompiler:
                 is_sub_tree_child = any((rel == 'Mudaf_MudafIlayh' or rel == 'Rel_Atif') and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
+
+        # [FAZ 2 ENTEGRASYONU] Müstatir (Gizli) Zamir Tespiti ve AST'ye Zero-Node Enjeksiyonu
+        if amil_token and not has_explicit_fail:
+            amil_morph = lexicon.get(amil_token)
+            hidden_pronoun = getattr(amil_morph, 'hidden_pronoun', None)
+            if hidden_pronoun:
+                # Gerçek metinde olmayan sanal bir fail (Agent) düğümü yaratılır ve fiile bağlanır.
+                # IlmWadAdapter bu zamiri gördüğünde DiscourseRegister üzerinden HPSG eşleşmesiyle çözecektir.
+                dependencies.append((amil_token, hidden_pronoun, 'Fail', 'Marfu_Virtual'))
                     
         return dependencies
 
     def build_ast(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> nx.DiGraph:
         self.dependency_graph.clear()
+        
+        # Orijinal tokenları grafiğe ekle
         for token in tokens:
             self.dependency_graph.add_node(token)
             
         for amil, mamul, rel, irab in dependencies:
+            # [FAZ 2 YAMASI] Sanal (Zero-Node) zamirler (Örn: 'huve') tokens listesinde olmadığı için hata vermemesi adına açıkça eklenir.
+            if mamul not in self.dependency_graph:
+                self.dependency_graph.add_node(mamul, virtual=True)
+            if amil not in self.dependency_graph:
+                self.dependency_graph.add_node(amil, virtual=True)
+                
             self.dependency_graph.add_edge(amil, mamul, relation=rel, irab=irab)
             
         return self.dependency_graph
