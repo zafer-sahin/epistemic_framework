@@ -9,6 +9,7 @@ class AdabAlBahthEngine:
     Taftâzânî, Cürcânî ve Gelenbevî temelli Münazara Sonlu Durum Makinesi (FSM).
     Faz 5: Rekürsif Men' (İç içe İspat Yükümlülüğü), Mülâzama Counter-Model Çözümlemesi 
     ve Tahrîr-i Mahall-i Niza' Z3 Aksiyom Enjeksiyonu.
+    [FAZ 4 YAMASI]: submit_evidence içindeki Kripke uzayına SpaceSort (Mekân) boyutu eklendi.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
@@ -96,6 +97,7 @@ class AdabAlBahthEngine:
             w_env = z3.Const('w_env', self.solver.builder.WorldSort)
             tz_env = z3.Const('tz_env', self.solver.builder.TimeSortZati)
             tv_env = z3.Const('tv_env', self.solver.builder.TimeSortVasfi)
+            s_env = z3.Const('s_env', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
             x_env = z3.Const('x_env', self.solver.builder.EntitySort)
             
             for m_term in self.musellemat:
@@ -104,7 +106,8 @@ class AdabAlBahthEngine:
                     self.solver.solver.add(self.solver.builder.parse(m_term))
                 else:
                     pred = self.solver.builder.get_or_create_predicate(m_term, arity=1)
-                    self.solver.solver.add(z3.Exists([w_env, tz_env, tv_env, x_env], pred(w_env, tz_env, tv_env, x_env)))
+                    # [FAZ 4 YAMASI] S_env enjeksiyonu ile Sort mismatch engellendi
+                    self.solver.solver.add(z3.Exists([w_env, tz_env, tv_env, s_env, x_env], pred(w_env, tz_env, tv_env, s_env, x_env)))
 
             for p in premises:
                 self._auto_register_predicates(p)

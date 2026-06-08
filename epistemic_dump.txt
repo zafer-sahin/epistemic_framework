@@ -446,6 +446,7 @@ class EpistemicOrchestrator:
         [FAZ 5 ENTEGRASYONU] FSM Asenkron Mu'aradah Tetikleyicisi.
         Sâil'in 'AWAITING_ATTACK' durumunda gönderdiği karşı-argümanı (Anti-Tez) Z3 Optimize 
         motorunda Mucîb'in argümanıyla çarpıştırır. Çapraz ekol kilitlenmesi FSM durumunu günceller.
+        [FAZ 4 YAMASI]: Kripke Uzayı (SpaceSort) eksik parametresi eklendi.
         """
         
         if fsm_engine and getattr(fsm_engine, "current_state", None) != "AWAITING_ATTACK":
@@ -470,17 +471,21 @@ class EpistemicOrchestrator:
             self._verify_air_gapped_ontology(cross_injected_ir)
             
             optimizer = z3.Optimize()
+            # Performans iyileştirmesi: Modal mantık (ForAll/Exists) Optimizer'ı NP-Hard uzaya sürükler. 
+            # 2 saniyede çözemezse kilitlenmeyi reddet.
+            optimizer.set("timeout", 2000)
             
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
             tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
+            s_base = z3.Const('s_base', self.l3.core_solver.builder.SpaceSort) # [FAZ 4 YAMASI]
             
             for item in mujib_claim_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
                 optimizer.add_soft(z3_expr, weight=1)
                 
             for item in cross_injected_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
                 optimizer.add(z3_expr)
 
             cross_status = optimizer.check()
@@ -828,7 +833,11 @@ class Layer3SMTCircuitBreaker:
     [FAZ 1 ENTEGRASYONU - BİLGİ]: Gayr-i Munsarif (Diptote) zırhı upstream (Sarf ve Nahiv) 
     katmanlarında çözümlendiği için, bu katmanın deterministik _build_z3_expr metodu 
     hiçbir ek koda ihtiyaç duymadan Semantic Shift'i (Fail-Meful kaymasını) matematiksel 
-    olarak engeller. Kripke Semantiği (w, tz, tv) saflığı korunmuştur.
+    olarak engeller.
+    [FAZ 3 ENTEGRASYONU]: 'İnne' ve kardeşlerinin ürettiği 'Epistemic_Necessity' operatörü 
+    Zorunluluk Operatörü (□) olarak Kripke uzayına (z3.ForAll ile) işlenmiştir.
+    [FAZ 4 ENTEGRASYONU]: Kripke Uzayına Mekânsal Boyut (SpaceSort) eklendi. Tüm Modal,
+    Deontik ve Epistemik operatörler s_const (Space) düzleminde kısıtlanmıştır.
     """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
         self.core_solver = solver
@@ -850,13 +859,13 @@ class Layer3SMTCircuitBreaker:
                 frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
-    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, tz_const: z3.ExprRef, tv_const: z3.ExprRef) -> z3.ExprRef:
+    def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, tz_const: z3.ExprRef, tv_const: z3.ExprRef, s_const: z3.ExprRef) -> z3.ExprRef:
         if isinstance(item, tuple):
             pred_id, arg_id, arity = item
             if arity == 1:
                 entity_const = z3.Const(arg_id, self.core_solver.builder.EntitySort)
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=1)
-                return predicate(w_const, tz_const, tv_const, entity_const)
+                return predicate(w_const, tz_const, tv_const, s_const, entity_const)
             elif arity == 2:
                 amil_str, mamul_str = arg_id.split('::', 1) 
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
@@ -865,12 +874,16 @@ class Layer3SMTCircuitBreaker:
                 if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
                     return amil_const == mamul_const
                 
+                # [FAZ 4 ENTEGRASYONU] LocatedIn müteallak kısıtının Z3 fonksiyonuna dönüştürülmesi
+                if pred_id == "LocatedIn":
+                    return self.core_solver.builder.LocatedIn(w_const, tz_const, tv_const, s_const, amil_const)
+
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
-                return predicate(w_const, tz_const, tv_const, amil_const, mamul_const)
+                return predicate(w_const, tz_const, tv_const, s_const, amil_const, mamul_const)
             else:
                 raise ValueError(f"[SENTAKS İHLALİ] Desteklenmeyen arite: {arity}")
         else:
-            args = [self._build_z3_expr(a, w_const, tz_const, tv_const) for a in item.args]
+            args = [self._build_z3_expr(a, w_const, tz_const, tv_const, s_const) for a in item.args]
             
             if item.operator == "Luzumi":
                 if len(args) == 2:
@@ -890,19 +903,20 @@ class Layer3SMTCircuitBreaker:
                 return z3.Or(args)
             elif item.operator == "Wajib_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                # [FAZ 2 ENTEGRASYONU] Deontik (Emir) Zaman Kilitlenmesi Çözüldü.
-                # Emirler mutlak zâtî doğa yasası değildir, vasfî zamandaki eylemsel lüzumiyettir.
-                return z3.ForAll([w_const, tv_const], body)
+                # [FAZ 2/4 ENTEGRASYONU] Deontik Emir: Vasfî zaman ve Vasfî mekân lüzumiyeti.
+                return z3.ForAll([w_const, tv_const, s_const], body)
             elif item.operator == "Haram_Fiqh":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                # [FAZ 2 ENTEGRASYONU] Nehiyler (Yasaklar) vasfî zaman düzleminde varoluşsal yokluktur.
-                return z3.Not(z3.Exists([w_const, tv_const], body))
+                # [FAZ 2/4 ENTEGRASYONU] Nehiyler (Yasaklar): Vasfî zaman ve mekânda varoluşsal yokluk.
+                return z3.Not(z3.Exists([w_const, tv_const, s_const], body))
             elif item.operator == "Istifham_Inkari":
                 body = args[0] if len(args) == 1 else z3.And(args)
-                return z3.ForAll([w_const, tz_const, tv_const], z3.Not(body))
+                return z3.ForAll([w_const, tz_const, tv_const, s_const], z3.Not(body))
+            elif item.operator == "Epistemic_Necessity":
+                # [FAZ 3/4 ENTEGRASYONU] İnne ve Kardeşleri (Tahkik / Yakîn Makamı)
+                body = args[0] if len(args) == 1 else z3.And(args)
+                return z3.ForAll([w_const, tz_const, tv_const, s_const], body)
             elif item.operator == "Kasr_Sifat_to_Mevsuf":
-                # [FAZ 2 ENTEGRASYONU] Yönlü Kasr (Sıfatın Mevsufa Hasredilmesi)
-                # ∀y (y ≠ Target ⇒ ¬Predicate(w, tz, tv, Amil, y))
                 base_truth = args[0] if len(args) == 1 else z3.And(args)
                 exclusion_axioms = []
                 
@@ -916,10 +930,10 @@ class Layer3SMTCircuitBreaker:
                         amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                         mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                         
-                        exclusion = z3.ForAll([w_const, tz_const, tv_const, y_kasr],
+                        exclusion = z3.ForAll([w_const, tz_const, tv_const, s_const, y_kasr],
                             z3.Implies(
                                 y_kasr != mamul_const,
-                                z3.Not(predicate(w_const, tz_const, tv_const, amil_const, y_kasr))
+                                z3.Not(predicate(w_const, tz_const, tv_const, s_const, amil_const, y_kasr))
                             )
                         )
                         exclusion_axioms.append(exclusion)
@@ -928,8 +942,6 @@ class Layer3SMTCircuitBreaker:
                     return z3.And(base_truth, *exclusion_axioms)
                 return base_truth
             elif item.operator == "Kasr_Mevsuf_to_Sifat":
-                # [FAZ 2 ENTEGRASYONU] Yönlü Kasr (Mevsufun Sıfata Hasredilmesi)
-                # ∀x (x ≠ Amil ⇒ ¬Predicate(w, tz, tv, x, Target))
                 base_truth = args[0] if len(args) == 1 else z3.And(args)
                 exclusion_axioms = []
                 
@@ -943,10 +955,10 @@ class Layer3SMTCircuitBreaker:
                         amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                         mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                         
-                        exclusion = z3.ForAll([w_const, tz_const, tv_const, x_kasr],
+                        exclusion = z3.ForAll([w_const, tz_const, tv_const, s_const, x_kasr],
                             z3.Implies(
                                 x_kasr != amil_const,
-                                z3.Not(predicate(w_const, tz_const, tv_const, x_kasr, mamul_const))
+                                z3.Not(predicate(w_const, tz_const, tv_const, s_const, x_kasr, mamul_const))
                             )
                         )
                         exclusion_axioms.append(exclusion)
@@ -961,6 +973,7 @@ class Layer3SMTCircuitBreaker:
         w_var = z3.Const('w_vaz', self.core_solver.builder.WorldSort)
         tz_var = z3.Const('tz_vaz', self.core_solver.builder.TimeSortZati)
         tv_var = z3.Const('tv_vaz', self.core_solver.builder.TimeSortVasfi)
+        s_var = z3.Const('s_vaz', self.core_solver.builder.SpaceSort)
         x_var = z3.Const('x_var', self.core_solver.builder.EntitySort)
         y_var = z3.Const('y_var', self.core_solver.builder.EntitySort)
 
@@ -969,28 +982,28 @@ class Layer3SMTCircuitBreaker:
         role_action = self.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
 
         agent_axiom = z3.ForAll(
-            [w_var, tz_var, tv_var, x_var],
+            [w_var, tz_var, tv_var, s_var, x_var],
             z3.Implies(
-                role_agent(w_var, tz_var, tv_var, x_var),
-                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, y_var))
+                role_agent(w_var, tz_var, tv_var, s_var, x_var),
+                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, s_var, y_var))
             )
         )
         self.core_solver.solver.add(agent_axiom)
 
         patient_axiom = z3.ForAll(
-            [w_var, tz_var, tv_var, x_var],
+            [w_var, tz_var, tv_var, s_var, x_var],
             z3.Implies(
-                role_patient(w_var, tz_var, tv_var, x_var),
-                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, y_var))
+                role_patient(w_var, tz_var, tv_var, s_var, x_var),
+                z3.Exists([y_var], role_action(w_var, tz_var, tv_var, s_var, y_var))
             )
         )
         self.core_solver.solver.add(patient_axiom)
-        
+
     def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> bool:
         """
-        [FAZ 3 ENTEGRASYONU] İlm-i Beyân Ma'nâ el-Ma'nâ İspatı.
-        L1'den gelen İlm-i Beyân analiz paketini (İstiare Müşabehetleri, Lüzumiyet Dereceleri) 
-        Kripke Semantiğine (Olası Dünyalar ve Çift Zaman) uygun Z3 aksiyomlarına dönüştürür.
+        [FAZ 3/4 ENTEGRASYONU] İlm-i Beyân Ma'nâ el-Ma'nâ İspatı.
+        L1'den gelen İlm-i Beyân analiz paketini, 4 Boyutlu Kripke Semantiğine (w, tz, tv, s) 
+        uygun Z3 aksiyomlarına dönüştürür.
         """
         if not chain_data or not chain_data.get("is_found"):
             return False
@@ -1006,6 +1019,7 @@ class Layer3SMTCircuitBreaker:
         w_var = z3.Const('w_beyan', self.core_solver.builder.WorldSort)
         tz_var = z3.Const('tz_beyan', self.core_solver.builder.TimeSortZati)
         tv_var = z3.Const('tv_beyan', self.core_solver.builder.TimeSortVasfi)
+        s_var = z3.Const('s_beyan', self.core_solver.builder.SpaceSort)
         x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
 
         for i in range(len(path) - 1):
@@ -1020,26 +1034,22 @@ class Layer3SMTCircuitBreaker:
             source_pred = self.core_solver.builder.get_or_create_predicate(source_id, arity=1)
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
 
-            # [FAZ 3] İstiare (Müşabehet / Câmi') Ortak Özellik İspatı
             if bridge_type == "Istiare":
                 mushabehat = chain_data.get("mushabehat", [])
                 for trait in mushabehat:
                     trait_pred = self.core_solver.builder.get_or_create_predicate(trait, arity=1)
-                    trait_axiom_src = z3.ForAll([w_var, tz_var, tv_var, x_var], z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), trait_pred(w_var, tz_var, tv_var, x_var)))
-                    trait_axiom_tgt = z3.ForAll([w_var, tz_var, tv_var, x_var], z3.Implies(target_pred(w_var, tz_var, tv_var, x_var), trait_pred(w_var, tz_var, tv_var, x_var)))
+                    trait_axiom_src = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var], z3.Implies(source_pred(w_var, tz_var, tv_var, s_var, x_var), trait_pred(w_var, tz_var, tv_var, s_var, x_var)))
+                    trait_axiom_tgt = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var], z3.Implies(target_pred(w_var, tz_var, tv_var, s_var, x_var), trait_pred(w_var, tz_var, tv_var, s_var, x_var)))
                     self._active_bridge_axioms.extend([trait_axiom_src, trait_axiom_tgt])
 
-            # Lüzum Derecesine Göre Kripke Niceleyicisi Optimizasyonu
             if luzum_derecesi == "Luzum_u_Harici":
-                # Sadece mevcut dışsal dünyada geçerli olan ampirik/dışsal mülâzama (Zihinsel zorunluluk değil)
                 w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
-                bridge_axiom = z3.ForAll([tz_var, tv_var, x_var], 
-                    z3.Implies(source_pred(w_base, tz_var, tv_var, x_var), target_pred(w_base, tz_var, tv_var, x_var))
+                bridge_axiom = z3.ForAll([tz_var, tv_var, s_var, x_var], 
+                    z3.Implies(source_pred(w_base, tz_var, tv_var, s_var, x_var), target_pred(w_base, tz_var, tv_var, s_var, x_var))
                 )
             else:
-                # Luzum_u_Zihni veya Luzum_u_Beyyin: Tüm olası dünyalarda geçerli mutlak zihinsel geçiş (Külliyye/Sebebiyye vb.)
-                bridge_axiom = z3.ForAll([w_var, tz_var, tv_var, x_var],
-                    z3.Implies(source_pred(w_var, tz_var, tv_var, x_var), target_pred(w_var, tz_var, tv_var, x_var))
+                bridge_axiom = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var],
+                    z3.Implies(source_pred(w_var, tz_var, tv_var, s_var, x_var), target_pred(w_var, tz_var, tv_var, s_var, x_var))
                 )
             
             self._active_bridge_axioms.append(bridge_axiom)
@@ -1064,9 +1074,10 @@ class Layer3SMTCircuitBreaker:
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.core_solver.builder.TimeSortZati)
             tv_base = z3.Const('tv_base', self.core_solver.builder.TimeSortVasfi)
+            s_base = z3.Const('s_base', self.core_solver.builder.SpaceSort)
             
             for item in ir_matrix.predicates:
-                z3_expr = self._build_z3_expr(item, w_base, tz_base, tv_base)
+                z3_expr = self._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
                 self.core_solver.solver.add(z3_expr)
             
             result = self.core_solver.solver.check()
@@ -1114,12 +1125,52 @@ class AristotelianSolver:
         root_entity = self.ontology.porphyrian_tree.roots[self.active_namespace]
         self._traverse_and_assert(root_entity)
         self._inject_kalamic_causality()
+        self._inject_tahayyuz_axioms()
+
+    def _inject_tahayyuz_axioms(self) -> None:
+        """
+        [FAZ 4 ENTEGRASYONU] İlm-i Kelâm Mekân (Tahayyuz) ve Tenzih Aksiyomları.
+        Vâcibu'l-Vücûd mekândan münezzehtir (LocatedIn bağımsızdır).
+        Cism (Cisim) ve Araz'lar ise mutlak surette bir mekâna (SpaceSort) muhtaçtır.
+        Bu metod, teolojik tenzih prensibini Z3 FOL matrisinde donanımsal bir kısıta çevirir.
+        """
+        try:
+            wajib_pred = self.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
+            cism_pred = self.builder.get_or_create_predicate("Cism", arity=1)
+            
+            w_tahayyuz = z3.Const('w_tahayyuz', self.builder.WorldSort)
+            tz_tahayyuz = z3.Const('tz_tahayyuz', self.builder.TimeSortZati)
+            tv_tahayyuz = z3.Const('tv_tahayyuz', self.builder.TimeSortVasfi)
+            s_tahayyuz = z3.Const('s_tahayyuz', self.builder.SpaceSort)
+            x_tahayyuz = z3.Const('x_tahayyuz', self.builder.EntitySort)
+
+            # Tenzih Aksiyomu: Zorunlu Varlık hiçbir mekânsal düzlemde (SpaceSort) bulunamaz.
+            tenzih_axiom = z3.ForAll([w_tahayyuz, tz_tahayyuz, tv_tahayyuz, s_tahayyuz, x_tahayyuz],
+                z3.Implies(
+                    wajib_pred(w_tahayyuz, tz_tahayyuz, tv_tahayyuz, s_tahayyuz, x_tahayyuz),
+                    z3.Not(self.builder.LocatedIn(w_tahayyuz, tz_tahayyuz, tv_tahayyuz, s_tahayyuz, x_tahayyuz))
+                )
+            )
+            self.solver.assert_and_track(tenzih_axiom, "AXIOM_TENZIH_WAJIB_AL_WUJUD")
+
+            # Tahayyuz Aksiyomu: Her Cisim (Cism) mutlak surette bir mekânda (SpaceSort) bulunmak zorundadır.
+            s_loc = z3.Const('s_loc', self.builder.SpaceSort)
+            tahayyuz_axiom = z3.ForAll([w_tahayyuz, tz_tahayyuz, tv_tahayyuz, s_tahayyuz, x_tahayyuz],
+                z3.Implies(
+                    cism_pred(w_tahayyuz, tz_tahayyuz, tv_tahayyuz, s_tahayyuz, x_tahayyuz),
+                    z3.Exists([s_loc], self.builder.LocatedIn(w_tahayyuz, tz_tahayyuz, tv_tahayyuz, s_loc, x_tahayyuz))
+                )
+            )
+            self.solver.assert_and_track(tahayyuz_axiom, "AXIOM_TAHAYYUZ_CISM")
+
+        except ValueError:
+            pass # Test ortamında veya daraltılmış ontolojide bu düğümler yoksa yoksay
 
     def _inject_kalamic_causality(self) -> None:
         """
-        [FAZ 4 - Tamamlama] İmkân ve Nedensellik (Kalamic Causality)
-        SMT motorunun olasılık çöküşü yaşamaması için, Kripke uzayındaki 
-        her Mümkin varlık Zorunlu varlığa bağlanır.
+        [FAZ 4 - Güncelleme] İmkân ve Nedensellik (Kalamic Causality)
+        Kripke uzayındaki her Mümkin varlık Zorunlu varlığa bağlanır.
+        SpaceSort (s_causality) boyutu ariteye eklendi.
         """
         try:
             wajib_pred = self.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
@@ -1128,19 +1179,20 @@ class AristotelianSolver:
             w = z3.Const('w_causality', self.builder.WorldSort)
             tz = z3.Const('tz_causality', self.builder.TimeSortZati)
             tv = z3.Const('tv_causality', self.builder.TimeSortVasfi)
+            s = z3.Const('s_causality', self.builder.SpaceSort)
             x_mumkin = z3.Const('x_mumkin', self.builder.EntitySort)
             y_wajib = z3.Const('y_wajib', self.builder.EntitySort)
+            s_wajib = z3.Const('s_wajib', self.builder.SpaceSort)
 
-            # Her mümkün varlık, en az bir zorunlu varlığın (Wajib_al_Wujud) aynı dünyada ve zâtî zamanda var olmasını gerektirir.
-            causality_axiom = z3.ForAll([w, tz, tv, x_mumkin],
+            causality_axiom = z3.ForAll([w, tz, tv, s, x_mumkin],
                 z3.Implies(
-                    mumkin_pred(w, tz, tv, x_mumkin),
-                    z3.Exists([y_wajib], wajib_pred(w, tz, tv, y_wajib))
+                    mumkin_pred(w, tz, tv, s, x_mumkin),
+                    z3.Exists([y_wajib, s_wajib], wajib_pred(w, tz, tv, s_wajib, y_wajib))
                 )
             )
             self.solver.assert_and_track(causality_axiom, "AXIOM_KALAMIC_CAUSALITY_DEPENDENCE")
         except ValueError:
-            pass # Çalışılan namespace (örn. daraltılmış test uzayları) bu düğümleri içermiyorsa yoksay
+            pass 
 
     def _traverse_and_assert(self, entity: EpistemicEntity) -> None:
         predicate = self.builder.get_or_create_predicate(entity.ontologic_id)
@@ -1148,80 +1200,75 @@ class AristotelianSolver:
         w = z3.Const(f"w_{entity.ontologic_id}", self.builder.WorldSort)
         tz = z3.Const(f"tz_{entity.ontologic_id}", self.builder.TimeSortZati)
         tv = z3.Const(f"tv_{entity.ontologic_id}", self.builder.TimeSortVasfi)
+        s = z3.Const(f"s_{entity.ontologic_id}", self.builder.SpaceSort)
         
-        # [FAZ 4] KURAL 1: Çift Katmanlı Varlık ve Kiplik (Modal Status) Entegrasyonu
         if entity.modal_status in ["Wajib", "Zaruriyye_i_Mutlaka"]:
-            existence_axiom = z3.Exists([x], z3.ForAll([w, tz, tv], predicate(w, tz, tv, x)))
+            existence_axiom = z3.Exists([x], z3.ForAll([w, tz, tv, s], predicate(w, tz, tv, s, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Daime_i_Mutlaka":
-            existence_axiom = z3.Exists([w, x], z3.ForAll([tz, tv], predicate(w, tz, tv, x)))
+            existence_axiom = z3.Exists([w, x], z3.ForAll([tz, tv, s], predicate(w, tz, tv, s, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Mustahil":
-            existence_axiom = z3.ForAll([w, tz, tv, x], z3.Not(predicate(w, tz, tv, x)))
+            existence_axiom = z3.ForAll([w, tz, tv, s, x], z3.Not(predicate(w, tz, tv, s, x)))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Mesruta_i_Amme" and entity.modal_condition_id:
             condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
-            existence_axiom = z3.ForAll([w, tz, tv, x], 
-                z3.Implies(condition_pred(w, tz, tv, x), predicate(w, tz, tv, x))
+            existence_axiom = z3.ForAll([w, tz, tv, s, x], 
+                z3.Implies(condition_pred(w, tz, tv, s, x), predicate(w, tz, tv, s, x))
             )
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         elif entity.modal_status == "Orfiyye_i_Amme" and entity.modal_condition_id:
             condition_pred = self.builder.get_or_create_predicate(entity.modal_condition_id)
-            existence_axiom = z3.Exists([w], z3.ForAll([tz, tv, x], 
-                z3.Implies(condition_pred(w, tz, tv, x), predicate(w, tz, tv, x))
+            existence_axiom = z3.Exists([w], z3.ForAll([tz, tv, s, x], 
+                z3.Implies(condition_pred(w, tz, tv, s, x), predicate(w, tz, tv, s, x))
             ))
             self.solver.assert_and_track(existence_axiom, f"AXIOM_EXISTENCE_{entity.ontologic_id}_{entity.modal_status}")
             
         else:
             pass
         
-        # KURAL 2: Hiyerarşik Geçişlilik
         for child in entity.children:
             child_pred = self.builder.get_or_create_predicate(child.ontologic_id)
             y = z3.Const(f"y_{child.ontologic_id}_trans", self.builder.EntitySort)
             
-            transitivity_axiom = z3.ForAll([w, tz, tv, y], z3.Implies(child_pred(w, tz, tv, y), predicate(w, tz, tv, y)))
+            transitivity_axiom = z3.ForAll([w, tz, tv, s, y], z3.Implies(child_pred(w, tz, tv, s, y), predicate(w, tz, tv, s, y)))
             self.solver.assert_and_track(
                 transitivity_axiom, 
                 f"AXIOM_HIERARCHY_{child.ontologic_id}_IMPLIES_{entity.ontologic_id}"
             )
             
-        # KURAL 3: Yatay Dışlama (Sibling Disjointness)
         if len(entity.children) > 1:
             for child_a, child_b in itertools.combinations(entity.children, 2):
                 pred_a = self.builder.get_or_create_predicate(child_a.ontologic_id)
                 pred_b = self.builder.get_or_create_predicate(child_b.ontologic_id)
                 z_var = z3.Const(f"z_disjoint_{child_a.ontologic_id}_{child_b.ontologic_id}", self.builder.EntitySort)
                 
-                disjoint_axiom = z3.ForAll([w, tz, tv, z_var], z3.Not(z3.And(pred_a(w, tz, tv, z_var), pred_b(w, tz, tv, z_var))))
+                disjoint_axiom = z3.ForAll([w, tz, tv, s, z_var], z3.Not(z3.And(pred_a(w, tz, tv, s, z_var), pred_b(w, tz, tv, s, z_var))))
                 self.solver.assert_and_track(
                     disjoint_axiom,
                     f"AXIOM_DISJOINT_{child_a.ontologic_id}_AND_{child_b.ontologic_id}"
                 )
 
-        # KURAL 4: Fasıl (Differentia) İzolasyonu
         if entity.differentia_id:
             diff_name = f"Diff_{entity.ontologic_id}_{entity.differentia_id}"
             diff_pred = self.builder.get_or_create_predicate(diff_name)
-            diff_axiom = z3.ForAll([w, tz, tv, x], z3.Implies(predicate(w, tz, tv, x), diff_pred(w, tz, tv, x)))
+            diff_axiom = z3.ForAll([w, tz, tv, s, x], z3.Implies(predicate(w, tz, tv, s, x), diff_pred(w, tz, tv, s, x)))
             self.solver.assert_and_track(diff_axiom, f"AXIOM_DIFFERENTIA_{entity.ontologic_id}")
 
-        # KURAL 5: Hâssa (Proprium)
         for prop_id in entity.propria_ids:
             prop_name = f"Prop_{entity.ontologic_id}_{prop_id}"
             prop_pred = self.builder.get_or_create_predicate(prop_name)
             
-            prop_axiom_forward = z3.ForAll([w, tz, tv, x], z3.Implies(predicate(w, tz, tv, x), prop_pred(w, tz, tv, x)))
+            prop_axiom_forward = z3.ForAll([w, tz, tv, s, x], z3.Implies(predicate(w, tz, tv, s, x), prop_pred(w, tz, tv, s, x)))
             self.solver.assert_and_track(prop_axiom_forward, f"AXIOM_PROP_FWD_{entity.ontologic_id}_{prop_id}")
             
-            prop_axiom_backward = z3.ForAll([w, tz, tv, x], z3.Implies(prop_pred(w, tz, tv, x), predicate(w, tz, tv, x)))
+            prop_axiom_backward = z3.ForAll([w, tz, tv, s, x], z3.Implies(prop_pred(w, tz, tv, s, x), predicate(w, tz, tv, s, x)))
             self.solver.assert_and_track(prop_axiom_backward, f"AXIOM_PROP_BWD_{entity.ontologic_id}_{prop_id}")
 
-        # Mutlak Rekürsiyon
         for child in entity.children:
             self._traverse_and_assert(child)
 
@@ -1263,17 +1310,23 @@ class Z3ExpressionBuilder:
     """
     Sadece belirlenmiş ontolojik ID'ler ve FOL kuralları dahilinde
     Z3 ifadelerine (z3.ExprRef) dönüşüm yapan güvenlik duvarlı ve derinlik limitli AST derleyicisi.
-    Faz 4 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve Çift Katmanlı Zaman Düzlemi (Zâtî ve Vasfî) eklentisi.
+    Faz 4 - Adım 1: Kripke Semantiği (Olası Dünyalar), Çift Katmanlı Zaman Düzlemi (Zâtî ve Vasfî) 
+    ve Mekânsal Boyut (SpaceSort) eklentisi.
     """
     def __init__(self, max_depth: int = 15):
         self.EntitySort = z3.DeclareSort('Entity')
         self.WorldSort = z3.DeclareSort('World') # Kripke Olası Dünyalar Uzayı
         self.TimeSortZati = z3.DeclareSort('TimeZati')   # Şemsiyye Kiplikleri İçin Zâtî Zaman (De re)
         self.TimeSortVasfi = z3.DeclareSort('TimeVasfi') # Şemsiyye Kiplikleri İçin Vasfî Zaman (De dicto)
+        self.SpaceSort = z3.DeclareSort('Space')         # Müteallak ve Mekân Bildiren Harf-i Cerler İçin Mekânsal Uzay
+        
         self.predicates: Dict[str, z3.FuncDeclRef] = {}
         
         # Modal Erişim Bağıntısı (Accessibility Relation: R(w1, w2))
         self.Access = z3.Function('Access', self.WorldSort, self.WorldSort, z3.BoolSort())
+        
+        # Mekânsal Bağlantı (Müteallak) Fonksiyonları: Entity'nin belirli bir mekânda (Space) bulunması
+        self.LocatedIn = z3.Function('LocatedIn', self.WorldSort, self.TimeSortZati, self.TimeSortVasfi, self.SpaceSort, self.EntitySort, z3.BoolSort())
         
         self.valid_identifier_pattern = re.compile(r'^[A-Za-z0-9_]+$')
         self.max_depth = max_depth
@@ -1283,18 +1336,18 @@ class Z3ExpressionBuilder:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz ontolojik sembol: '{name}'. Sadece ASCII/Transliterasyon desteklenir.")
 
         if name not in self.predicates:
-            # Muvaccehât: Her yüklem artık N ariteye ek olarak "Dünya" (w), "Zâtî Zaman" (t_zati) ve "Vasfî Zaman" (t_vasfi) alır.
-            domains = [self.WorldSort, self.TimeSortZati, self.TimeSortVasfi] + [self.EntitySort] * arity
+            # Muvaccehât ve Mekân: Her yüklem artık N ariteye ek olarak "Dünya" (w), "Zâtî Zaman" (t_zati), "Vasfî Zaman" (t_vasfi) ve "Mekân" (s) alır.
+            domains = [self.WorldSort, self.TimeSortZati, self.TimeSortVasfi, self.SpaceSort] + [self.EntitySort] * arity
             self.predicates[name] = z3.Function(name, *domains, z3.BoolSort())
         else:
-            # Mevcut arite, WorldSort, TimeSortZati ve TimeSortVasfi eklendiği için +3 olarak kontrol edilir
+            # Mevcut arite, WorldSort, TimeSortZati, TimeSortVasfi ve SpaceSort eklendiği için +4 olarak kontrol edilir
             existing_arity = self.predicates[name].arity()
-            if existing_arity != arity + 3:
-                raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması.")
+            if existing_arity != arity + 4:
+                raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması. Beklenen {arity+4}, Bulunan: {existing_arity}")
                 
         return self.predicates[name]
 
-    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time_zati: z3.ExprRef = None, current_time_vasfi: z3.ExprRef = None) -> z3.ExprRef:
+    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time_zati: z3.ExprRef = None, current_time_vasfi: z3.ExprRef = None, current_space: z3.ExprRef = None) -> z3.ExprRef:
         try:
             if current_world is None:
                 current_world = z3.Const('w_base', self.WorldSort)
@@ -1302,13 +1355,16 @@ class Z3ExpressionBuilder:
                 current_time_zati = z3.Const('t_zati_base', self.TimeSortZati)
             if current_time_vasfi is None:
                 current_time_vasfi = z3.Const('t_vasfi_base', self.TimeSortVasfi)
+            if current_space is None:
+                current_space = z3.Const('s_base', self.SpaceSort)
                 
             tree = ast.parse(expr_str, mode='eval').body
-            # Kök ayrıştırmada World (w) ve Time (t_zati, t_vasfi) parametreleri bound_vars içerisine gömülür
+            # Kök ayrıştırmada World (w), Time (t_zati, t_vasfi) ve Space (s) parametreleri bound_vars içerisine gömülür
             return self._eval_node(tree, {
                 '__world__': current_world, 
                 '__time_zati__': current_time_zati, 
-                '__time_vasfi__': current_time_vasfi
+                '__time_vasfi__': current_time_vasfi,
+                '__space__': current_space
             }, current_depth=0)
         except SyntaxError as e:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz FOL/Modal ifadesi derlenemez: {e}")
@@ -1320,6 +1376,7 @@ class Z3ExpressionBuilder:
         current_w = bound_vars.get('__world__')
         current_t_zati = bound_vars.get('__time_zati__')
         current_t_vasfi = bound_vars.get('__time_vasfi__')
+        current_s = bound_vars.get('__space__')
 
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
@@ -1340,7 +1397,7 @@ class Z3ExpressionBuilder:
             elif func_name == 'Luzumi':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
-                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time_zati__', '__time_vasfi__')]
+                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time_zati__', '__time_vasfi__', '__space__')]
                 if existential_vars:
                     return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
@@ -1384,8 +1441,8 @@ class Z3ExpressionBuilder:
                     return z3.Exists(z3_vars, body_expr)
             
             else:
-                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) ve Çift Zaman (t_zati, t_vasfi) parametreleri enjekte edilir
-                args = [current_w, current_t_zati, current_t_vasfi] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
+                # N-Ary Yüklem Çağrılarına otomatik olarak World (w), Çift Zaman (t_zati, t_vasfi) ve Space (s) parametreleri enjekte edilir
+                args = [current_w, current_t_zati, current_t_vasfi, current_s] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
                 arity = len(node.args)
                 predicate = self.get_or_create_predicate(func_name, arity)
                 return predicate(*args)
@@ -2509,6 +2566,8 @@ class IlmWadAdapter:
     Faz 2 - Adım 3.2: Harf-i Atıf (Fasıl/Vasıl) edatlarını Kadiyye-i Şartiyye (Inadi/Luzumi) düğümlerine dönüştürür.
     [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 
     'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
+    [FAZ 3 ENTEGRASYONU]: Amel_Inne AST bağları çözümlenerek Kripke uzayı için Epistemic_Necessity operatörüne sarmalanır.
+    [FAZ 4 ENTEGRASYONU]: Zarf-ı Mustakar ve Zarf-ı Lağv Muteallak ilişkileri LocatedIn FOL kısıtına çevrilir.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -2544,10 +2603,31 @@ class IlmWadAdapter:
         
         processed_roles = set()
 
+        # [FAZ 3 ENTEGRASYONU] Amel_Inne İlişkilerini Kadiyye-i Hamliyye'ye (Mubteda_Haber) Döndürme
+        inne_relations = {}
         for amil, mamul, rel_type, irab in dependencies:
-            # [FAZ 2 ENTEGRASYONU] Tevkid, Kasr ve İhtisas (Takdim) kenarları atomik ilişkiler (Rel_X) 
-            # olarak Z3'e gönderilmez; Pragmatics katmanında yakalanıp NestedPredicate'e sarmalanır.
-            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas']:
+            if rel_type == 'Amel_Inne_Ism':
+                if amil not in inne_relations: inne_relations[amil] = {}
+                inne_relations[amil]['ism'] = mamul
+            elif rel_type == 'Amel_Inne_Haber':
+                if amil not in inne_relations: inne_relations[amil] = {}
+                inne_relations[amil]['haber'] = mamul
+
+        for inne_token, rels in inne_relations.items():
+            if 'ism' in rels and 'haber' in rels:
+                ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                atomic_predicates.append(("Rel_Mubteda_Haber", f"{haber_id}::{ism_id}", 2))
+                atomic_predicates.append((ism_id, ism_id, 1))
+                atomic_predicates.append((haber_id, haber_id, 1))
+
+        for amil, mamul, rel_type, irab in dependencies:
+            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas'] or rel_type.startswith('Amel_Inne_'):
+                continue
+                
+            # [FAZ 4 YAMASI] Kainun_Virtual (Zımnî Amil) Ontoloji Hatası Koruması
+            # Zarf-ı Mustakar'da Kainun_Virtual ontolojik ID'ye sahip değildir. Çöküş engellendi.
+            if rel_type == 'Mubteda_Haber' and amil == 'Kainun_Virtual':
                 continue
             
             # [FAZ 2.6] Harf-i Atıf (Fasıl/Vasıl) Doğrudan Kadiyye-i Şartiyye'ye (NestedPredicate) dönüştürülür
@@ -2558,11 +2638,30 @@ class IlmWadAdapter:
                 particle = irab.lower()
                 if particle in self.inadi_particles:
                     atomic_predicates.append(NestedPredicate(operator="Inadi_Hakikiyye", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
-                else: # wa, fa, summe, vb. Lüzumî (Birleştirici) bağlar
+                else: 
                     atomic_predicates.append(NestedPredicate(operator="Luzumi", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
                 
                 atomic_predicates.append((amil_id, amil_id, 1))
                 atomic_predicates.append((mamul_id, mamul_id, 1))
+                continue
+
+            # [FAZ 4 ENTEGRASYONU] Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi
+            if rel_type == 'Muteallak_Mekan':
+                harf_node = mamul
+                mekan_target = next((m for a, m, r, _ in dependencies if r == 'Harf_Mecrur' and a == harf_node), None)
+                if mekan_target:
+                    mekan_id = self._resolve_entity(mekan_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                    if amil == 'Kainun_Virtual':
+                        mubteda_token = next((m for a, m, r, _ in dependencies if r == 'Mubteda_Haber' and a == 'Kainun_Virtual'), None)
+                        if mubteda_token:
+                            located_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                            atomic_predicates.append(("LocatedIn", f"{located_id}::{mekan_id}", 2))
+                    else:
+                        located_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                        atomic_predicates.append(("LocatedIn", f"{located_id}::{mekan_id}", 2))
+                continue
+
+            if rel_type == 'Harf_Mecrur':
                 continue
 
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
@@ -2610,22 +2709,25 @@ class IlmWadAdapter:
         else:
             ir_predicates.extend(atomic_predicates)
 
-        if pragmatics_res["type"] == "Deontic":
-            op = "Wajib_Fiqh" if pragmatics_res["operator"] == "Emir" else "Haram_Fiqh"
+        if pragmatics_res.get("type") == "Deontic":
+            op = "Wajib_Fiqh" if pragmatics_res.get("operator") == "Emir" else "Haram_Fiqh"
             deontic_logic = NestedPredicate(operator=op, args=ir_predicates)
             ir_predicates = [deontic_logic]
             
-        elif pragmatics_res["type"] == "Istifham_i_Inkari":
+        elif pragmatics_res.get("type") == "Istifham_i_Inkari":
             inkari_logic = NestedPredicate(operator="Istifham_Inkari", args=ir_predicates)
             ir_predicates = [inkari_logic]
 
-        # [FAZ 2 ENTEGRASYONU] İlm-i Ma'ânî Yönlü Kasr (Hasr) İşlemesi
         kasr_data = pragmatics_res.get("kasr_data")
         if kasr_data:
-            # Kasr (Kısıtlama) yönüne göre (Sıfat->Mevsuf veya Mevsuf->Sıfat) operatör sarmalanır.
             kasr_dir = kasr_data.get("kasr_direction", "Mevsuf_to_Sifat")
             kasr_logic = NestedPredicate(operator=f"Kasr_{kasr_dir}", args=ir_predicates)
             ir_predicates = [kasr_logic]
+
+        epistemic_modality = pragmatics_res.get("epistemic_modality")
+        if epistemic_modality == "Epistemic_Necessity":
+            epistemic_logic = NestedPredicate(operator="Epistemic_Necessity", args=ir_predicates)
+            ir_predicates = [epistemic_logic]
 
         unique_predicates = []
         seen = set()
@@ -2651,6 +2753,9 @@ class IlmWadAdapter:
             return f"GrammarNode_{search_key.capitalize()}"
             
         if morph_data and morph_data.ontologic_type == "Harf_Kasr":
+            return f"GrammarNode_{search_key.capitalize()}"
+
+        if morph_data and morph_data.ontologic_type == "Harf_Inne":
             return f"GrammarNode_{search_key.capitalize()}"
 
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch)
@@ -2685,8 +2790,9 @@ class NahivDependencyCompiler:
     Faz 2 - Adım 2.6: Kasr (Hasr) Operatörlerinde Yön Tespiti (Sıfat/Mevsuf) ve Harf-i Atıf (Fasıl/Vasıl) Entegrasyonu.
     [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) kelimelerin cer durumundaki (fetha) i'rab istisnaları AST mantığına işlendi.
     [FAZ 2 ENTEGRASYONU]: Müstatir Zamir (Hidden Pronoun) otonom düğüm enjeksiyonu eklendi (Zero-Node Agent).
-    İzafet (İsim Tamlaması), Sıfat-Mevsuf, Hal ve Atıf ilişkilerini saptayarak,
-    ontolojik mesafe motoruna (L1) deterministik 'Edge'ler sağlar.
+    [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Amel Statüleri) cümlenin ana amili olarak AST'ye eklendi.
+    [FAZ 4 ENTEGRASYONU]: Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi, Zarf-ı Mustakar 
+    ve Zarf-ı Lağv matrisleri ile Zero-Copula (Kainun_Virtual) AST'ye entegre edildi.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") # Harf-i Ta'rif
@@ -2695,6 +2801,8 @@ class NahivDependencyCompiler:
         self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart"]
         # Kadiyye-i Şartiyye (Fasıl/Vasıl) tetikleyicileri
         self.atif_particles = ["wa", "fa", "aw", "summe", "am", "bal", "la", "lakin"]
+        # [FAZ 4 ENTEGRASYONU] Mekân/Zaman Harf-i Cer ve Zarfları
+        self.mekan_zarflari = ["fi", "ala", "min", "ila", "bi", "li", "inde", "tahta", "fawqa", "beyne", "khalf", "amam"]
 
     def _is_definite(self, token: str) -> bool:
         return token.lower().startswith(self.definite_article)
@@ -2702,17 +2810,21 @@ class NahivDependencyCompiler:
     def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, str, str]]:
         dependencies = []
         
-        # 1. ANA CÜMLE (SENTENCE) ÇÖZÜMLEMESİ: FİİL KONTROLÜ (Erken Tespit)
         amil_token = None
         amil_index = -1
+        inne_token = None
+        inne_index = -1
+        
         for idx, token in enumerate(tokens):
             morph = lexicon.get(token)
-            if morph and morph.ontologic_type == "Fiil":
-                amil_token = token
-                amil_index = idx
-                break
+            if morph:
+                if morph.ontologic_type == "Fiil":
+                    amil_token = token
+                    amil_index = idx
+                elif morph.ontologic_type == "Harf_Inne":
+                    inne_token = token
+                    inne_index = idx
                 
-        # 2. ALT-AĞAÇ (PHRASE/TERKİB) ÇÖZÜMLEMESİ (Sliding Window)
         for i in range(len(tokens) - 1):
             t1 = tokens[i]
             t2 = tokens[i+1]
@@ -2720,74 +2832,96 @@ class NahivDependencyCompiler:
             m1 = lexicon.get(t1)
             m2 = lexicon.get(t2)
             
-            # [FAZ 2.2] Tevkîd Edatlarının Ana Yükleme/İsme Bağlanması
             if m1 and m1.ontologic_type == "Harf_Tevkid":
                 dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
                 continue
             
-            # [FAZ 2.6] Kasr Edatlarının (İnnemâ, İllâ) Yönlü Bağlanması
             if m1 and m1.ontologic_type == "Harf_Kasr":
-                kasr_direction = 'Mevsuf_to_Sifat' # Varsayılan yön
-                
-                # İnnemâ genellikle cümlede son gelen öğeye (Te'hir) kısıtlama yapar.
+                kasr_direction = 'Mevsuf_to_Sifat'
                 if t1.lower() == "innema":
                     if amil_index != -1 and i < amil_index:
-                        # Fiilden önce gelirse, faili fiile veya mefulü fiile hasreder.
                         kasr_direction = 'Sifat_to_Mevsuf'
                     else:
                         kasr_direction = 'Mevsuf_to_Sifat'
-                # İllâ (Nefy ile birlikte), kendisinden sonra gelene hasreder.
                 elif t1.lower() == "illa":
                         kasr_direction = 'Sifat_to_Mevsuf'
 
-                # Tuple aritesini korumak adına irab parametresi (4. indis) kasr yönünü taşımak için aşırı yüklenir (overloaded).
                 dependencies.append((t2, t1, 'Kasr_Modifier', kasr_direction))
                 continue
                 
-            # [FAZ 2.6] Kadiyye-i Şartiyye: Harf-i Atıf (Fasıl ve Vasıl) Matrisi
             if t1.lower() in self.atif_particles:
                 if i > 0:
                     t_prev = tokens[i-1]
-                    # Atıf bağlacı, bir önceki token ile bir sonraki token (Ma'tûf ve Ma'tûf aleyh) arasında Lüzum/İnad bağı kurar.
                     dependencies.append((t_prev, t2, 'Rel_Atif', t1.lower()))
+                continue
+                
+            # [FAZ 4 ENTEGRASYONU] Harf-i Cer, Mecrur ve Müteallak Bağıntısı
+            if t1.lower() in self.mekan_zarflari:
+                dependencies.append((t1, t2, 'Harf_Mecrur', 'Majrur'))
+                
+                if amil_token:
+                    # Zarf-ı Lağv: Cümlede açıkça zikredilmiş bir eyleme (amile) mekânsal kısıt ekler.
+                    dependencies.append((amil_token, t1, 'Muteallak_Mekan', 'Zarf_Lagv'))
+                else:
+                    # Zarf-ı Mustakar: Amil zikredilmemiştir. Zımnî 'Kainun' (Mevcut/Karar Kılmış) amili takdir edilir.
+                    dependencies.append(('Kainun_Virtual', t1, 'Muteallak_Mekan', 'Zarf_Mustakar'))
                 continue
 
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
-                # İzafet (Mudaf - Mudaf İleyh) Matrisi
-                # [FAZ 1 - GAYRİ MUNSARİF YAMASI]: Mudaf_Ilayh olan diptote kelime fetha (-a) ile bitebilir.
                 is_diptote_majrur = getattr(m2, 'is_diptote', False) and t2.lower().endswith('a')
                 if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i')) or is_diptote_majrur):
                     dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
                 
-                # [FAZ 4 ENTEGRASYONU] Hal ve Zarf-ı Zaman (Vasfî Zaman Tetiği) - [ÖNCELİKLİ]
-                # Hal, marife veya nekra bir fail/mefulün mansub (-an) niteliğidir. İ'rab uyumu aramaz.
                 elif t2.lower().endswith('an') and m1.thematic_role in ["Agent", "Patient", "Action"]:
                     dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
 
-                # Sıfat-Mevsuf (Na't - Man'ut) Matrisi
-                # [LOGIC FIX]: Sadece marife/nekra uyumu yetmez, kesin İ'rab uyumu şarttır.
                 is_sifat_uyumu = False
                 if self._is_definite(t1) == self._is_definite(t2):
                     if t1[-2:] == t2[-2:]:
                         is_sifat_uyumu = True
-                    # [FAZ 1 - GAYRİ MUNSARİF YAMASI]: Triptote mevsuf (mecrur) + Diptote sıfat (mecrur '-a' ile)
                     elif getattr(m2, 'is_diptote', False) and t1.lower().endswith(('in', 'i')) and t2.lower().endswith('a'):
                         is_sifat_uyumu = True
                 
                 if is_sifat_uyumu:
                     dependencies.append((t1, t2, 'Sifat_Mevsuf', 'Tabi'))
                     
-            # Şart Edatları (İn, İza, Lev, Amma)
             elif t1.lower() in ["in", "iza", "law", "amma"]:
                 dependencies.append((t1, t2, "Rel_Shart", "Majzum"))
         
-        # 3. İSİM CÜMLESİ (Kadiyye-i Hamliyye) ZİNCİRİ
-        if not amil_token:
+        if inne_token:
+            ism_tokens_after = [t for idx, t in enumerate(tokens) if idx > inne_index and lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
+            
+            if ism_tokens_after:
+                ism_inne = ism_tokens_after[0]
+                dependencies.append((inne_token, ism_inne, 'Amel_Inne_Ism', 'Mansub'))
+                
+                if amil_token and amil_index > inne_index:
+                    dependencies.append((inne_token, amil_token, 'Amel_Inne_Haber', 'Marfu_Mahallen'))
+                elif len(ism_tokens_after) >= 2:
+                    haber_inne = None
+                    for ism in ism_tokens_after[1:]:
+                        is_mudaf_ilayh = any(rel == 'Mudaf_MudafIlayh' and t_sub == ism for _, t_sub, rel, _ in dependencies)
+                        if not is_mudaf_ilayh:
+                            haber_inne = ism
+                            break
+                    if not haber_inne:
+                        haber_inne = ism_tokens_after[-1]
+                    
+                    dependencies.append((inne_token, haber_inne, 'Amel_Inne_Haber', 'Marfu'))
+
+        if not amil_token and not inne_token:
+            # [FAZ 4 ENTEGRASYONU] Zarf-ı Mustakar'ın Kadiyye-i Hamliyye üzerindeki otoritesi
+            has_zarf_mustakar = any(rel == 'Muteallak_Mekan' and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
             ism_tokens = [t for t in tokens if lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
             
+            if has_zarf_mustakar and len(ism_tokens) >= 1:
+                mubteda = ism_tokens[0]
+                # Kainun_Virtual, varoluşsal bir yüklem (Haber) olarak Mübteda'ya bağlanır
+                dependencies.append(('Kainun_Virtual', mubteda, 'Mubteda_Haber', 'Marfu_Virtual'))
+                return dependencies
+
             if len(ism_tokens) >= 2:
                 mubteda = ism_tokens[0]
-                
                 haber = None
                 for ism in ism_tokens[1:]:
                     is_mudaf_ilayh = any(rel == 'Mudaf_MudafIlayh' and t_sub == ism for _, t_sub, rel, _ in dependencies)
@@ -2802,8 +2936,10 @@ class NahivDependencyCompiler:
                     dependencies.append((haber, mubteda, 'Mubteda_Haber', 'Marfu'))
             
             return dependencies
+            
+        if not amil_token and inne_token:
+            return dependencies 
 
-        # 4. FİİL CÜMLESİ (Verbal Sentence) ZİNCİRİ
         has_explicit_fail = False
         for idx, token in enumerate(tokens):
             if token == amil_token: 
@@ -2816,34 +2952,30 @@ class NahivDependencyCompiler:
             is_diptote = getattr(morph, 'is_diptote', False)
 
             if token.lower().endswith('un') or (is_diptote and token.lower().endswith('u')):
-                dependencies.append((amil_token, token, 'Fail', 'Marfu'))
-                has_explicit_fail = True
+                is_inne_haber = any(rel == 'Amel_Inne_Haber' and mamul == token for _, mamul, rel, _ in dependencies)
+                if not is_inne_haber:
+                    dependencies.append((amil_token, token, 'Fail', 'Marfu'))
+                    has_explicit_fail = True
             elif token.lower().endswith('an') or (is_diptote and token.lower().endswith('a')):
-                # Hal olarak bağlanmış bir kelime tekrar Meful olarak bağlanmamalıdır.
-                # [FAZ 1 - GAYRİ MUNSARİF KORUMASI]: Eğer kelime diptote ise ve zaten Majrur (Mudaf_Ilayh) olarak bağlandıysa Meful OLAMAZ.
                 is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
                 is_majrur = any(mamul == token and irab == 'Majrur' for _, mamul, rel, irab in dependencies)
+                is_inne_ism = any(rel == 'Amel_Inne_Ism' and mamul == token for _, mamul, rel, _ in dependencies)
                 
-                if not is_hal and not is_majrur:
-                    # [FAZ 2.5] İlm-i Ma'ânî İhtisas (Takdim) Kontrolü
-                    # Eğer meful, fiilden (amil) önce gelmişse bu bir İhtisas/Kasr durumudur.
+                if not is_hal and not is_majrur and not is_inne_ism:
                     if idx < amil_index:
                         dependencies.append((amil_token, token, 'Rel_Ihtisas', 'Mansub'))
                     else:
                         dependencies.append((amil_token, token, 'Meful', 'Mansub'))
             elif token.lower().endswith(('in', 'i')):
-                # Mudaf İleyh veya Atıf (Ma'tûf) ile alt ağaca bağlananlar ana amile majrur olarak bağlanmamalıdır.
-                is_sub_tree_child = any((rel == 'Mudaf_MudafIlayh' or rel == 'Rel_Atif') and t2 == token for _, t2, rel, _ in dependencies)
+                # [FAZ 4 YAMASI] Harf_Mecrur bağına girenler ana fiile Majrur olarak doğrudan bağlanamaz. Onlar Harf üzerinden Müteallak olurlar.
+                is_sub_tree_child = any((rel == 'Mudaf_MudafIlayh' or rel == 'Rel_Atif' or rel == 'Harf_Mecrur') and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
 
-        # [FAZ 2 ENTEGRASYONU] Müstatir (Gizli) Zamir Tespiti ve AST'ye Zero-Node Enjeksiyonu
         if amil_token and not has_explicit_fail:
             amil_morph = lexicon.get(amil_token)
             hidden_pronoun = getattr(amil_morph, 'hidden_pronoun', None)
             if hidden_pronoun:
-                # Gerçek metinde olmayan sanal bir fail (Agent) düğümü yaratılır ve fiile bağlanır.
-                # IlmWadAdapter bu zamiri gördüğünde DiscourseRegister üzerinden HPSG eşleşmesiyle çözecektir.
                 dependencies.append((amil_token, hidden_pronoun, 'Fail', 'Marfu_Virtual'))
                     
         return dependencies
@@ -2851,12 +2983,10 @@ class NahivDependencyCompiler:
     def build_ast(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> nx.DiGraph:
         self.dependency_graph.clear()
         
-        # Orijinal tokenları grafiğe ekle
         for token in tokens:
             self.dependency_graph.add_node(token)
             
         for amil, mamul, rel, irab in dependencies:
-            # [FAZ 2 YAMASI] Sanal (Zero-Node) zamirler (Örn: 'huve') tokens listesinde olmadığı için hata vermemesi adına açıkça eklenir.
             if mamul not in self.dependency_graph:
                 self.dependency_graph.add_node(mamul, virtual=True)
             if amil not in self.dependency_graph:
@@ -2867,15 +2997,10 @@ class NahivDependencyCompiler:
         return self.dependency_graph
     
     def extract_temporal_conditions(self, ast: nx.DiGraph) -> Dict[str, str]:
-        """
-        AST üzerinden Vasfî Zamanı (t_vasfi) tetikleyen düğümleri çeker.
-        Eğer bir varlığa Rel_Hal veya Rel_Shart bağlanmışsa, o varlık SMT katmanında
-        'Meşrûta-i Âmme' veya 'Örfiyye-i Âmme' matrisine sokulmalıdır.
-        """
         conditions = {}
         for u, v, data in ast.edges(data=True):
             if data.get('relation') in self.temporal_triggers:
-                conditions[u] = v  # u: Zât (Özne), v: Vasıf (Şart/Hal)
+                conditions[u] = v
         return conditions
 
 
@@ -2893,6 +3018,8 @@ class MaaniSpeechActAnalyzer:
     Faz 2 - Adım 2.4: İstifham-ı İnkârî (Reddedici Soru) tespiti.
     Faz 2 - Adım 2.5: Kasr/Hasr (Kısıtlama) ve İhtisas (Takdim/Te'hir) tespiti.
     Faz 2 - Adım 2.6: Kasr Operatörlerinde Yön Yitimi Onarımı (Kasr-ı Sıfat ale'l-Mevsuf / Kasr-ı Mevsuf ale's-Sıfat).
+    [FAZ 3 ENTEGRASYONU]: 'İnne ve Kardeşleri'nin Tevkîd gücü korunurken (Muktazâ el-Hâl), 
+    Kripke uzayı için 'Epistemic_Necessity' (Tahkik/Yakîn) sinyali üretmesi sağlandı.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
@@ -2930,8 +3057,9 @@ class MaaniSpeechActAnalyzer:
             is_prohibitive = first_token.startswith("la_")
             return {"is_valid": True, "type": "Deontic", "operator": "Nehiy" if is_prohibitive else "Emir"}
             
-        # 3. Muktazâ el-Hâl (Bağlamsal Gereklilik) Denetimi (Faz 2.3)
-        tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier')
+        # 3. Muktazâ el-Hâl (Bağlamsal Gereklilik) Denetimi (Faz 2.3 & FAZ 3)
+        # [FAZ 3 GÜNCELLEMESİ]: 'Amel_Inne_Ism' veya 'Amel_Inne_Haber' bağımlılıkları da güçlü bir Tevkid (Pekiştirme) sayılır.
+        tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier' or rel.startswith('Amel_Inne_'))
         opponent_denial_level = self.discourse.get_opponent_epistemic_state()
 
         if opponent_denial_level == DenialLevel.KHALI_AL_ZIHN and tevkid_count > 0:
@@ -2981,8 +3109,19 @@ class MaaniSpeechActAnalyzer:
                 }
 
         response = {"is_valid": True, "type": "Khabari"}
+        
+        # [FAZ 3 ENTEGRASYONU]: Epistemic Necessity (Tahkik) Tespiti
+        has_epistemic_necessity = any(rel.startswith('Amel_Inne_') for _, _, rel, _ in dependencies)
+        if has_epistemic_necessity:
+            response["epistemic_modality"] = "Epistemic_Necessity"
+            response["message"] = "İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil) tespit edildi: Tahkik (Epistemic Necessity) uygulanacak."
+
         if kasr_data:
             response["kasr_data"] = kasr_data
+            if "message" in response:
+                response["message"] += f" | {kasr_data['message']}"
+            else:
+                response["message"] = kasr_data['message']
 
         return response
         
@@ -3031,6 +3170,7 @@ class SarfEngine:
     Üretken Morfoloji Motoru ('İlm-i Sarf).
     [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) bükün sınıfları eklendi.
     [FAZ 2 ENTEGRASYONU]: Müstatir zamirler (Hidden Pronouns), Cinsiyet (Gender) ve Sayı (Number) HPSG kısıtları OntoLex grafına işlendi.
+    [FAZ 3 ENTEGRASYONU]: Huruf-u Müşebbehe bil-Fiil (İnne ve kardeşleri) izole edilerek Epistemic Operator sınıfı tanımlandı.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
@@ -3042,7 +3182,12 @@ class SarfEngine:
             "illa", "lam", "lan"   
         }
         
-        self.tevkid_set = {"inna", "kad", "qad", "la", "nun"}
+        # [FAZ 3 ENTEGRASYONU]: "inna" buradan çıkarılarak inne_set'e aktarıldı.
+        self.tevkid_set = {"kad", "qad", "la", "nun"}
+        
+        # [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil)
+        self.inne_set = {"inna", "anna", "kaanna", "lakinna", "layta", "laalla"}
+        
         self.kasr_set = {"innema", "illa"}
         
         # FAZ 1: Gayri Munsarif (Diptote) Gövde/Kök Havuzu.
@@ -3183,6 +3328,12 @@ class SarfEngine:
             return MorphologicalAnalysis(
                 original_word=word_lower, root=word_lower, pattern="Harf_Kasr",
                 ontologic_type="Harf_Kasr", thematic_role=None, is_diptote=False
+            )
+
+        if word_lower in self.inne_set:
+            return MorphologicalAnalysis(
+                original_word=word_lower, root=word_lower, pattern="Harf_Inne",
+                ontologic_type="Harf_Inne", thematic_role="Epistemic_Operator", is_diptote=False
             )
 
         if word_lower in self.tevkid_set:
@@ -3624,7 +3775,7 @@ def execute_healthcheck():
     # [FAZ 6] Selefî Usûlü için Bila-Kayf (Hakikat Taşınması) Sibak Tetikleyicisi
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
-    
+   
     # [FAZ 3] Eş'arî ve Mâtürîdî için Ma'nâ el-Ma'nâ (Mecaz) Fallback Tetikleyicisi
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
@@ -3640,8 +3791,12 @@ def execute_healthcheck():
     lexicon.register_word("drb", "Base", "Kavram_Vuran")
     lexicon.register_word("masiy", "Base", "Masi") 
     
+    # [FAZ 4] Mekân Zarfları ve Kripke Uzayı (SpaceSort) Kayıtları
+    lexicon.register_word("fi", "Base", "Harf")
+    lexicon.register_word("beyt", "Base", "Cism")
+    lexicon.register_word("sema", "Base", "Cism")
+
     # [FAZ 1] Sızıntı Testi için Seküler Kelime Kaydı Denemesi
-    # Sarf motoru 'demokrasi' girdisinden 'demokras' kökünü çıkaracağı için test kök üzerinden yapılır.
     print("[LOG] Diachronic Koruma Testi: 'Modern' epoch kaydı deneniyor...")
     try:
         lexicon.register_word("demokras", "Base", "Sekuler_Otorite", epoch="Modern")
@@ -3788,6 +3943,27 @@ def execute_healthcheck():
     print(f"Girdi: '{sentence_8}' | AST: {ast_8}")
     print(f"Şartlı Modalite (Meşrûta-i Âmme) Tespiti: {temporal_conditions}")
     print(f"Sonuç: [{res_modal.get('status', 'BİLİNMİYOR')}] -> Vasfî Zaman Tensörü Z3'e başarıyla zerk edildi.\n")
+
+    print("--- SENARYO 10: FAZ 4 - MÜTEALLAK PRENSİBİ VE İLM-İ KELÂM TENZİH AKSİYOMU ---")
+    sentence_10a = "zeydun fi beyti"
+    tokens_10a = tokenizer.tokenize(sentence_10a)
+    morph_10a = sarf.derive_lexicon(tokens_10a)
+    ast_10a = nahiv.suggest_dependencies(tokens_10a, morph_10a)
+
+    discourse.clear_memory()
+    res_10a = orchestrator.process_statement(tokens_10a, ast_10a, AshariUsul(), morph_10a)
+    print(f"Girdi: '{sentence_10a}' | AST: {ast_10a}")
+    print(f"Sonuç: [{res_10a.get('status', 'BİLİNMİYOR')}] -> Zarf-ı Mustakar (Kainun_Virtual) başarıyla Tahayyuz (Cism) kısıtından geçti.\n")
+
+    sentence_10b = "allahu fi semai"
+    tokens_10b = tokenizer.tokenize(sentence_10b)
+    morph_10b = sarf.derive_lexicon(tokens_10b)
+    ast_10b = nahiv.suggest_dependencies(tokens_10b, morph_10b)
+
+    discourse.clear_memory()
+    res_10b = orchestrator.process_statement(tokens_10b, ast_10b, SalafiUsul(), morph_10b)
+    print(f"Girdi: '{sentence_10b}' | AST: {ast_10b}")
+    print(f"Sonuç: [{res_10b.get('status', 'BİLİNMİYOR')}] -> Vâcibu'l-Vücûd Tenzih Aksiyomu devrede. (Beklenen: NAKZ/UNSAT)\n")
 
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 
@@ -4039,6 +4215,7 @@ class AdabAlBahthEngine:
     Taftâzânî, Cürcânî ve Gelenbevî temelli Münazara Sonlu Durum Makinesi (FSM).
     Faz 5: Rekürsif Men' (İç içe İspat Yükümlülüğü), Mülâzama Counter-Model Çözümlemesi 
     ve Tahrîr-i Mahall-i Niza' Z3 Aksiyom Enjeksiyonu.
+    [FAZ 4 YAMASI]: submit_evidence içindeki Kripke uzayına SpaceSort (Mekân) boyutu eklendi.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
@@ -4126,6 +4303,7 @@ class AdabAlBahthEngine:
             w_env = z3.Const('w_env', self.solver.builder.WorldSort)
             tz_env = z3.Const('tz_env', self.solver.builder.TimeSortZati)
             tv_env = z3.Const('tv_env', self.solver.builder.TimeSortVasfi)
+            s_env = z3.Const('s_env', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
             x_env = z3.Const('x_env', self.solver.builder.EntitySort)
             
             for m_term in self.musellemat:
@@ -4134,7 +4312,8 @@ class AdabAlBahthEngine:
                     self.solver.solver.add(self.solver.builder.parse(m_term))
                 else:
                     pred = self.solver.builder.get_or_create_predicate(m_term, arity=1)
-                    self.solver.solver.add(z3.Exists([w_env, tz_env, tv_env, x_env], pred(w_env, tz_env, tv_env, x_env)))
+                    # [FAZ 4 YAMASI] S_env enjeksiyonu ile Sort mismatch engellendi
+                    self.solver.solver.add(z3.Exists([w_env, tz_env, tv_env, s_env, x_env], pred(w_env, tz_env, tv_env, s_env, x_env)))
 
             for p in premises:
                 self._auto_register_predicates(p)
@@ -4800,16 +4979,18 @@ class TestTemporalModalIsolation(unittest.TestCase):
         w_test = z3.Const('w_test', self.solver.builder.WorldSort)
         tz_test = z3.Const('tz_test', self.solver.builder.TimeSortZati)
         tv_test = z3.Const('tv_test', self.solver.builder.TimeSortVasfi)
+        s_test = z3.Const('s_test', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
         
         mumkin_pred = self.solver.builder.get_or_create_predicate("Mumkin_al_Wujud", arity=1)
         wajib_pred = self.solver.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
         x_obj = z3.Const('x_obj', self.solver.builder.EntitySort)
         
         self.solver.solver.push()
-        self.solver.solver.add(mumkin_pred(w_test, tz_test, tv_test, x_obj))
+        self.solver.solver.add(mumkin_pred(w_test, tz_test, tv_test, s_test, x_obj)) # [FAZ 4 YAMASI]
         
         y_obj = z3.Const('y_obj', self.solver.builder.EntitySort)
-        self.solver.solver.add(z3.ForAll([y_obj], z3.Not(wajib_pred(w_test, tz_test, tv_test, y_obj))))
+        s_wajib = z3.Const('s_wajib', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
+        self.solver.solver.add(z3.ForAll([y_obj, s_wajib], z3.Not(wajib_pred(w_test, tz_test, tv_test, s_wajib, y_obj)))) # [FAZ 4 YAMASI]
         
         result, _ = self.solver.check_consistency()
         self.assertFalse(result, "[MANTIK ÇÖKÜŞÜ] Kelâmî Nedensellik (Kalamic Causality) Kripke dünyasında korunamadı. Mümkün varlık, Zorunlu varlık olmadan SAT döndürdü.")
@@ -4856,17 +5037,18 @@ class TestTemporalModalIsolation(unittest.TestCase):
         w_viol = z3.Const('w_vaz', self.solver.builder.WorldSort)
         tz_viol = z3.Const('tz_vaz', self.solver.builder.TimeSortZati)
         tv_viol = z3.Const('tv_vaz', self.solver.builder.TimeSortVasfi)
+        s_viol = z3.Const('s_vaz', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
         x_viol = z3.Const('x_viol', self.solver.builder.EntitySort)
         
         # Sızıntı testini simüle etmek için Haram kuralı izole test state'ine (push block) tekrar zerk edilmelidir.
         haram_constraint = l3_breaker._build_z3_expr(
             NestedPredicate(operator="Haram_Fiqh", args=[("Zina", "x_viol", 1)]), 
-            w_viol, tz_viol, tv_viol
+            w_viol, tz_viol, tv_viol, s_viol # [FAZ 4 YAMASI]
         )
         self.solver.solver.add(haram_constraint)
         
         # Kural devredeyken vasfî zamanda eylemin gerçekleştiği iddia ediliyor.
-        self.solver.solver.add(zina_pred(w_viol, tz_viol, tv_viol, x_viol))
+        self.solver.solver.add(zina_pred(w_viol, tz_viol, tv_viol, s_viol, x_viol)) # [FAZ 4 YAMASI]
         
         final_result = self.solver.solver.check()
         self.assertEqual(final_result, z3.unsat, "[ONTOLOJİK SIZINTI] Haram (Nehiy) kılınmış eylemin Vasfî Zamanda vuku bulması Z3 motoru tarafından engellenemedi.")

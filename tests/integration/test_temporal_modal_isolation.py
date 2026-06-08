@@ -82,16 +82,18 @@ class TestTemporalModalIsolation(unittest.TestCase):
         w_test = z3.Const('w_test', self.solver.builder.WorldSort)
         tz_test = z3.Const('tz_test', self.solver.builder.TimeSortZati)
         tv_test = z3.Const('tv_test', self.solver.builder.TimeSortVasfi)
+        s_test = z3.Const('s_test', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
         
         mumkin_pred = self.solver.builder.get_or_create_predicate("Mumkin_al_Wujud", arity=1)
         wajib_pred = self.solver.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
         x_obj = z3.Const('x_obj', self.solver.builder.EntitySort)
         
         self.solver.solver.push()
-        self.solver.solver.add(mumkin_pred(w_test, tz_test, tv_test, x_obj))
+        self.solver.solver.add(mumkin_pred(w_test, tz_test, tv_test, s_test, x_obj)) # [FAZ 4 YAMASI]
         
         y_obj = z3.Const('y_obj', self.solver.builder.EntitySort)
-        self.solver.solver.add(z3.ForAll([y_obj], z3.Not(wajib_pred(w_test, tz_test, tv_test, y_obj))))
+        s_wajib = z3.Const('s_wajib', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
+        self.solver.solver.add(z3.ForAll([y_obj, s_wajib], z3.Not(wajib_pred(w_test, tz_test, tv_test, s_wajib, y_obj)))) # [FAZ 4 YAMASI]
         
         result, _ = self.solver.check_consistency()
         self.assertFalse(result, "[MANTIK ÇÖKÜŞÜ] Kelâmî Nedensellik (Kalamic Causality) Kripke dünyasında korunamadı. Mümkün varlık, Zorunlu varlık olmadan SAT döndürdü.")
@@ -138,17 +140,18 @@ class TestTemporalModalIsolation(unittest.TestCase):
         w_viol = z3.Const('w_vaz', self.solver.builder.WorldSort)
         tz_viol = z3.Const('tz_vaz', self.solver.builder.TimeSortZati)
         tv_viol = z3.Const('tv_vaz', self.solver.builder.TimeSortVasfi)
+        s_viol = z3.Const('s_vaz', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
         x_viol = z3.Const('x_viol', self.solver.builder.EntitySort)
         
         # Sızıntı testini simüle etmek için Haram kuralı izole test state'ine (push block) tekrar zerk edilmelidir.
         haram_constraint = l3_breaker._build_z3_expr(
             NestedPredicate(operator="Haram_Fiqh", args=[("Zina", "x_viol", 1)]), 
-            w_viol, tz_viol, tv_viol
+            w_viol, tz_viol, tv_viol, s_viol # [FAZ 4 YAMASI]
         )
         self.solver.solver.add(haram_constraint)
         
         # Kural devredeyken vasfî zamanda eylemin gerçekleştiği iddia ediliyor.
-        self.solver.solver.add(zina_pred(w_viol, tz_viol, tv_viol, x_viol))
+        self.solver.solver.add(zina_pred(w_viol, tz_viol, tv_viol, s_viol, x_viol)) # [FAZ 4 YAMASI]
         
         final_result = self.solver.solver.check()
         self.assertEqual(final_result, z3.unsat, "[ONTOLOJİK SIZINTI] Haram (Nehiy) kılınmış eylemin Vasfî Zamanda vuku bulması Z3 motoru tarafından engellenemedi.")

@@ -7,17 +7,23 @@ class Z3ExpressionBuilder:
     """
     Sadece belirlenmiş ontolojik ID'ler ve FOL kuralları dahilinde
     Z3 ifadelerine (z3.ExprRef) dönüşüm yapan güvenlik duvarlı ve derinlik limitli AST derleyicisi.
-    Faz 4 - Adım 1: Kripke Semantiği (Olası Dünyalar) ve Çift Katmanlı Zaman Düzlemi (Zâtî ve Vasfî) eklentisi.
+    Faz 4 - Adım 1: Kripke Semantiği (Olası Dünyalar), Çift Katmanlı Zaman Düzlemi (Zâtî ve Vasfî) 
+    ve Mekânsal Boyut (SpaceSort) eklentisi.
     """
     def __init__(self, max_depth: int = 15):
         self.EntitySort = z3.DeclareSort('Entity')
         self.WorldSort = z3.DeclareSort('World') # Kripke Olası Dünyalar Uzayı
         self.TimeSortZati = z3.DeclareSort('TimeZati')   # Şemsiyye Kiplikleri İçin Zâtî Zaman (De re)
         self.TimeSortVasfi = z3.DeclareSort('TimeVasfi') # Şemsiyye Kiplikleri İçin Vasfî Zaman (De dicto)
+        self.SpaceSort = z3.DeclareSort('Space')         # Müteallak ve Mekân Bildiren Harf-i Cerler İçin Mekânsal Uzay
+        
         self.predicates: Dict[str, z3.FuncDeclRef] = {}
         
         # Modal Erişim Bağıntısı (Accessibility Relation: R(w1, w2))
         self.Access = z3.Function('Access', self.WorldSort, self.WorldSort, z3.BoolSort())
+        
+        # Mekânsal Bağlantı (Müteallak) Fonksiyonları: Entity'nin belirli bir mekânda (Space) bulunması
+        self.LocatedIn = z3.Function('LocatedIn', self.WorldSort, self.TimeSortZati, self.TimeSortVasfi, self.SpaceSort, self.EntitySort, z3.BoolSort())
         
         self.valid_identifier_pattern = re.compile(r'^[A-Za-z0-9_]+$')
         self.max_depth = max_depth
@@ -27,18 +33,18 @@ class Z3ExpressionBuilder:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz ontolojik sembol: '{name}'. Sadece ASCII/Transliterasyon desteklenir.")
 
         if name not in self.predicates:
-            # Muvaccehât: Her yüklem artık N ariteye ek olarak "Dünya" (w), "Zâtî Zaman" (t_zati) ve "Vasfî Zaman" (t_vasfi) alır.
-            domains = [self.WorldSort, self.TimeSortZati, self.TimeSortVasfi] + [self.EntitySort] * arity
+            # Muvaccehât ve Mekân: Her yüklem artık N ariteye ek olarak "Dünya" (w), "Zâtî Zaman" (t_zati), "Vasfî Zaman" (t_vasfi) ve "Mekân" (s) alır.
+            domains = [self.WorldSort, self.TimeSortZati, self.TimeSortVasfi, self.SpaceSort] + [self.EntitySort] * arity
             self.predicates[name] = z3.Function(name, *domains, z3.BoolSort())
         else:
-            # Mevcut arite, WorldSort, TimeSortZati ve TimeSortVasfi eklendiği için +3 olarak kontrol edilir
+            # Mevcut arite, WorldSort, TimeSortZati, TimeSortVasfi ve SpaceSort eklendiği için +4 olarak kontrol edilir
             existing_arity = self.predicates[name].arity()
-            if existing_arity != arity + 3:
-                raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması.")
+            if existing_arity != arity + 4:
+                raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması. Beklenen {arity+4}, Bulunan: {existing_arity}")
                 
         return self.predicates[name]
 
-    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time_zati: z3.ExprRef = None, current_time_vasfi: z3.ExprRef = None) -> z3.ExprRef:
+    def parse(self, expr_str: str, current_world: z3.ExprRef = None, current_time_zati: z3.ExprRef = None, current_time_vasfi: z3.ExprRef = None, current_space: z3.ExprRef = None) -> z3.ExprRef:
         try:
             if current_world is None:
                 current_world = z3.Const('w_base', self.WorldSort)
@@ -46,13 +52,16 @@ class Z3ExpressionBuilder:
                 current_time_zati = z3.Const('t_zati_base', self.TimeSortZati)
             if current_time_vasfi is None:
                 current_time_vasfi = z3.Const('t_vasfi_base', self.TimeSortVasfi)
+            if current_space is None:
+                current_space = z3.Const('s_base', self.SpaceSort)
                 
             tree = ast.parse(expr_str, mode='eval').body
-            # Kök ayrıştırmada World (w) ve Time (t_zati, t_vasfi) parametreleri bound_vars içerisine gömülür
+            # Kök ayrıştırmada World (w), Time (t_zati, t_vasfi) ve Space (s) parametreleri bound_vars içerisine gömülür
             return self._eval_node(tree, {
                 '__world__': current_world, 
                 '__time_zati__': current_time_zati, 
-                '__time_vasfi__': current_time_vasfi
+                '__time_vasfi__': current_time_vasfi,
+                '__space__': current_space
             }, current_depth=0)
         except SyntaxError as e:
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz FOL/Modal ifadesi derlenemez: {e}")
@@ -64,6 +73,7 @@ class Z3ExpressionBuilder:
         current_w = bound_vars.get('__world__')
         current_t_zati = bound_vars.get('__time_zati__')
         current_t_vasfi = bound_vars.get('__time_vasfi__')
+        current_s = bound_vars.get('__space__')
 
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
@@ -84,7 +94,7 @@ class Z3ExpressionBuilder:
             elif func_name == 'Luzumi':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
-                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time_zati__', '__time_vasfi__')]
+                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time_zati__', '__time_vasfi__', '__space__')]
                 if existential_vars:
                     return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
@@ -128,8 +138,8 @@ class Z3ExpressionBuilder:
                     return z3.Exists(z3_vars, body_expr)
             
             else:
-                # N-Ary Yüklem Çağrılarına otomatik olarak World (w) ve Çift Zaman (t_zati, t_vasfi) parametreleri enjekte edilir
-                args = [current_w, current_t_zati, current_t_vasfi] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
+                # N-Ary Yüklem Çağrılarına otomatik olarak World (w), Çift Zaman (t_zati, t_vasfi) ve Space (s) parametreleri enjekte edilir
+                args = [current_w, current_t_zati, current_t_vasfi, current_s] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
                 arity = len(node.args)
                 predicate = self.get_or_create_predicate(func_name, arity)
                 return predicate(*args)

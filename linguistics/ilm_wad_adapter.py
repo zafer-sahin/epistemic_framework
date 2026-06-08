@@ -38,6 +38,7 @@ class IlmWadAdapter:
     [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 
     'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
     [FAZ 3 ENTEGRASYONU]: Amel_Inne AST bağları çözümlenerek Kripke uzayı için Epistemic_Necessity operatörüne sarmalanır.
+    [FAZ 4 ENTEGRASYONU]: Zarf-ı Mustakar ve Zarf-ı Lağv Muteallak ilişkileri LocatedIn FOL kısıtına çevrilir.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -87,14 +88,17 @@ class IlmWadAdapter:
             if 'ism' in rels and 'haber' in rels:
                 ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                 haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-                # Haber -> Mubteda (Amil -> Mamul) as per Nahiv logic where Haber is the predicate.
                 atomic_predicates.append(("Rel_Mubteda_Haber", f"{haber_id}::{ism_id}", 2))
                 atomic_predicates.append((ism_id, ism_id, 1))
                 atomic_predicates.append((haber_id, haber_id, 1))
 
         for amil, mamul, rel_type, irab in dependencies:
-            # [FAZ 3 ENTEGRASYONU] Amel_Inne_ bağları yukarıda çözüldüğü için standart döngüde es geçilir.
             if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas'] or rel_type.startswith('Amel_Inne_'):
+                continue
+                
+            # [FAZ 4 YAMASI] Kainun_Virtual (Zımnî Amil) Ontoloji Hatası Koruması
+            # Zarf-ı Mustakar'da Kainun_Virtual ontolojik ID'ye sahip değildir. Çöküş engellendi.
+            if rel_type == 'Mubteda_Haber' and amil == 'Kainun_Virtual':
                 continue
             
             # [FAZ 2.6] Harf-i Atıf (Fasıl/Vasıl) Doğrudan Kadiyye-i Şartiyye'ye (NestedPredicate) dönüştürülür
@@ -105,11 +109,30 @@ class IlmWadAdapter:
                 particle = irab.lower()
                 if particle in self.inadi_particles:
                     atomic_predicates.append(NestedPredicate(operator="Inadi_Hakikiyye", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
-                else: # wa, fa, summe, vb. Lüzumî (Birleştirici) bağlar
+                else: 
                     atomic_predicates.append(NestedPredicate(operator="Luzumi", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
                 
                 atomic_predicates.append((amil_id, amil_id, 1))
                 atomic_predicates.append((mamul_id, mamul_id, 1))
+                continue
+
+            # [FAZ 4 ENTEGRASYONU] Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi
+            if rel_type == 'Muteallak_Mekan':
+                harf_node = mamul
+                mekan_target = next((m for a, m, r, _ in dependencies if r == 'Harf_Mecrur' and a == harf_node), None)
+                if mekan_target:
+                    mekan_id = self._resolve_entity(mekan_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                    if amil == 'Kainun_Virtual':
+                        mubteda_token = next((m for a, m, r, _ in dependencies if r == 'Mubteda_Haber' and a == 'Kainun_Virtual'), None)
+                        if mubteda_token:
+                            located_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                            atomic_predicates.append(("LocatedIn", f"{located_id}::{mekan_id}", 2))
+                    else:
+                        located_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                        atomic_predicates.append(("LocatedIn", f"{located_id}::{mekan_id}", 2))
+                continue
+
+            if rel_type == 'Harf_Mecrur':
                 continue
 
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
@@ -166,14 +189,12 @@ class IlmWadAdapter:
             inkari_logic = NestedPredicate(operator="Istifham_Inkari", args=ir_predicates)
             ir_predicates = [inkari_logic]
 
-        # [FAZ 2 ENTEGRASYONU] İlm-i Ma'ânî Yönlü Kasr (Hasr) İşlemesi
         kasr_data = pragmatics_res.get("kasr_data")
         if kasr_data:
             kasr_dir = kasr_data.get("kasr_direction", "Mevsuf_to_Sifat")
             kasr_logic = NestedPredicate(operator=f"Kasr_{kasr_dir}", args=ir_predicates)
             ir_predicates = [kasr_logic]
 
-        # [FAZ 3 ENTEGRASYONU] Epistemic Necessity (Tahkik) Sarmalaması
         epistemic_modality = pragmatics_res.get("epistemic_modality")
         if epistemic_modality == "Epistemic_Necessity":
             epistemic_logic = NestedPredicate(operator="Epistemic_Necessity", args=ir_predicates)
@@ -205,7 +226,6 @@ class IlmWadAdapter:
         if morph_data and morph_data.ontologic_type == "Harf_Kasr":
             return f"GrammarNode_{search_key.capitalize()}"
 
-        # [FAZ 3 ENTEGRASYONU] Inne operatörü Leksikon hatası vermemesi için GrammarNode sarmalaması
         if morph_data and morph_data.ontologic_type == "Harf_Inne":
             return f"GrammarNode_{search_key.capitalize()}"
 

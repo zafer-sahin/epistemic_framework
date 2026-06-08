@@ -64,16 +64,17 @@ class TestVazNeviPipeline(unittest.TestCase):
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
             tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
+            s_base = z3.Const('s_base', self.l3.core_solver.builder.SpaceSort)
             
             for item in ir_matrix.predicates:
-                self.l3.core_solver.solver.add(self.l3._build_z3_expr(item, w_base, tz_base, tv_base))
+                self.l3.core_solver.solver.add(self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base))
             
             self.assertEqual(self.l3.core_solver.solver.check(), z3.sat)
 
             y_var = z3.Const('y_var', self.l3.core_solver.builder.EntitySort)
             role_action = self.l3.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
             
-            no_action_axiom = z3.ForAll([w_base, tz_base, tv_base, y_var], z3.Not(role_action(w_base, tz_base, tv_base, y_var)))
+            no_action_axiom = z3.ForAll([w_base, tz_base, tv_base, s_base, y_var], z3.Not(role_action(w_base, tz_base, tv_base, s_base, y_var)))
             self.l3.core_solver.solver.add(no_action_axiom)
 
             result = self.l3.core_solver.solver.check()

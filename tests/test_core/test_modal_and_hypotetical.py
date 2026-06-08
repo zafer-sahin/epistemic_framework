@@ -22,6 +22,7 @@ class TestModalLogicEngine(unittest.TestCase):
         tz1 = z3.Const('tz1', self.builder.TimeSortZati)
         tv1 = z3.Const('tv1', self.builder.TimeSortVasfi)
         tv2 = z3.Const('tv2', self.builder.TimeSortVasfi)
+        s1 = z3.Const('s1', self.builder.SpaceSort)
         zeyd = z3.Const('Zeyd', self.builder.EntitySort)
         
         Kaim = self.builder.get_or_create_predicate('Kaim', 1)
@@ -31,23 +32,24 @@ class TestModalLogicEngine(unittest.TestCase):
         w_var = z3.Const('w_var', self.builder.WorldSort)
         tz_var = z3.Const('tz_var', self.builder.TimeSortZati)
         tv_var = z3.Const('tv_var', self.builder.TimeSortVasfi)
+        s_var = z3.Const('s_var', self.builder.SpaceSort)
         x_var = z3.Const('x_var', self.builder.EntitySort)
         
-        disjoint_axiom = z3.ForAll([w_var, tz_var, tv_var, x_var], 
-                                   z3.Not(z3.And(Kaim(w_var, tz_var, tv_var, x_var), Celisik_Kaim(w_var, tz_var, tv_var, x_var))))
+        disjoint_axiom = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var], 
+                                   z3.Not(z3.And(Kaim(w_var, tz_var, tv_var, s_var, x_var), Celisik_Kaim(w_var, tz_var, tv_var, s_var, x_var))))
         self.solver.add(disjoint_axiom)
 
         # Senaryo 1: Farklı vasfî zamanlarda (tv1, tv2) zıt arazlar -> SAT beklenir
         self.solver.push()
-        self.solver.add(Kaim(w1, tz1, tv1, zeyd))
-        self.solver.add(Celisik_Kaim(w1, tz1, tv2, zeyd))
+        self.solver.add(Kaim(w1, tz1, tv1, s1, zeyd))
+        self.solver.add(Celisik_Kaim(w1, tz1, tv2, s1, zeyd))
         self.assertEqual(self.solver.check(), z3.sat, "Farklı vasfî zaman dilimlerinde (tv1, tv2) tutarlı olan ontolojik durum SAT dönmelidir.")
         self.solver.pop()
 
         # Senaryo 2: Aynı vasfî zamanda (tv1) zıt arazlar -> UNSAT (Çelişki) beklenir
         self.solver.push()
-        self.solver.add(Kaim(w1, tz1, tv1, zeyd))
-        self.solver.add(Celisik_Kaim(w1, tz1, tv1, zeyd))
+        self.solver.add(Kaim(w1, tz1, tv1, s1, zeyd))
+        self.solver.add(Celisik_Kaim(w1, tz1, tv1, s1, zeyd))
         self.assertEqual(self.solver.check(), z3.unsat, "Aynı vasfî zaman diliminde (tv1) zıt eylemler araz kuralları gereği anında UNSAT dönmelidir.")
         self.solver.pop()
 

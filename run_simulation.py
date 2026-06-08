@@ -46,7 +46,7 @@ def execute_healthcheck():
     # [FAZ 6] Selefî Usûlü için Bila-Kayf (Hakikat Taşınması) Sibak Tetikleyicisi
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
-    
+   
     # [FAZ 3] Eş'arî ve Mâtürîdî için Ma'nâ el-Ma'nâ (Mecaz) Fallback Tetikleyicisi
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
@@ -62,8 +62,12 @@ def execute_healthcheck():
     lexicon.register_word("drb", "Base", "Kavram_Vuran")
     lexicon.register_word("masiy", "Base", "Masi") 
     
+    # [FAZ 4] Mekân Zarfları ve Kripke Uzayı (SpaceSort) Kayıtları
+    lexicon.register_word("fi", "Base", "Harf")
+    lexicon.register_word("beyt", "Base", "Cism")
+    lexicon.register_word("sema", "Base", "Cism")
+
     # [FAZ 1] Sızıntı Testi için Seküler Kelime Kaydı Denemesi
-    # Sarf motoru 'demokrasi' girdisinden 'demokras' kökünü çıkaracağı için test kök üzerinden yapılır.
     print("[LOG] Diachronic Koruma Testi: 'Modern' epoch kaydı deneniyor...")
     try:
         lexicon.register_word("demokras", "Base", "Sekuler_Otorite", epoch="Modern")
@@ -210,6 +214,27 @@ def execute_healthcheck():
     print(f"Girdi: '{sentence_8}' | AST: {ast_8}")
     print(f"Şartlı Modalite (Meşrûta-i Âmme) Tespiti: {temporal_conditions}")
     print(f"Sonuç: [{res_modal.get('status', 'BİLİNMİYOR')}] -> Vasfî Zaman Tensörü Z3'e başarıyla zerk edildi.\n")
+
+    print("--- SENARYO 10: FAZ 4 - MÜTEALLAK PRENSİBİ VE İLM-İ KELÂM TENZİH AKSİYOMU ---")
+    sentence_10a = "zeydun fi beyti"
+    tokens_10a = tokenizer.tokenize(sentence_10a)
+    morph_10a = sarf.derive_lexicon(tokens_10a)
+    ast_10a = nahiv.suggest_dependencies(tokens_10a, morph_10a)
+
+    discourse.clear_memory()
+    res_10a = orchestrator.process_statement(tokens_10a, ast_10a, AshariUsul(), morph_10a)
+    print(f"Girdi: '{sentence_10a}' | AST: {ast_10a}")
+    print(f"Sonuç: [{res_10a.get('status', 'BİLİNMİYOR')}] -> Zarf-ı Mustakar (Kainun_Virtual) başarıyla Tahayyuz (Cism) kısıtından geçti.\n")
+
+    sentence_10b = "allahu fi semai"
+    tokens_10b = tokenizer.tokenize(sentence_10b)
+    morph_10b = sarf.derive_lexicon(tokens_10b)
+    ast_10b = nahiv.suggest_dependencies(tokens_10b, morph_10b)
+
+    discourse.clear_memory()
+    res_10b = orchestrator.process_statement(tokens_10b, ast_10b, SalafiUsul(), morph_10b)
+    print(f"Girdi: '{sentence_10b}' | AST: {ast_10b}")
+    print(f"Sonuç: [{res_10b.get('status', 'BİLİNMİYOR')}] -> Vâcibu'l-Vücûd Tenzih Aksiyomu devrede. (Beklenen: NAKZ/UNSAT)\n")
 
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 

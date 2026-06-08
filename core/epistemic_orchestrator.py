@@ -194,6 +194,7 @@ class EpistemicOrchestrator:
         [FAZ 5 ENTEGRASYONU] FSM Asenkron Mu'aradah Tetikleyicisi.
         Sâil'in 'AWAITING_ATTACK' durumunda gönderdiği karşı-argümanı (Anti-Tez) Z3 Optimize 
         motorunda Mucîb'in argümanıyla çarpıştırır. Çapraz ekol kilitlenmesi FSM durumunu günceller.
+        [FAZ 4 YAMASI]: Kripke Uzayı (SpaceSort) eksik parametresi eklendi.
         """
         
         if fsm_engine and getattr(fsm_engine, "current_state", None) != "AWAITING_ATTACK":
@@ -218,17 +219,21 @@ class EpistemicOrchestrator:
             self._verify_air_gapped_ontology(cross_injected_ir)
             
             optimizer = z3.Optimize()
+            # Performans iyileştirmesi: Modal mantık (ForAll/Exists) Optimizer'ı NP-Hard uzaya sürükler. 
+            # 2 saniyede çözemezse kilitlenmeyi reddet.
+            optimizer.set("timeout", 2000)
             
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
             tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
+            s_base = z3.Const('s_base', self.l3.core_solver.builder.SpaceSort) # [FAZ 4 YAMASI]
             
             for item in mujib_claim_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
                 optimizer.add_soft(z3_expr, weight=1)
                 
             for item in cross_injected_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base)
+                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
                 optimizer.add(z3_expr)
 
             cross_status = optimizer.check()
