@@ -46,26 +46,30 @@ def execute_healthcheck():
     # [FAZ 6] Selefî Usûlü için Bila-Kayf (Hakikat Taşınması) Sibak Tetikleyicisi
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
     lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
-   
+    
     # [FAZ 3] Eş'arî ve Mâtürîdî için Ma'nâ el-Ma'nâ (Mecaz) Fallback Tetikleyicisi
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
     lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
     lexicon.register_word("yad", "Maturidi", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
     
-    # Sistematik Ontoloji Kayıtları
+    # Sistematik Ontoloji Kayıtları (Air-Gap Uyumlu)
     lexicon.register_word("tekvin", "Maturidi", "Tekvin")
     lexicon.register_word("allah", "Base", "Wajib_al_Wujud")
     lexicon.register_word("cemad", "Base", "Cemad")
     lexicon.register_word("nam", "Base", "Nami")
-    lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
-    lexicon.register_word("drb", "Base", "Kavram_Vuran")
+    lexicon.register_word("zeyd", "Base", "Insan")
+    lexicon.register_word("drb", "Base", "Bats")
     lexicon.register_word("masiy", "Base", "Masi") 
     
-    # [FAZ 4] Mekân Zarfları ve Kripke Uzayı (SpaceSort) Kayıtları
-    lexicon.register_word("fi", "Base", "Harf")
+    # [FAZ 4/5] Mekân Zarfları, Harf-i Cerler ve Ontolojik Düğümler
+    lexicon.register_word("fi", "Base", "GrammarNode_Fi")
+    lexicon.register_word("bi", "Base", "GrammarNode_Bi")
     lexicon.register_word("beyt", "Base", "Cism")
     lexicon.register_word("sema", "Base", "Cism")
+
+    # [FAZ 6] Bedel (Apposition) İçin İsm-i İşaretler
+    lexicon.register_word("haza", "Base", "GrammarNode_Haza")
 
     # [FAZ 1] Sızıntı Testi için Seküler Kelime Kaydı Denemesi
     print("[LOG] Diachronic Koruma Testi: 'Modern' epoch kaydı deneniyor...")
@@ -125,11 +129,11 @@ def execute_healthcheck():
     res_maturidi = orchestrator.process_statement(tokens_2, ast_2, MaturidiUsul(), morph_2)
     print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
 
-    print("--- SENARYO 5: CÜRCÂNÎ MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
+    print("--- SENARYO 5: CÜRCÂN MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
     discourse.clear_memory()
     ir_mujib = SemanticStatementIR(
         active_namespace="Ashari", 
-        predicates=[("Cemad", "Cemad", 1), ("Zeyd_Entity", "Zeyd_Entity", 1), ("Rel_Mubteda_Haber", "Cemad::Zeyd_Entity", 2)], 
+        predicates=[("Cemad", "Cemad", 1), ("Insan", "Insan", 1), ("Rel_Mubteda_Haber", "Cemad::Insan", 2)], 
         is_valid_for_z3=True
     )
     sail_tokens = ["nami", "zeydun"]
@@ -152,7 +156,7 @@ def execute_healthcheck():
     res_vaz = orchestrator.process_statement(tokens_5, ast_5, AshariUsul(), morph_5)
     print(f"Girdi: '{sentence_5}' | Morfolojik Kalıp (Vezin): {morph_5['daribun'].pattern}")
     print(f"Çıkarılan Tematik Rol (Thematic Role): {morph_5['daribun'].thematic_role}")
-    print(f"Sonuç: [{res_vaz['status']}] (Role_Agent tespiti otonom Role_Action yarattı)\n")
+    print(f"Sonuç: [{res_vaz.get('status', 'BİLİNMİYOR')}] -> {res_vaz.get('message', 'Role_Agent tespiti otonom Role_Action yarattı')}\n")
 
     print("--- SENARYO 7: İLM-İ MA'ÂNÎ (MUKTAZÂ EL-HÂL VE İSTİFHAM-I İNKÂRÎ) ---")
     sentence_6a = "inna zeydun daribun"
@@ -213,9 +217,9 @@ def execute_healthcheck():
     res_modal = clean_orchestrator_8.process_statement(tokens_8, ast_8, AshariUsul(), morph_8)
     print(f"Girdi: '{sentence_8}' | AST: {ast_8}")
     print(f"Şartlı Modalite (Meşrûta-i Âmme) Tespiti: {temporal_conditions}")
-    print(f"Sonuç: [{res_modal.get('status', 'BİLİNMİYOR')}] -> Vasfî Zaman Tensörü Z3'e başarıyla zerk edildi.\n")
+    print(f"Sonuç: [{res_modal.get('status', 'BİLİNMİYOR')}] -> {res_modal.get('message')}\n")
 
-    print("--- SENARYO 10: FAZ 4 - MÜTEALLAK PRENSİBİ VE İLM-İ KELÂM TENZİH AKSİYOMU ---")
+    print("--- SENARYO 10: FAZ 4 - ZARF-I MUSTAKAR VE İLM-İ KELÂM TENZİH AKSİYOMU ---")
     sentence_10a = "zeydun fi beyti"
     tokens_10a = tokenizer.tokenize(sentence_10a)
     morph_10a = sarf.derive_lexicon(tokens_10a)
@@ -224,7 +228,7 @@ def execute_healthcheck():
     discourse.clear_memory()
     res_10a = orchestrator.process_statement(tokens_10a, ast_10a, AshariUsul(), morph_10a)
     print(f"Girdi: '{sentence_10a}' | AST: {ast_10a}")
-    print(f"Sonuç: [{res_10a.get('status', 'BİLİNMİYOR')}] -> Zarf-ı Mustakar (Kainun_Virtual) başarıyla Tahayyuz (Cism) kısıtından geçti.\n")
+    print(f"Sonuç: [{res_10a.get('status', 'BİLİNMİYOR')}] -> {res_10a.get('message')}\n")
 
     sentence_10b = "allahu fi semai"
     tokens_10b = tokenizer.tokenize(sentence_10b)
@@ -234,7 +238,31 @@ def execute_healthcheck():
     discourse.clear_memory()
     res_10b = orchestrator.process_statement(tokens_10b, ast_10b, SalafiUsul(), morph_10b)
     print(f"Girdi: '{sentence_10b}' | AST: {ast_10b}")
-    print(f"Sonuç: [{res_10b.get('status', 'BİLİNMİYOR')}] -> Vâcibu'l-Vücûd Tenzih Aksiyomu devrede. (Beklenen: NAKZ/UNSAT)\n")
+    print(f"Sonuç: [{res_10b.get('status', 'BİLİNMİYOR')}] -> {res_10b.get('message')}\n")
+
+    print("--- SENARYO 11: FAZ 5 - ŞİBH-İ FİİL VE MEKÂN-DIŞI MÜTEALLAK PRENSİBİ ---")
+    sentence_11 = "zeydun daribun bi yadin" 
+    tokens_11 = tokenizer.tokenize(sentence_11)
+    morph_11 = sarf.derive_lexicon(tokens_11)
+    ast_11 = nahiv.suggest_dependencies(tokens_11, morph_11)
+    
+    discourse.clear_memory()
+    res_11 = orchestrator.process_statement(tokens_11, ast_11, AshariUsul(), morph_11)
+    print(f"Girdi: '{sentence_11}' | AST: {ast_11}")
+    has_zarf_lagv = any(irab == 'Zarf_Lagv' for _, _, rel, irab in ast_11)
+    print(f"Sonuç: [{res_11.get('status', 'BİLİNMİYOR')}] -> Geriye Dönük Amil Taraması ile Zarf-ı Lağv Kuruldu mu? {has_zarf_lagv}. İleti: {res_11.get('message')}\n")
+
+    print("--- SENARYO 12: FAZ 6 - İSM-İ İŞARET VE BEDEL (APPOSITION) HAZIRLIĞI ---")
+    sentence_12 = "haza el_beytu"
+    tokens_12 = tokenizer.tokenize(sentence_12)
+    morph_12 = sarf.derive_lexicon(tokens_12)
+    ast_12 = nahiv.suggest_dependencies(tokens_12, morph_12)
+    
+    discourse.clear_memory()
+    res_12 = orchestrator.process_statement(tokens_12, ast_12, AshariUsul(), morph_12)
+    print(f"Girdi: '{sentence_12}' | AST: {ast_12}")
+    has_bedel = any(rel == 'Rel_Bedel' for _, _, rel, _ in ast_12)
+    print(f"Sonuç: [{res_12.get('status', 'BİLİNMİYOR')}] -> İsm-i İşaret Bedel-i Küll bağı kurdu mu? {has_bedel}. İleti: {res_12.get('message')}\n")
 
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
 

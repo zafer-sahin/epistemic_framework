@@ -14,6 +14,8 @@ class Layer3SMTCircuitBreaker:
     Zorunluluk Operatörü (□) olarak Kripke uzayına (z3.ForAll ile) işlenmiştir.
     [FAZ 4 ENTEGRASYONU]: Kripke Uzayına Mekânsal Boyut (SpaceSort) eklendi. Tüm Modal,
     Deontik ve Epistemik operatörler s_const (Space) düzleminde kısıtlanmıştır.
+    [FAZ 5 ENTEGRASYONU]: Mekân (Zarfiyye) ve Harf-i Cer müteallak bağları için Çift-Yönlü 
+    Zerk (Dual-Injection) ve Kasr (Hasr) döngülerinde Arity Mismatch koruması entegre edildi.
     """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
         self.core_solver = solver
@@ -50,9 +52,14 @@ class Layer3SMTCircuitBreaker:
                 if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
                     return amil_const == mamul_const
                 
-                # [FAZ 4 ENTEGRASYONU] LocatedIn müteallak kısıtının Z3 fonksiyonuna dönüştürülmesi
+                # [FAZ 5 ENTEGRASYONU] Çift-Yönlü Mekân/Müteallak Zerk İşlemi
                 if pred_id == "LocatedIn":
-                    return self.core_solver.builder.LocatedIn(w_const, tz_const, tv_const, s_const, amil_const)
+                    # 1. Kripke Tahayyuz Kısıtı (Abstract Space Binding)
+                    loc_constraint = self.core_solver.builder.LocatedIn(w_const, tz_const, tv_const, s_const, amil_const)
+                    # 2. Zarfiyye Ontolojik Bağıntısı (Concrete Entity-to-Entity)
+                    zarfiyye_pred = self.core_solver.builder.get_or_create_predicate("Rel_Zarfiyye", arity=2)
+                    rel_constraint = zarfiyye_pred(w_const, tz_const, tv_const, s_const, amil_const, mamul_const)
+                    return z3.And(loc_constraint, rel_constraint)
 
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
                 return predicate(w_const, tz_const, tv_const, s_const, amil_const, mamul_const)
@@ -100,7 +107,13 @@ class Layer3SMTCircuitBreaker:
                     if isinstance(a, tuple) and a[2] == 2 and '::' in a[1]:
                         pred_id, arg_id, arity = a
                         amil_str, mamul_str = arg_id.split('::', 1)
-                        predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
+                        
+                        # [FAZ 5 YAMASI] Arity Mismatch Koruması ve System Constraints Baypası
+                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                            continue
+                            
+                        target_pred_id = "Rel_Zarfiyye" if pred_id == "LocatedIn" else pred_id
+                        predicate = self.core_solver.builder.get_or_create_predicate(target_pred_id, arity=2)
                         
                         y_kasr = z3.Const('y_kasr', self.core_solver.builder.EntitySort)
                         amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
@@ -125,7 +138,13 @@ class Layer3SMTCircuitBreaker:
                     if isinstance(a, tuple) and a[2] == 2 and '::' in a[1]:
                         pred_id, arg_id, arity = a
                         amil_str, mamul_str = arg_id.split('::', 1)
-                        predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
+                        
+                        # [FAZ 5 YAMASI] Arity Mismatch Koruması ve System Constraints Baypası
+                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                            continue
+                            
+                        target_pred_id = "Rel_Zarfiyye" if pred_id == "LocatedIn" else pred_id
+                        predicate = self.core_solver.builder.get_or_create_predicate(target_pred_id, arity=2)
                         
                         x_kasr = z3.Const('x_kasr', self.core_solver.builder.EntitySort)
                         amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)

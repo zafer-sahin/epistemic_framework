@@ -39,6 +39,7 @@ class IlmWadAdapter:
     'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
     [FAZ 3 ENTEGRASYONU]: Amel_Inne AST bağları çözümlenerek Kripke uzayı için Epistemic_Necessity operatörüne sarmalanır.
     [FAZ 4 ENTEGRASYONU]: Zarf-ı Mustakar ve Zarf-ı Lağv Muteallak ilişkileri LocatedIn FOL kısıtına çevrilir.
+    [FAZ 5 ENTEGRASYONU]: Muteallak_Harf ve Muteallak_Mekan ayırımı yapılarak Şibh-i Fiil ve diğer ontolojik edat bağları Z3 matrislerine uyarlandı.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -116,20 +117,27 @@ class IlmWadAdapter:
                 atomic_predicates.append((mamul_id, mamul_id, 1))
                 continue
 
-            # [FAZ 4 ENTEGRASYONU] Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi
-            if rel_type == 'Muteallak_Mekan':
+            # [FAZ 5 ENTEGRASYONU] Harf-i Cerlerin Müteallak (Bağlantı) Prensibi: Mekân ve Ontolojik Kısıtlar
+            if rel_type in ['Muteallak_Mekan', 'Muteallak_Harf']:
                 harf_node = mamul
-                mekan_target = next((m for a, m, r, _ in dependencies if r == 'Harf_Mecrur' and a == harf_node), None)
-                if mekan_target:
-                    mekan_id = self._resolve_entity(mekan_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                mecrur_target = next((m for a, m, r, _ in dependencies if r == 'Harf_Mecrur' and a == harf_node), None)
+                if mecrur_target:
+                    mecrur_id = self._resolve_entity(mecrur_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                    
                     if amil == 'Kainun_Virtual':
                         mubteda_token = next((m for a, m, r, _ in dependencies if r == 'Mubteda_Haber' and a == 'Kainun_Virtual'), None)
                         if mubteda_token:
-                            located_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-                            atomic_predicates.append(("LocatedIn", f"{located_id}::{mekan_id}", 2))
+                            amil_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                        else:
+                            amil_id = "Kainun_Virtual"
                     else:
-                        located_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-                        atomic_predicates.append(("LocatedIn", f"{located_id}::{mekan_id}", 2))
+                        amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                    
+                    if rel_type == 'Muteallak_Mekan':
+                        atomic_predicates.append(("LocatedIn", f"{amil_id}::{mecrur_id}", 2))
+                    else:
+                        # İlsak, Gaye, İhtisas gibi mekân dışı ontolojik harf bağıntıları (Müteallak)
+                        atomic_predicates.append(("Rel_Muteallak", f"{amil_id}::{mecrur_id}", 2))
                 continue
 
             if rel_type == 'Harf_Mecrur':

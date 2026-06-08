@@ -30,12 +30,13 @@ class EpistemicOrchestrator:
         Semantik ara temsildeki (IR) hiçbir kavramın Porphyrios Ağacı 
         (Base Ontology) dışından seküler bir varlık olarak Z3 Kripke uzayına 
         sızmamasını garanti altına alan donanımsal güvenlik duvarı.
+        [FAZ 4 YAMASI]: 'LocatedIn' operatörü beyaz listeye eklendi.
         """
         allowed_system_prefixes = ("Rel_", "Role_", "GrammarNode_")
         allowed_operators = {
             "Wajib_Fiqh", "Haram_Fiqh", "Istifham_Inkari", "Kasr_Universal_Exclusion", 
             "Luzumi", "Inadi_Hakikiyye", "Inadi_Maniatul_Cem", "Inadi_Maniatul_Huluv",
-            "Kasr_Sifat_to_Mevsuf", "Kasr_Mevsuf_to_Sifat"
+            "Kasr_Sifat_to_Mevsuf", "Kasr_Mevsuf_to_Sifat", "LocatedIn"
         }
 
         def _scan_items(items):
@@ -219,8 +220,7 @@ class EpistemicOrchestrator:
             self._verify_air_gapped_ontology(cross_injected_ir)
             
             optimizer = z3.Optimize()
-            # Performans iyileştirmesi: Modal mantık (ForAll/Exists) Optimizer'ı NP-Hard uzaya sürükler. 
-            # 2 saniyede çözemezse kilitlenmeyi reddet.
+            # Performans iyileştirmesi: Modal mantık (ForAll/Exists) Optimizer'ı NP-Hard uzaya sürükler. 2 saniyede çözemezse kilitlenmeyi reddet.
             optimizer.set("timeout", 2000)
             
             w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)

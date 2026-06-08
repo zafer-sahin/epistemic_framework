@@ -12,8 +12,8 @@ class NahivDependencyCompiler:
     [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) kelimelerin cer durumundaki (fetha) i'rab istisnaları AST mantığına işlendi.
     [FAZ 2 ENTEGRASYONU]: Müstatir Zamir (Hidden Pronoun) otonom düğüm enjeksiyonu eklendi (Zero-Node Agent).
     [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Amel Statüleri) cümlenin ana amili olarak AST'ye eklendi.
-    [FAZ 4 ENTEGRASYONU]: Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi, Zarf-ı Mustakar 
-    ve Zarf-ı Lağv matrisleri ile Zero-Copula (Kainun_Virtual) AST'ye entegre edildi.
+    [FAZ 4 ENTEGRASYONU]: Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi ve Zero-Copula (Kainun_Virtual).
+    [FAZ 5 ENTEGRASYONU]: Geriye Dönük Amil Tarayıcısı (Backward-Scan). Şibh-i Fiil (Fiilimsi) ve İlsak/Gaye bildiren Harf-i Cerlerin Zarf-ı Lağv/Mustakar olarak alt-ağaçlara bağlanması.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") # Harf-i Ta'rif
@@ -22,8 +22,23 @@ class NahivDependencyCompiler:
         self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart"]
         # Kadiyye-i Şartiyye (Fasıl/Vasıl) tetikleyicileri
         self.atif_particles = ["wa", "fa", "aw", "summe", "am", "bal", "la", "lakin"]
-        # [FAZ 4 ENTEGRASYONU] Mekân/Zaman Harf-i Cer ve Zarfları
-        self.mekan_zarflari = ["fi", "ala", "min", "ila", "bi", "li", "inde", "tahta", "fawqa", "beyne", "khalf", "amam"]
+        
+        # [FAZ 5 ENTEGRASYONU] Kapsamlı Harf-i Cer ve Müteallak Ontolojisi
+        self.harf_i_cerler = {
+            "fi": "Zarfiyye",
+            "ala": "Isti_la",
+            "min": "Ibtida_i_Gaye",
+            "ila": "Intiha_i_Gaye",
+            "bi": "Ilsak_Alet",
+            "li": "Ihtisas_Mulk",
+            "inde": "Zarfiyye",
+            "tahta": "Zarfiyye",
+            "fawqa": "Zarfiyye",
+            "beyne": "Zarfiyye",
+            "khalf": "Zarfiyye",
+            "amam": "Zarfiyye",
+            "an": "Mucaveze"
+        }
 
     def _is_definite(self, token: str) -> bool:
         return token.lower().startswith(self.definite_article)
@@ -69,23 +84,41 @@ class NahivDependencyCompiler:
 
                 dependencies.append((t2, t1, 'Kasr_Modifier', kasr_direction))
                 continue
-                
+                 
             if t1.lower() in self.atif_particles:
                 if i > 0:
                     t_prev = tokens[i-1]
                     dependencies.append((t_prev, t2, 'Rel_Atif', t1.lower()))
                 continue
                 
-            # [FAZ 4 ENTEGRASYONU] Harf-i Cer, Mecrur ve Müteallak Bağıntısı
-            if t1.lower() in self.mekan_zarflari:
+            # [FAZ 5 ENTEGRASYONU] Geriye Dönük (Backward-Scan) Harf-i Cer ve Müteallak Bağıntısı
+            if t1.lower() in self.harf_i_cerler:
+                sem_type = self.harf_i_cerler[t1.lower()]
+                rel_name = 'Muteallak_Mekan' if sem_type in ["Zarfiyye", "Isti_la"] else 'Muteallak_Harf'
+
                 dependencies.append((t1, t2, 'Harf_Mecrur', 'Majrur'))
                 
-                if amil_token:
-                    # Zarf-ı Lağv: Cümlede açıkça zikredilmiş bir eyleme (amile) mekânsal kısıt ekler.
-                    dependencies.append((amil_token, t1, 'Muteallak_Mekan', 'Zarf_Lagv'))
+                # Müteallak Amili Taraması: Sadece ana fiil değil, en yakın Şibh-i Fiil de amil olabilir.
+                potential_amils = []
+                for prev_idx in range(i - 1, -1, -1):
+                    prev_token = tokens[prev_idx]
+                    prev_morph = lexicon.get(prev_token)
+                    if prev_morph:
+                        if prev_morph.ontologic_type == "Fiil":
+                            potential_amils.append(prev_token)
+                            break
+                        elif prev_morph.ontologic_type == "Ism" and prev_morph.thematic_role in ["Agent", "Patient", "Action"]:
+                            potential_amils.append(prev_token)
+                            break
+
+                closest_amil = potential_amils[0] if potential_amils else None
+
+                if closest_amil:
+                    # Zarf-ı Lağv: Açıkça zikredilmiş bir amile (fiil veya şibh-i fiil) ontolojik kısıt ekler.
+                    dependencies.append((closest_amil, t1, rel_name, 'Zarf_Lagv'))
                 else:
-                    # Zarf-ı Mustakar: Amil zikredilmemiştir. Zımnî 'Kainun' (Mevcut/Karar Kılmış) amili takdir edilir.
-                    dependencies.append(('Kainun_Virtual', t1, 'Muteallak_Mekan', 'Zarf_Mustakar'))
+                    # Zarf-ı Mustakar: Amil zikredilmemiştir. Zımnî 'Kainun' (Mevcut/Karar Kılmış) sanal amili takdir edilir.
+                    dependencies.append(('Kainun_Virtual', t1, rel_name, 'Zarf_Mustakar'))
                 continue
 
             if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
@@ -131,15 +164,15 @@ class NahivDependencyCompiler:
                     dependencies.append((inne_token, haber_inne, 'Amel_Inne_Haber', 'Marfu'))
 
         if not amil_token and not inne_token:
-            # [FAZ 4 ENTEGRASYONU] Zarf-ı Mustakar'ın Kadiyye-i Hamliyye üzerindeki otoritesi
-            has_zarf_mustakar = any(rel == 'Muteallak_Mekan' and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
+            # [FAZ 4/5 ENTEGRASYONU] Zarf-ı Mustakar'ın Kadiyye-i Hamliyye üzerindeki otoritesi
+            has_zarf_mustakar = any(rel in ['Muteallak_Mekan', 'Muteallak_Harf'] and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
             ism_tokens = [t for t in tokens if lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
             
             if has_zarf_mustakar and len(ism_tokens) >= 1:
-                mubteda = ism_tokens[0]
-                # Kainun_Virtual, varoluşsal bir yüklem (Haber) olarak Mübteda'ya bağlanır
-                dependencies.append(('Kainun_Virtual', mubteda, 'Mubteda_Haber', 'Marfu_Virtual'))
-                return dependencies
+                 mubteda = ism_tokens[0]
+                 # Kainun_Virtual, varoluşsal bir yüklem (Haber) olarak Mübteda'ya bağlanır
+                 dependencies.append(('Kainun_Virtual', mubteda, 'Mubteda_Haber', 'Marfu_Virtual'))
+                 return dependencies
 
             if len(ism_tokens) >= 2:
                 mubteda = ism_tokens[0]
@@ -188,7 +221,7 @@ class NahivDependencyCompiler:
                     else:
                         dependencies.append((amil_token, token, 'Meful', 'Mansub'))
             elif token.lower().endswith(('in', 'i')):
-                # [FAZ 4 YAMASI] Harf_Mecrur bağına girenler ana fiile Majrur olarak doğrudan bağlanamaz. Onlar Harf üzerinden Müteallak olurlar.
+                # Harf_Mecrur bağına girenler ana fiile Majrur olarak doğrudan bağlanamaz. Onlar Harf üzerinden Müteallak olurlar.
                 is_sub_tree_child = any((rel == 'Mudaf_MudafIlayh' or rel == 'Rel_Atif' or rel == 'Harf_Mecrur') and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
@@ -203,7 +236,7 @@ class NahivDependencyCompiler:
 
     def build_ast(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> nx.DiGraph:
         self.dependency_graph.clear()
-        
+         
         for token in tokens:
             self.dependency_graph.add_node(token)
             
