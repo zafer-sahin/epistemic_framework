@@ -101,7 +101,7 @@ class DiscourseRegister:
             Mucîb'in Z3 matrisindeki bir varlığa temas ederse, iki zıt hakikat 
             birbirine karışır. Base (Musellemat) uzayı hariç tutulur.
         """
-        if enforcement_namespace and resolved_mention.sealed_namespace != "Base" and enforcement_namespace != "Base":
+        if enforcement_namespace and resolved_mention.sealed_namespace != "Base":
             if resolved_mention.sealed_namespace != enforcement_namespace:
                 raise ContextPoisoningError(
                     f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "

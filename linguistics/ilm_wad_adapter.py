@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Dict, Union, Optional
+from typing import List, Tuple, Dict, Union, Optional, Any
 from pydantic import BaseModel, ConfigDict
 from linguistics.contextual_lexicon import ContextualLexicon
 from linguistics.pragmatics import MaaniSpeechActAnalyzer
@@ -41,10 +41,11 @@ class IlmWadAdapter:
     [FAZ 5 ENTEGRASYONU]: Muteallak_Harf ve Muteallak_Mekan ayırımı yapılarak Şibh-i Fiil ve diğer ontolojik edat bağları Z3 matrislerine uyarlandı.
     [FAZ 7 ENTEGRASYONU]: AST'den gelen Rabıta statüleri (Identity/Predication) IR formlarına eşlendi. Fâ-i Füzâiyye 'Luzumi_Dynamic' ve 'Dynamic_Transition' kısıtlarına çevrildi.
     
-    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel yükü (Cognitive Load) azaltmak için devasa `generate_ir` 
+    [FAZ 9 LITERATE CHUNKING]: Bilişsel yükü (Cognitive Load) azaltmak için devasa `generate_ir` 
     fonksiyonu; 'İnne İşlemleri', 'Rabıta Çözümlemesi', 'Dinamik Mantık', 'Müteallak (Uzay)' 
-    ve 'Kiplik (Pragmatics)' şeklinde 5 izole private method'a (Chunking) bölünmüştür.
-    Hiçbir mantıksal dal (if/else) eksiltilmemiştir.
+    ve 'Kiplik (Pragmatics)' şeklinde izole private method'lara (Chunking) bölünmüştür.
+    Her semantik düğümün Z3 SMT motorundaki felsefi/ontolojik kısıt karşılığı 
+    pedagojik anlatılarla (LaTeX destekli) kod bloklarına dokunmuştur (Weaving).
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -58,7 +59,12 @@ class IlmWadAdapter:
         self.current_tevil_targets: List[str] = []
 
     def _resolve_inne_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
-        """[FAZ 3 ENTEGRASYONU] Amel_Inne İlişkilerini Kadiyye-i Hamliyye'ye (Mubteda_Haber) Döndürme"""
+        """
+        .. pedagojik_anlati::
+            Amel_Inne İlişkilerini Kadiyye-i Hamliyye'ye (Mubteda_Haber) Döndürme.
+            Z3 SMT motorunda bu yapı $ \square (Ism \implies Haber) $ formunda 
+            Epistemic Necessity (Zorunluluk) düğümüne dönüştürülmek üzere hazırlanır.
+        """
         inne_relations = {}
         for amil, mamul, rel_type, irab in dependencies:
             if rel_type == 'Amel_Inne_Ism':
@@ -73,26 +79,23 @@ class IlmWadAdapter:
                 ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                 haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                 
-                # [FAZ 7 ENTEGRASYONU] İnne yapılarında Kadiyye-i Hamliyye (Predication) IR
                 atomic_predicates.append(("Rel_Rabita_Predication", f"{haber_id}::{ism_id}", 2))
                 atomic_predicates.append((ism_id, ism_id, 1))
                 atomic_predicates.append((haber_id, haber_id, 1))
 
     def _resolve_rabita_and_dynamic_logic(self, amil: str, mamul: str, rel_type: str, irab: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> bool:
         """
-        Zero-Copula (Rabıta), Fâ-i Füzâiyye (Dinamik Sıçrama) ve Harf-i Atıf yapılarını
-        FOL uzayında kilitler. True dönerse diğer işlemlere (continue) atlar.
+        .. pedagojik_anlati::
+            Rabıta düğümleri ontolojik eşdeğerliği ($x = y$) veya aidiyeti ($x \in Y$) kurar.
+            Fâ-i Füzâiyye ve Harf-i Atıf ise Kripke semantiğinde dinamik durum sıçramaları 
+            ($W_t \implies W_{t+1}$) ile mantıksal nedenselliği kilitler.
         """
-        # Rabita_Subject ve Rabita_Predicate salt AST aracıları olduğundan es geçilir, Identity/Predication işlenir
         if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
             return True
             
-        # [FAZ 4 YAMASI + FAZ 7 GÜNCELLEMESİ] Kainun_Virtual (Zımnî Amil) Ontoloji Hatası Koruması
-        # Zarf-ı Mustakar'da Kainun_Virtual ontolojik ID'ye sahip değildir. Çöküş engellendi.
         if rel_type in ['Rabita_Predication', 'Mubteda_Haber'] and amil == 'Kainun_Virtual':
             return True
 
-        # [FAZ 7 ENTEGRASYONU] Zero-Copula Ontolojik Ayrıştırması (Geriye dönük uyumluluk için Mubteda_Haber de Predication'a evriltilir)
         if rel_type in ['Rabita_Identity', 'Rabita_Predication', 'Mubteda_Haber']: 
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
@@ -106,7 +109,6 @@ class IlmWadAdapter:
             atomic_predicates.append((mamul_id, mamul_id, 1))
             return True
 
-        # [FAZ 7 ENTEGRASYONU] Fâ-i Sebebiyye ve Füzâiyye İşlemesi
         if rel_type in ['Rel_Fa_Sebebiyye', 'Rel_Fa_Fuzaiyye']:
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
@@ -116,7 +118,6 @@ class IlmWadAdapter:
             atomic_predicates.append((mamul_id, mamul_id, 1))
             return True
 
-        # [FAZ 2.6] Harf-i Atıf (Fasıl/Vasıl) Doğrudan Kadiyye-i Şartiyye'ye dönüştürülür
         if rel_type == 'Rel_Atif':
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
@@ -134,7 +135,12 @@ class IlmWadAdapter:
         return False
 
     def _resolve_mutaallak_spatial_logic(self, amil: str, mamul: str, rel_type: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> bool:
-        """[FAZ 5 ENTEGRASYONU] Harf-i Cerlerin Müteallak (Bağlantı) Prensibi: Mekân ve Ontolojik Kısıtlar"""
+        """
+        .. pedagojik_anlati::
+            Harf-i Cerlerin Müteallak (Bağlantı) Prensibi:
+            FOL uzayında $\exists x. \text{LocatedIn}(x, l, w, t)$ şeklinde çok boyutlu
+            uzay kısıtını Kripke dünyalarına uygular.
+        """
         if rel_type in ['Muteallak_Mekan', 'Muteallak_Harf']:
             harf_node = mamul
             mecrur_target = next((m for a, m, r, _ in dependencies if r == 'Harf_Mecrur' and a == harf_node), None)
@@ -154,13 +160,16 @@ class IlmWadAdapter:
                 if rel_type == 'Muteallak_Mekan':
                     atomic_predicates.append(("LocatedIn", f"{amil_id}::{mecrur_id}", 2))
                 else:
-                    # İlsak, Gaye, İhtisas gibi mekân dışı ontolojik harf bağıntıları (Müteallak)
                     atomic_predicates.append(("Rel_Muteallak", f"{amil_id}::{mecrur_id}", 2))
             return True
         return False
 
     def _wrap_with_pragmatic_modalities(self, ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], pragmatics_res: Dict[str, Any]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
-        """Deontik Mantık, İstifham-ı İnkârî, Kasr (Hasr) ve Epistemic Modality (Tahkik) üst-kapsüllerini sarar."""
+        """
+        .. pedagojik_anlati::
+            İlm-i Ma'ânî'den süzülen pragmatik verilerin (Deontik $O(P)$, Kasr $\forall x$, 
+            Epistemik $\square P$) üst-kapsül olarak IR yüklemlerine sarılması işlemidir.
+        """
         if pragmatics_res.get("type") == "Deontic":
             op = "Wajib_Fiqh" if pragmatics_res.get("operator") == "Emir" else "Haram_Fiqh"
             ir_predicates = [NestedPredicate(operator=op, args=ir_predicates)]
@@ -179,31 +188,13 @@ class IlmWadAdapter:
             
         return ir_predicates
 
-    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical") -> SemanticStatementIR:
-        if epoch != "Classical":
-            raise DiachronicViolationError("[ÇİFTE DÖNÜŞÜM İHLALİ] Semantic IR Matrisi yalnızca 'Classical' Arapça ontolojisini derleyebilir. Çeviri katmanları yasaktır.")
-            
-        if auto_lexicon is None: auto_lexicon = {}
-        if tevil_fallback_nodes is None: tevil_fallback_nodes = []
-        
-        self.current_tevil_targets = tevil_fallback_nodes
-        
-        pragmatics_res = self.pragmatics.analyze_pragmatics(tokens, dependencies)
-        if not pragmatics_res["is_valid"]:
-            return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False)
-
-        ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
-        atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
-        
-        has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
-        has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
-        has_mani_cem = any(t.lower() in self.mani_cem_particles for t in tokens)
-        has_mani_huluv = any(t.lower() in self.mani_huluv_particles for t in tokens)
-        
+    def _process_atomic_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
+        """
+        .. pedagojik_anlati::
+            Temel Amil-Mamul ilişkilerinin, yapısal roller (Agent, Patient) ile 
+            birlikte salt FOL (First-Order Logic) atomlarına ayrıştırılmasıdır.
+        """
         processed_roles = set()
-
-        self._resolve_inne_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
-
         for amil, mamul, rel_type, irab in dependencies:
             if self._resolve_rabita_and_dynamic_logic(amil, mamul, rel_type, irab, dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch):
                 continue
@@ -214,7 +205,6 @@ class IlmWadAdapter:
             if rel_type == 'Harf_Mecrur':
                 continue
 
-            # Inadi ve Luzumi edatlarının yüzeysel atomic engeli
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
                 continue
             if amil.lower() in self.inadi_particles or mamul.lower() in self.inadi_particles:
@@ -245,7 +235,12 @@ class IlmWadAdapter:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
 
-        # Şartlı ve Ayırıcı (Inadi/Luzumi) Üst Kapsülleme
+    def _apply_propositional_capsules(self, has_mani_cem: bool, has_mani_huluv: bool, has_inadi: bool, has_luzumi: bool, atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
+        """
+        .. pedagojik_anlati::
+            Kadiyye-i Şartiyye (Hipotetik Önermeler) için İnadî/Lüzumî üst kapsülleme işlemleri.
+        """
+        ir_predicates = []
         if has_mani_cem:
             ir_predicates.append(NestedPredicate(operator="Inadi_Maniatul_Cem", args=atomic_predicates))
         elif has_mani_huluv:
@@ -256,8 +251,32 @@ class IlmWadAdapter:
             ir_predicates.append(NestedPredicate(operator="Luzumi", args=atomic_predicates))
         else:
             ir_predicates.extend(atomic_predicates)
+        return ir_predicates
 
-        # Pragmatik Filtreler ve Ontolojik Kiplikler (Deontik, İstifham, Kasr, Epistemic Necessity)
+    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical") -> SemanticStatementIR:
+        if epoch != "Classical":
+            raise DiachronicViolationError("[ÇİFTE DÖNÜŞÜM İHLALİ] Semantic IR Matrisi yalnızca 'Classical' Arapça ontolojisini derleyebilir. Çeviri katmanları yasaktır.")
+            
+        if auto_lexicon is None: auto_lexicon = {}
+        if tevil_fallback_nodes is None: tevil_fallback_nodes = []
+        
+        self.current_tevil_targets = tevil_fallback_nodes
+        
+        pragmatics_res = self.pragmatics.analyze_pragmatics(tokens, dependencies)
+        if not pragmatics_res["is_valid"]:
+            return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False)
+
+        atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
+        
+        has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
+        has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
+        has_mani_cem = any(t.lower() in self.mani_cem_particles for t in tokens)
+        has_mani_huluv = any(t.lower() in self.mani_huluv_particles for t in tokens)
+        
+        self._resolve_inne_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
+        self._process_atomic_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
+        
+        ir_predicates = self._apply_propositional_capsules(has_mani_cem, has_mani_huluv, has_inadi, has_luzumi, atomic_predicates)
         ir_predicates = self._wrap_with_pragmatic_modalities(ir_predicates, pragmatics_res)
 
         unique_predicates = []
