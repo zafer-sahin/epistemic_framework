@@ -14,6 +14,7 @@ class NahivDependencyCompiler:
     [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Amel Statüleri) cümlenin ana amili olarak AST'ye eklendi.
     [FAZ 4 ENTEGRASYONU]: Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi ve Zero-Copula (Kainun_Virtual).
     [FAZ 5 ENTEGRASYONU]: Geriye Dönük Amil Tarayıcısı (Backward-Scan). Şibh-i Fiil (Fiilimsi) ve İlsak/Gaye bildiren Harf-i Cerlerin Zarf-ı Lağv/Mustakar olarak alt-ağaçlara bağlanması.
+    [FAZ 7 ENTEGRASYONU]: Rabıta (Copula) Dinamikleri ve Fâ-i Füzâiyye/Sebebiyye (Dynamic Logic) Sentaksı.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") # Harf-i Ta'rif
@@ -88,7 +89,15 @@ class NahivDependencyCompiler:
             if t1.lower() in self.atif_particles:
                 if i > 0:
                     t_prev = tokens[i-1]
-                    dependencies.append((t_prev, t2, 'Rel_Atif', t1.lower()))
+                    # [FAZ 7 ENTEGRASYONU] Fâ-i Füzâiyye ve Sebebiyye Tespiti
+                    if t1.lower() == "fa":
+                        shart_exists = any(t.lower() in ["in", "iza", "law", "amma"] for t in tokens[:i])
+                        if shart_exists:
+                            dependencies.append((t_prev, t2, 'Rel_Fa_Sebebiyye', 'Luzumi_Muttasila'))
+                        else:
+                            dependencies.append((t_prev, t2, 'Rel_Fa_Fuzaiyye', 'Dynamic_Transition'))
+                    else:
+                        dependencies.append((t_prev, t2, 'Rel_Atif', t1.lower()))
                 continue
                 
             # [FAZ 5 ENTEGRASYONU] Geriye Dönük (Backward-Scan) Harf-i Cer ve Müteallak Bağıntısı
@@ -171,7 +180,8 @@ class NahivDependencyCompiler:
             if has_zarf_mustakar and len(ism_tokens) >= 1:
                  mubteda = ism_tokens[0]
                  # Kainun_Virtual, varoluşsal bir yüklem (Haber) olarak Mübteda'ya bağlanır
-                 dependencies.append(('Kainun_Virtual', mubteda, 'Mubteda_Haber', 'Marfu_Virtual'))
+                 # [FAZ 7 ENTEGRASYONU] Zarf-ı Mustakar'da Rabıta-i Zamaniyye (Predication)
+                 dependencies.append(('Kainun_Virtual', mubteda, 'Rabita_Predication', 'Marfu_Virtual'))
                  return dependencies
 
             if len(ism_tokens) >= 2:
@@ -187,7 +197,17 @@ class NahivDependencyCompiler:
                     haber = ism_tokens[-1]
                 
                 if mubteda != haber:
-                    dependencies.append((haber, mubteda, 'Mubteda_Haber', 'Marfu'))
+                    # [FAZ 7 ENTEGRASYONU] Zero-Copula (Rabıta) Üretimi ve Ontolojik Ayrıştırma
+                    is_mubteda_marife = self._is_definite(mubteda)
+                    is_haber_marife = self._is_definite(haber)
+                    
+                    dependencies.append(('Rabita_Virtual', mubteda, 'Rabita_Subject', 'Marfu'))
+                    dependencies.append(('Rabita_Virtual', haber, 'Rabita_Predicate', 'Marfu'))
+                    
+                    if is_mubteda_marife and is_haber_marife:
+                        dependencies.append((haber, mubteda, 'Rabita_Identity', 'Marfu'))
+                    else:
+                        dependencies.append((haber, mubteda, 'Rabita_Predication', 'Marfu'))
             
             return dependencies
             

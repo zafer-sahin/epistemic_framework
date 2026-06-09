@@ -32,14 +32,14 @@ class StructuralPositingEngine:
 class IlmWadAdapter:
     """
     Doğal dil bileşenlerini (AST ve Sarf) Birinci Dereceden Mantık (FOL) matrislerine (Semantic IR) dönüştürür.
-    Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen yönlü 'Kasr_Data' verisini 'Kasr_Mevsuf_to_Sifat' 
-    veya 'Kasr_Sifat_to_Mevsuf' NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
+    Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen yönlü 'Kasr_Data' verisini 'Kasr_Mevsuf_to_Sifat' veya 'Kasr_Sifat_to_Mevsuf' NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
     Faz 2 - Adım 3.2: Harf-i Atıf (Fasıl/Vasıl) edatlarını Kadiyye-i Şartiyye (Inadi/Luzumi) düğümlerine dönüştürür.
-    [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 
-    'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
+    [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır.
+    Pivot dil sızıntısı izole edilmiştir.
     [FAZ 3 ENTEGRASYONU]: Amel_Inne AST bağları çözümlenerek Kripke uzayı için Epistemic_Necessity operatörüne sarmalanır.
     [FAZ 4 ENTEGRASYONU]: Zarf-ı Mustakar ve Zarf-ı Lağv Muteallak ilişkileri LocatedIn FOL kısıtına çevrilir.
     [FAZ 5 ENTEGRASYONU]: Muteallak_Harf ve Muteallak_Mekan ayırımı yapılarak Şibh-i Fiil ve diğer ontolojik edat bağları Z3 matrislerine uyarlandı.
+    [FAZ 7 ENTEGRASYONU]: AST'den gelen Rabıta statüleri (Identity/Predication) IR formlarına eşlendi. Fâ-i Füzâiyye 'Luzumi_Dynamic' ve 'Dynamic_Transition' kısıtlarına çevrildi.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -89,19 +89,49 @@ class IlmWadAdapter:
             if 'ism' in rels and 'haber' in rels:
                 ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                 haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-                atomic_predicates.append(("Rel_Mubteda_Haber", f"{haber_id}::{ism_id}", 2))
+                
+                # [FAZ 7 ENTEGRASYONU] İnne yapılarında Kadiyye-i Hamliyye (Predication) IR
+                atomic_predicates.append(("Rel_Rabita_Predication", f"{haber_id}::{ism_id}", 2))
                 atomic_predicates.append((ism_id, ism_id, 1))
                 atomic_predicates.append((haber_id, haber_id, 1))
 
         for amil, mamul, rel_type, irab in dependencies:
-            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas'] or rel_type.startswith('Amel_Inne_'):
+            # Rabita_Subject ve Rabita_Predicate salt AST aracıları olduğundan es geçilir, Identity/Predication işlenir
+            if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
                 continue
                 
-            # [FAZ 4 YAMASI] Kainun_Virtual (Zımnî Amil) Ontoloji Hatası Koruması
+            # [FAZ 4 YAMASI + FAZ 7 GÜNCELLEMESİ] Kainun_Virtual (Zımnî Amil) Ontoloji Hatası Koruması
             # Zarf-ı Mustakar'da Kainun_Virtual ontolojik ID'ye sahip değildir. Çöküş engellendi.
-            if rel_type == 'Mubteda_Haber' and amil == 'Kainun_Virtual':
+            if rel_type in ['Rabita_Predication', 'Mubteda_Haber'] and amil == 'Kainun_Virtual':
                 continue
-            
+
+            # [FAZ 7 ENTEGRASYONU] Zero-Copula Ontolojik Ayrıştırması
+            # Geriye dönük uyumluluk için Mubteda_Haber de Predication'a evriltilir
+            if rel_type in ['Rabita_Identity', 'Rabita_Predication', 'Mubteda_Haber']: 
+                amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                
+                if rel_type == 'Rabita_Identity':
+                    # x == y (Eşdeğerlik)
+                    atomic_predicates.append(("Rel_Rabita_Identity", f"{amil_id}::{mamul_id}", 2))
+                else:
+                    # x \in Y (Predication - Aidiyet)
+                    atomic_predicates.append(("Rel_Rabita_Predication", f"{amil_id}::{mamul_id}", 2))
+                
+                atomic_predicates.append((amil_id, amil_id, 1))
+                atomic_predicates.append((mamul_id, mamul_id, 1))
+                continue
+
+            # [FAZ 7 ENTEGRASYONU] Fâ-i Sebebiyye ve Füzâiyye İşlemesi
+            if rel_type in ['Rel_Fa_Sebebiyye', 'Rel_Fa_Fuzaiyye']:
+                amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                op = "Luzumi_Dynamic" if rel_type == 'Rel_Fa_Sebebiyye' else "Dynamic_Transition"
+                atomic_predicates.append(NestedPredicate(operator=op, args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
+                atomic_predicates.append((amil_id, amil_id, 1))
+                atomic_predicates.append((mamul_id, mamul_id, 1))
+                continue
+
             # [FAZ 2.6] Harf-i Atıf (Fasıl/Vasıl) Doğrudan Kadiyye-i Şartiyye'ye (NestedPredicate) dönüştürülür
             if rel_type == 'Rel_Atif':
                 amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
@@ -125,7 +155,7 @@ class IlmWadAdapter:
                     mecrur_id = self._resolve_entity(mecrur_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                     
                     if amil == 'Kainun_Virtual':
-                        mubteda_token = next((m for a, m, r, _ in dependencies if r == 'Mubteda_Haber' and a == 'Kainun_Virtual'), None)
+                        mubteda_token = next((m for a, m, r, _ in dependencies if r in ['Mubteda_Haber', 'Rabita_Predication'] and a == 'Kainun_Virtual'), None)
                         if mubteda_token:
                             amil_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                         else:
@@ -230,7 +260,7 @@ class IlmWadAdapter:
 
         if morph_data and morph_data.ontologic_type == "Harf_Tevkid":
             return f"GrammarNode_{search_key.capitalize()}"
-            
+
         if morph_data and morph_data.ontologic_type == "Harf_Kasr":
             return f"GrammarNode_{search_key.capitalize()}"
 

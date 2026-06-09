@@ -1,0 +1,153 @@
+import pytest
+from unittest.mock import MagicMock
+from linguistics.nahiv_ast import NahivDependencyCompiler
+from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR, NestedPredicate
+from linguistics.sarf_parser import MorphologicalAnalysis
+
+class TestFaz7Linguistics:
+    """
+    Faz 7 (Rabıta ve Fâ-i Füzâiyye Dinamikleri) Entegrasyon Testleri.
+    Bu test paketi, Kadiyye-i Hamliyye'deki Zero-Copula üretimini ve 
+    Kadiyye-i Şartiyye'deki Dinamik Mantık geçişlerini doğrular.
+    """
+    
+    @pytest.fixture
+    def setup_compilers(self):
+        nahiv = NahivDependencyCompiler()
+        
+        mock_lexicon = MagicMock()
+        mock_discourse = MagicMock()
+        mock_discourse.resolve_pronoun.return_value = None
+        
+        adapter = IlmWadAdapter(lexicon=mock_lexicon, discourse=mock_discourse)
+        
+        # Pragmatics Bypass (Doğrudan IR geçişini test etmek için)
+        adapter.pragmatics.analyze_pragmatics = MagicMock(return_value={
+            "is_valid": True,
+            "type": "Khabari",
+            "kasr_data": None,
+            "epistemic_modality": None
+        })
+        
+        # Lexicon Resolver Mock
+        adapter.lexicon.resolve_id = MagicMock(side_effect=lambda k, *args, **kwargs: f"Entity_{k.capitalize()}")
+        
+        return nahiv, adapter
+
+    def test_rabita_predication_injection(self, setup_compilers):
+        """
+        Senaryo: "zeydun kaimun" (Zeyd ayaktadır).
+        Beklenti: Marife (Zeyd) ve Nekra (Kaimun) yapısı gereği AST'de 'Rabita_Predication' oluşmalı,
+        IR matrisinde Rel_Rabita_Predication arite=2 olarak yer almalıdır.
+        """
+        nahiv, adapter = setup_compilers
+        
+        tokens = ["zeydun", "kaimun"]
+        mock_auto_lexicon = {
+            "zeydun": MorphologicalAnalysis(root="zeyd", ontologic_type="Ism", thematic_role="Agent"),
+            "kaimun": MorphologicalAnalysis(root="kaim", ontologic_type="Ism", thematic_role="State")
+        }
+        
+        # AST Üretimi
+        ast_deps = nahiv.suggest_dependencies(tokens, mock_auto_lexicon)
+        
+        # AST Doğrulama
+        has_virtual_copula = any(amil == 'Rabita_Virtual' for amil, mamul, rel, ir in ast_deps)
+        has_predication = any(rel == 'Rabita_Predication' for amil, mamul, rel, ir in ast_deps)
+        
+        assert has_virtual_copula is True, "LOGIC_FAILURE: Zero-Copula AST'ye enjekte edilemedi."
+        assert has_predication is True, "LOGIC_FAILURE: Marife-Nekra uyumsuzluğu Predication olarak algılanmadı."
+        
+        # IR Dönüşümü
+        ir_res = adapter.generate_ir(tokens, ast_deps, "Test_NS", mock_auto_lexicon)
+        
+        # IR Doğrulama
+        predication_matrix = next((p for p in ir_res.predicates if isinstance(p, tuple) and p[0] == "Rel_Rabita_Predication"), None)
+        assert predication_matrix is not None, "LOGIC_FAILURE: Rabita_Predication IR matrisine aktarılamadı."
+        assert predication_matrix[2] == 2, "LOGIC_FAILURE: Predication ilişkisinin FOL arite değeri 2 olmalıdır."
+
+    def test_rabita_identity_injection(self, setup_compilers):
+        """
+        Senaryo: "zeydun el_emiru" (Zeyd, emirdir).
+        Beklenti: Marife (Zeyd) ve Marife (el_emiru) yapısı gereği AST'de 'Rabita_Identity' oluşmalı,
+        IR matrisinde Eşdeğerlik (Identity) bağıntısı kurulmalıdır.
+        """
+        nahiv, adapter = setup_compilers
+        
+        tokens = ["zeydun", "el_emiru"]
+        mock_auto_lexicon = {
+            "zeydun": MorphologicalAnalysis(root="zeyd", ontologic_type="Ism"),
+            "el_emiru": MorphologicalAnalysis(root="emir", ontologic_type="Ism")
+        }
+        
+        # Zımni Marife (Özel isim) kuralını testte bypass etmek için manuel _is_definite override
+        original_is_definite = nahiv._is_definite
+        nahiv._is_definite = lambda t: t in ["zeydun", "el_emiru"] or original_is_definite(t)
+        
+        ast_deps = nahiv.suggest_dependencies(tokens, mock_auto_lexicon)
+        nahiv._is_definite = original_is_definite # Restore
+        
+        has_identity = any(rel == 'Rabita_Identity' for amil, mamul, rel, ir in ast_deps)
+        assert has_identity is True, "LOGIC_FAILURE: İki marife ismin Eşdeğerlik (Identity) bağı kurulamadı."
+        
+        ir_res = adapter.generate_ir(tokens, ast_deps, "Test_NS", mock_auto_lexicon)
+        identity_matrix = next((p for p in ir_res.predicates if isinstance(p, tuple) and p[0] == "Rel_Rabita_Identity"), None)
+        assert identity_matrix is not None, "LOGIC_FAILURE: Rabita_Identity FOL matrisine aktarılamadı."
+
+    def test_fa_i_sebebiyye_luzumi_dynamic(self, setup_compilers):
+        """
+        Senaryo: "in ja'a zeydun fa amrun kaimun" (Eğer Zeyd gelirse, Amr ayaktadır).
+        Beklenti: Şart edatı sonrası gelen 'fa', Rel_Fa_Sebebiyye olarak ayrıştırılmalı,
+        IR'da Kripke uzayı durum geçişini belirten Luzumi_Dynamic NestedPredicate oluşmalıdır.
+        """
+        nahiv, adapter = setup_compilers
+        
+        tokens = ["in", "ja'a", "zeydun", "fa", "amrun", "kaimun"]
+        mock_auto_lexicon = {
+            "in": MorphologicalAnalysis(root="in", ontologic_type="Harf"),
+            "ja'a": MorphologicalAnalysis(root="meciyy", ontologic_type="Fiil"),
+            "zeydun": MorphologicalAnalysis(root="zeyd", ontologic_type="Ism"),
+            "fa": MorphologicalAnalysis(root="fa", ontologic_type="Harf_Atif"),
+            "amrun": MorphologicalAnalysis(root="amr", ontologic_type="Ism"),
+            "kaimun": MorphologicalAnalysis(root="kaim", ontologic_type="Ism")
+        }
+        
+        ast_deps = nahiv.suggest_dependencies(tokens, mock_auto_lexicon)
+        
+        is_sebebiyye = any(rel == 'Rel_Fa_Sebebiyye' for amil, mamul, rel, ir in ast_deps)
+        is_flat_atif = any(rel == 'Rel_Atif' and ir == 'fa' for amil, mamul, rel, ir in ast_deps)
+        
+        assert is_sebebiyye is True, "LOGIC_FAILURE: Şart edatı bulunmasına rağmen Fa harfi Sebebiyye olarak yakalanamadı."
+        assert is_flat_atif is False, "LOGIC_FAILURE: Fa harfi Sebebiyye olması gerekirken basit Atıf olarak etiketlendi."
+        
+        ir_res = adapter.generate_ir(tokens, ast_deps, "Test_NS", mock_auto_lexicon)
+        
+        luzumi_dynamic = next((p for p in ir_res.predicates if isinstance(p, NestedPredicate) and p.operator == "Luzumi_Dynamic"), None)
+        assert luzumi_dynamic is not None, "LOGIC_FAILURE: Rel_Fa_Sebebiyye, Dinamik Mantık Lüzum operatörüne çevrilemedi."
+        
+    def test_fa_i_fuzaiyye_dynamic_transition(self, setup_compilers):
+        """
+        Senaryo: "daraba zeydun fa amrun sakitun" (Zeyd vurdu, aniden Amr sustu).
+        Beklenti: Şart edatı olmayan durumda 'fa', Rel_Fa_Fuzaiyye olarak ayrıştırılmalı,
+        IR'da ani durum geçişini belirten Dynamic_Transition NestedPredicate oluşmalıdır.
+        """
+        nahiv, adapter = setup_compilers
+        
+        tokens = ["daraba", "zeydun", "fa", "amrun", "sakitun"]
+        mock_auto_lexicon = {
+            "daraba": MorphologicalAnalysis(root="darb", ontologic_type="Fiil"),
+            "zeydun": MorphologicalAnalysis(root="zeyd", ontologic_type="Ism"),
+            "fa": MorphologicalAnalysis(root="fa", ontologic_type="Harf_Atif"),
+            "amrun": MorphologicalAnalysis(root="amr", ontologic_type="Ism"),
+            "sakitun": MorphologicalAnalysis(root="sukut", ontologic_type="Ism")
+        }
+        
+        ast_deps = nahiv.suggest_dependencies(tokens, mock_auto_lexicon)
+        
+        is_fuzaiyye = any(rel == 'Rel_Fa_Fuzaiyye' for amil, mamul, rel, ir in ast_deps)
+        assert is_fuzaiyye is True, "LOGIC_FAILURE: Şartsız bağlamda Fa harfi Füzâiyye olarak izole edilemedi."
+        
+        ir_res = adapter.generate_ir(tokens, ast_deps, "Test_NS", mock_auto_lexicon)
+        
+        dynamic_transition = next((p for p in ir_res.predicates if isinstance(p, NestedPredicate) and p.operator == "Dynamic_Transition"), None)
+        assert dynamic_transition is not None, "LOGIC_FAILURE: Rel_Fa_Fuzaiyye, Z3 State Sıçrama matrisine dönüştürülemedi."
