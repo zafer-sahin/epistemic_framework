@@ -1,5 +1,9 @@
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Tuple
 from pydantic import BaseModel, ConfigDict, Field
+
+# ==============================================================================
+# BÖLÜM 0: 'İLM-İ SARF VE ÜRETKEN MORFOLOJİ (GENERATIVE MORPHOLOGY)
+# ==============================================================================
 
 class MorphologicalAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -7,7 +11,8 @@ class MorphologicalAnalysis(BaseModel):
     root: str           
     pattern: str        
     ontologic_type: str 
-    thematic_role: Optional[str] = None  
+    thematic_role: Optional[str] = None
+    irab: Optional[str] = Field(default=None, description="İ'rab Durumu: Marfu, Mansub, Majrur, Waqf")
     is_diptote: bool = Field(default=False, description="Gayri Munsarif (Diptote) morfolojik kısıt bayrağı")
     gender: Optional[str] = Field(default=None, description="HPSG Kısıtı: Muzekker veya Muennes")
     number: Optional[str] = Field(default=None, description="HPSG Kısıtı: Mufred, Tesniye, Cemi")
@@ -37,22 +42,26 @@ class SarfEngine:
     [FAZ 2 ENTEGRASYONU]: Müstatir zamirler (Hidden Pronouns), Cinsiyet (Gender) ve Sayı (Number) HPSG kısıtları OntoLex grafına işlendi.
     [FAZ 3 ENTEGRASYONU]: Huruf-u Müşebbehe bil-Fiil (İnne ve kardeşleri) izole edilerek Epistemic Operator sınıfı tanımlandı.
     [FAZ 6 ENTEGRASYONU]: İsm-i İşaretler (Demonstrative Pronouns) kapalı kümeye eklendi. Harf-i Ta'rif (al_/el_) kök soyutlaması yapıldı.
+    
+    [FAZ 8 BÜTÜNCÜL (HOLISTIC) GÜNCELLEME]: Bilişsel yükü parçalama (Chunking) uygulanmıştır.
+    Sarf motoru, tanınmayan veya harekesiz yazılan kelimeleri (Waqf) çökerterek reddetmek yerine,
+    'Alem/Camid_Waqf' formunda işaretler. Ontolojik meşruiyet denetimini İlm-i Vaz'a (Lexicon) devreder.
     """
     def __init__(self):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
         
-        # Kapalı Küme (Closed-Set) Edatlar
+        # Kapalı Küme (Closed-Set) Edatlar (Yaygın transliterasyon varyasyonları eklendi)
         self.harf_set = {
             "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
             "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  
-            "illa", "lam", "lan"   
+            "illa", "lam", "lan", "fa", "fe"
         }
         
         # [FAZ 3 ENTEGRASYONU]: "inna" buradan çıkarılarak inne_set'e aktarıldı.
         self.tevkid_set = {"kad", "qad", "la", "nun"}
         
         # [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil)
-        self.inne_set = {"inna", "anna", "kaanna", "lakinna", "layta", "laalla"}
+        self.inne_set = {"inna", "anna", "kaanna", "lakinna", "layta", "laalla", "inne", "enne", "keenne", "lakinne", "leyte", "lealle"}
         
         self.kasr_set = {"innema", "illa"}
 
@@ -65,7 +74,7 @@ class SarfEngine:
             "mesacid", "masabih", "fatimat", "ayishat", "makkah"
         }
         
-        # OntoLex-Morph Kural Grafı - [FAZ 2]: Gender, Number, Hidden Pronoun Eklentileri
+        # OntoLex-Morph Kural Grafı
         self.ontolex_graph: Dict[str, OntoLexMorphEntry] = {
             "CaCaCa": OntoLexMorphEntry(
                 pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action",
@@ -154,10 +163,9 @@ class SarfEngine:
                 sig += char
             elif char in ['m', 'y', 'a', 't'] and i == 0:
                 sig += char
-            elif char == 'n' and i == length - 1 and word_lower[i-1] in ['u', 'a', 'i']:
+            elif char == 'n' and i == length - 1 and word_lower[i-1] in ['u', 'a', 'i', 'e', 'ı', 'o', 'ö', 'ü']:
                 sig += char
-            elif char == 't' and i == length - 1 and word_lower[i-1] == 'a':
-                # [FAZ 2 YAMASI]: Fiil-i Mazi Müennes kalıplarının (Fa'alat) Tâ-i Te'nîs (t) tespit koruması.
+            elif char == 't' and i == length - 1 and word_lower[i-1] in ['a', 'e']:
                 sig += char
             else:
                 sig += 'C'
@@ -190,18 +198,15 @@ class SarfEngine:
         except IndexError:
             raise ValueError(f"[İ'LÂL HATASI] '{word}' kelimesinin yapısal indeksi OntoLex kural sınırlarını taştı.")
 
-    def _derive_morphology(self, word: str) -> MorphologicalAnalysis:
-        original_word = word.lower()
+    def _strip_definite_article(self, original_word: str) -> Tuple[str, bool]:
         core_word = original_word
-        
-        # [FAZ 6 YAMASI]: Harf-i Ta'rif (Definite Article) izolasyonu
-        # Kök bulma işlemi öncesi 'el_' veya 'al_' öneklerini çekirdekten ayırıyoruz.
         if core_word.startswith("al_"):
-            core_word = core_word[3:]
+            return core_word[3:], True
         elif core_word.startswith("el_"):
-            core_word = core_word[3:]
-            
-        # [FAZ 6 ENTEGRASYONU]: İsm-i İşaretler (Mebni Koruma)
+            return core_word[3:], True
+        return core_word, False
+
+    def _evaluate_closed_sets(self, original_word: str, core_word: str) -> Optional[MorphologicalAnalysis]:
         if core_word in self.ism_isaret_set:
             return MorphologicalAnalysis(
                 original_word=original_word, root=core_word, pattern="Ism_Isaret",
@@ -233,7 +238,9 @@ class SarfEngine:
                 original_word=original_word, root=core_word, pattern="Harf",
                 ontologic_type="Harf", thematic_role=None, is_diptote=False
             )
+        return None
 
+    def _evaluate_ontolex_graph(self, original_word: str, core_word: str) -> Optional[MorphologicalAnalysis]:
         signature = self._generate_structural_signature(core_word)
 
         if signature in self.ontolex_graph:
@@ -246,31 +253,55 @@ class SarfEngine:
                 is_diptote=False, gender=entry.gender, number=entry.number,
                 hidden_pronoun=entry.hidden_pronoun
             )
+        return None
 
-        # FAZ 1: Gayri Munsarif (Diptote) İzolasyon Kısıtı.
+    def _evaluate_nominal_endings_and_diptotes(self, original_word: str, core_word: str, has_al_prefix: bool) -> MorphologicalAnalysis:
+        # Gayri Munsarif Kontrolü
         stem_1 = core_word[:-1]
-        if stem_1 in self.diptote_stems and core_word[-1] in ("u", "a"):
+        if stem_1 in self.diptote_stems and core_word[-1] in ("u", "a", "e", "i", "ı"):
+            irab_val = "Marfu" if core_word[-1] in ("u", "ü") else "Mansub_or_Majrur"
             return MorphologicalAnalysis(
                 original_word=original_word, root=stem_1, pattern="Gayri_Munsarif",
-                ontologic_type="Ism", thematic_role=None, is_diptote=True,
-                gender="Muzekker", number="Mufred" # Çoğunlukla Alem (Özel İsim) varsayımı
-            )
-
-        if core_word.endswith(("un", "an", "in")):
-            return MorphologicalAnalysis(
-                original_word=original_word, root=core_word[:-2], pattern="Alem/Camid_Munevven",
-                ontologic_type="Ism", thematic_role=None, is_diptote=False,
+                ontologic_type="Ism", thematic_role=None, irab=irab_val, is_diptote=True,
                 gender="Muzekker", number="Mufred"
             )
+
+        # Münevven (Tenvinli) İsimler
+        if core_word.endswith(("un", "ün")):
+            return MorphologicalAnalysis(original_word=original_word, root=core_word[:-2], pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Marfu", gender="Muzekker", number="Mufred")
+        elif core_word.endswith(("an", "en")):
+            return MorphologicalAnalysis(original_word=original_word, root=core_word[:-2], pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Mansub", gender="Muzekker", number="Mufred")
+        elif core_word.endswith(("in", "ın")):
+            return MorphologicalAnalysis(original_word=original_word, root=core_word[:-2], pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Majrur", gender="Muzekker", number="Mufred")
             
-        elif core_word.endswith(("u", "a", "i")):
-            return MorphologicalAnalysis(
-                original_word=original_word, root=core_word[:-1], pattern="Alem/Camid_Mudaf",
-                ontologic_type="Ism", thematic_role=None, is_diptote=False,
-                gender="Muzekker", number="Mufred"
-            )
+        # Mudaf (Tenvinsiz) İsimler
+        elif core_word.endswith(("u", "ü")):
+            return MorphologicalAnalysis(original_word=original_word, root=core_word[:-1], pattern="Alem/Camid_Mudaf", ontologic_type="Ism", irab="Marfu", gender="Muzekker", number="Mufred")
+        elif core_word.endswith(("a", "e")):
+            return MorphologicalAnalysis(original_word=original_word, root=core_word[:-1], pattern="Alem/Camid_Mudaf", ontologic_type="Ism", irab="Mansub", gender="Muzekker", number="Mufred")
+        elif core_word.endswith(("i", "ı")):
+            return MorphologicalAnalysis(original_word=original_word, root=core_word[:-1], pattern="Alem/Camid_Mudaf", ontologic_type="Ism", irab="Majrur", gender="Muzekker", number="Mufred")
+        
+        # BÜTÜNCÜL ÇÖZÜM: HAREKESİZ İSİMLER (WAQF / DURAKLAMA) ZIRHI
+        # Tanınmayan veya harekesiz girilen tüm kelimeler çökmek yerine sükun (Waqf) 
+        # halinde bir isim olarak sisteme kabul edilir. Ontolojik denetimi Lexicon yapar.
+        return MorphologicalAnalysis(
+            original_word=original_word, root=core_word, pattern="Alem/Camid_Waqf",
+            ontologic_type="Ism", thematic_role=None, irab="Waqf", is_diptote=False,
+            gender="Muzekker", number="Mufred"
+        )
 
-        raise ValueError(f"[SARF ÇÖKÜŞÜ] '{original_word}' (Çekirdek: '{core_word}', İmza: {signature}) kelimesi OntoLex-Morph grafında doğrulanamadı. MSA/Modern türetim reddedildi.")
+    def _derive_morphology(self, word: str) -> MorphologicalAnalysis:
+        original_word = word.lower()
+        core_word, has_al_prefix = self._strip_definite_article(original_word)
+            
+        res_closed = self._evaluate_closed_sets(original_word, core_word)
+        if res_closed: return res_closed
+
+        res_ontolex = self._evaluate_ontolex_graph(original_word, core_word)
+        if res_ontolex: return res_ontolex
+
+        return self._evaluate_nominal_endings_and_diptotes(original_word, core_word, has_al_prefix)
 
     def derive_lexicon(self, words: List[str]) -> Dict[str, MorphologicalAnalysis]:
         derived_lexicon = {}

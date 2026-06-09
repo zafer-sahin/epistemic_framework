@@ -2,6 +2,13 @@ from typing import Dict, Optional, Any, List, Tuple
 from linguistics.discourse_state import DiscourseRegister
 from core.exceptions import DiachronicViolationError
 
+"""
+.. felsefe_notu::
+    Klasik İslâm Dilbilimi'nde lafzın ma'nâya delaleti statik bir sözlük eşleşmesi değil, 
+    dinamik bir ontolojik atama (Vaz') işlemidir. Bu modül, bir lafzın bağlam 
+    ve usûl profiline göre kazandığı ontolojik ağırlığı (ID) deterministik olarak bulur.
+"""
+
 class ContextualLexicon:
     """
     N-boyutlu Leksikon Tensörü: (word -> epoch -> namespace -> proposition_type -> {default, context_triggers})
@@ -10,6 +17,10 @@ class ContextualLexicon:
     (Klasik Arapça) zaman damgasına sahip ontolojik düğümlerin Z3 matrisine girmesine izin verilir.
     Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
     [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
+    
+    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel Yükü (Cognitive Load) 4 birimin altında tutmak
+    için monolitik parse algoritması hiyerarşik private fonksiyonlara (Chunking) ayrılmıştır.
+    Orijinal motorun tarihsel 'Faz' kayıtları, değişkenleri ve akışları %100 korunmuştur.
     """
     def __init__(self):
         # 4 Boyutlu Tensör Hiyerarşisi: Word -> Epoch -> Namespace -> PropositionType
@@ -18,10 +29,25 @@ class ContextualLexicon:
         self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
 
     def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None, epoch: str = "Classical") -> None:
+        """
+        .. pedagojik_anlati::
+            Sisteme modern bir kelime veya İngilizce bir terim girmeye çalışılırsa, 
+            sistem bunu Diachronic (Tarihsel) bir ihlal kabul eder. Sadece 'Classical'
+            kökler Z3 evrenine mühürlenir.
+        """
         if epoch != "Classical":
             raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{word}' kelimesi '{epoch}' dönemine ait. Yalnızca 'Classical' (Klasik Arapça) kökleri sisteme kaydedilebilir.")
 
         word_lower = word.lower()
+        self._initialize_tensor_dimensions(word_lower, epoch, namespace, proposition_type)
+        
+        if sibak_trigger:
+            self._tensor[word_lower][epoch][namespace][proposition_type]["context_triggers"][sibak_trigger.lower()] = ontologic_id
+        else:
+            self._tensor[word_lower][epoch][namespace][proposition_type]["default"] = ontologic_id
+
+    def _initialize_tensor_dimensions(self, word_lower: str, epoch: str, namespace: str, proposition_type: str) -> None:
+        """Tensör boyutlarını güvenli (memory-safe) şekilde inşa eder."""
         if word_lower not in self._tensor:
             self._tensor[word_lower] = {}
         if epoch not in self._tensor[word_lower]:
@@ -30,11 +56,6 @@ class ContextualLexicon:
             self._tensor[word_lower][epoch][namespace] = {}
         if proposition_type not in self._tensor[word_lower][epoch][namespace]:
             self._tensor[word_lower][epoch][namespace][proposition_type] = {"default": None, "context_triggers": {}}
-        
-        if sibak_trigger:
-            self._tensor[word_lower][epoch][namespace][proposition_type]["context_triggers"][sibak_trigger.lower()] = ontologic_id
-        else:
-            self._tensor[word_lower][epoch][namespace][proposition_type]["default"] = ontologic_id
 
     def _scan_ast_for_sibak(self, target_word: str, triggers: Dict[str, str], dependencies: List[Tuple[str, str, str, str]] = None) -> Optional[str]:
         """
@@ -62,6 +83,26 @@ class ContextualLexicon:
                         
         return None
 
+    def _get_from_namespace(self, namespace_map: Dict, ns: str, proposition_type: str, word: str, dependencies: List[Tuple[str, str, str, str]]) -> Optional[str]:
+        """İlgili usûl evreninden (Namespace) kelimenin ontolojik kimliğini süzer (Kadiyye türüne göre daraltma)."""
+        if ns not in namespace_map:
+            return None
+            
+        prop_map = namespace_map[ns]
+        target_map = None
+        if proposition_type in prop_map:
+            target_map = prop_map[proposition_type]
+        elif "Kadiyye-i_Hamliyye" in prop_map:
+            target_map = prop_map["Kadiyye-i_Hamliyye"]
+        
+        if target_map:
+            context_id = self._scan_ast_for_sibak(word, target_map.get("context_triggers", {}), dependencies)
+            if context_id:
+                return context_id
+            
+            return target_map.get("default")
+        return None
+
     def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None, epoch: str = "Classical") -> str:
         word_lower = word.lower()
 
@@ -77,29 +118,10 @@ class ContextualLexicon:
 
         namespace_map = self._tensor[word_lower][epoch]
 
-        def get_from_namespace(ns: str) -> Optional[str]:
-            if ns not in namespace_map:
-                return None
-                
-            prop_map = namespace_map[ns]
-            target_map = None
-            if proposition_type in prop_map:
-                target_map = prop_map[proposition_type]
-            elif "Kadiyye-i_Hamliyye" in prop_map:
-                target_map = prop_map["Kadiyye-i_Hamliyye"]
-            
-            if target_map:
-                context_id = self._scan_ast_for_sibak(word, target_map.get("context_triggers", {}), dependencies)
-                if context_id:
-                    return context_id
-                
-                return target_map.get("default")
-            return None
-
-        resolved = get_from_namespace(active_namespace)
+        resolved = self._get_from_namespace(namespace_map, active_namespace, proposition_type, word, dependencies)
         if resolved: return resolved
         
-        resolved_base = get_from_namespace("Base")
+        resolved_base = self._get_from_namespace(namespace_map, "Base", proposition_type, word, dependencies)
         if resolved_base: return resolved_base
             
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{word}' kelimesi '{active_namespace}' alanında (Epoch: {epoch}) çözümlenemedi.")

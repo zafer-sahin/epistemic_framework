@@ -24,11 +24,15 @@ class DiscourseRegister:
     Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı.
     Faz 2 - Adım 1: Epistemik Durum (Muktazâ el-Hâl) matrisi.
     [FAZ 2 ENTEGRASYONU]: HPSG Kısıtları ile Discourse Representation Theory (DRT) Anaphora çözümlemesi.
+    
+    [FAZ 8 LITERATE PROGRAMMING & BÜTÜNCÜL ÇÖZÜM]: 
+    Fiziksel liste ayrımı (mujib_frames/sail_frames) kaldırılarak paylaşımlı DRT yığıtına geçildi.
+    Sâil ve Mucîb aynı uzayı okuyabilir, ancak 'sealed_namespace' mührü sayesinde karşı tarafın
+    ontolojik varlığına (Tahrîr-i Niza' olmadan) zamir bağlayamaz. Bağlam Zehirlenmesi kök nedenden çözülmüştür.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
-        self.mujib_frames: List[List[EntityMention]] = [[]]  
-        self.sail_frames: List[List[EntityMention]] = [[]]  
+        self.scopes: List[List[EntityMention]] = [[]]  
         self.clock: int = 0
         
         # [FAZ 2 ENTEGRASYONU]: Munfasıl/Muttasıl Zamirlerin HPSG Cinsiyet ve Sayı Matrisi
@@ -65,20 +69,15 @@ class DiscourseRegister:
         return self.epistemic_state[opponent]
 
     def push_scope(self) -> None:
-        """Z3.push() veya yeni bir diyalektik iddia açıldığında, sadece aktif aktörün alt bağlamını yaratır."""
-        if self.active_agent == "Mujib":
-            self.mujib_frames.append([])
-        else:
-            self.sail_frames.append([])
+        """Z3.push() veya yeni bir diyalektik iddia açıldığında alt bağlamı yaratır."""
+        self.scopes.append([])
 
     def pop_scope(self) -> None:
-        """Z3.pop() tetiklendiğinde veya iddia çürütüldüğünde aktif aktörün varsayımsal bağlamını imha eder."""
-        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
-        
-        if len(frames) > 1:
-            frames.pop()
+        """Z3.pop() tetiklendiğinde veya iddia çürütüldüğünde varsayımsal bağlamı imha eder."""
+        if len(self.scopes) > 1:
+            self.scopes.pop()
         else:
-            raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
+            raise RuntimeError(f"[BELLEK HATASI] Global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
 
     def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None) -> None:
         """Aktif aktörün kapsamına, aktif uzayın mührüyle (namespace) yeni bir ontolojik varlık ataması yapar."""
@@ -91,16 +90,44 @@ class DiscourseRegister:
             gender=gender,
             number=number
         )
-        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
-        frames[-1].append(mention)
+        self.scopes[-1].append(mention)
         self.clock += 1
+
+    def _verify_context_sealing(self, pronoun: str, resolved_mention: EntityMention, enforcement_namespace: Optional[str]) -> None:
+        """
+        Context Sealing (Bağlam Zehirlenmesi Koruması)
+        .. felsefe_notu::
+            Mu'aradah (Çapraz İtiraz) anında, Sâil'in cümlesindeki bir zamir, 
+            Mucîb'in Z3 matrisindeki bir varlığa temas ederse, iki zıt hakikat 
+            birbirine karışır. Base (Musellemat) uzayı hariç tutulur.
+        """
+        if enforcement_namespace and resolved_mention.sealed_namespace != "Base" and enforcement_namespace != "Base":
+            if resolved_mention.sealed_namespace != enforcement_namespace:
+                raise ContextPoisoningError(
+                    f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
+                    f"'{pronoun}' zamiri, '{enforcement_namespace}' uzayından işlem yapan {self.active_agent} tarafından, "
+                    f"'{resolved_mention.sealed_namespace}' uzayında ({resolved_mention.agent} tarafından) mühürlenmiş "
+                    f"'{resolved_mention.word}' varlığına bağlanmaya çalışıyor. Mu'aradah çapraz izolasyonu ihlal edildi."
+                )
+
+    def _check_hpsg_unification(self, resolved_mention: EntityMention, target_gender: Optional[str], target_number: Optional[str]) -> bool:
+        """
+        [FAZ 2] HPSG Kısıt Doğrulaması (Cinsiyet ve Sayı Uyumu)
+        """
+        if target_gender and resolved_mention.gender and target_gender != resolved_mention.gender:
+            return False  # Cinsiyet uyuşmazlığı, önceki adaylara bak.
+        
+        if target_number and resolved_mention.number and target_number != resolved_mention.number:
+            return False  # Sayı uyuşmazlığı, önceki adaylara bak.
+            
+        return True
 
     def resolve_pronoun(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[str]:
         """
         [FAZ 4] Aktör-Spesifik ve Uzay-Korumalı Zamir (Anafora) tespiti.
         [FAZ 2 ENTEGRASYONU] HPSG Feature Structures (Cinsiyet ve Sayı) üzerinden DRT Geriye Dönük Çözümlemesi.
-        Sadece konuşan aktörün kendi yığıtındaki (LIFO) geçmiş kabulleri (Müsellemat) taranır.
-        Eğer çapraz sorguda (Mu'aradah) bağlam zehirlenmesi saptanırsa motor durdurulur.
+        [FAZ 8 ÇÖZÜMÜ] Paylaşımlı yığıtta LIFO üzerinden tüm varlıklar taranır. Doğru HPSG uyumu 
+        bulunduğu anda _verify_context_sealing çalışır. İzolasyon kırılırsa motor durdurulur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
@@ -109,36 +136,23 @@ class DiscourseRegister:
         target_gender = self.pronouns[pronoun_lower]["gender"]
         target_number = self.pronouns[pronoun_lower]["number"]
 
-        frames = self.mujib_frames if self.active_agent == "Mujib" else self.sail_frames
-
         # Yığıt içerisinde sondan başa (LIFO) doğru ilerleyerek en yakın mantıksal uyumu (Unification) arar.
-        for frame in reversed(frames):
-            # [LOGIC FIX]: Yalnızca frame'in son elemanı değil, frame içindeki tüm aktörler sondan başa taranmalıdır.
+        for frame in reversed(self.scopes):
             for resolved_mention in reversed(frame):
                 
-                # Context Sealing (Bağlam Zehirlenmesi Koruması)
-                if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
-                    raise ContextPoisoningError(
-                        f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
-                        f"'{pronoun}' zamiri '{resolved_mention.sealed_namespace}' uzayında üretildi, "
-                        f"ancak şu an '{enforcement_namespace}' uzayına sızmaya/bağlanmaya çalışıyor. Mu'aradah çapraz izolasyonu ihlal edildi."
-                    )
-
-                # [FAZ 2] HPSG Kısıt Doğrulaması (Cinsiyet ve Sayı Uyumu)
-                if target_gender and resolved_mention.gender and target_gender != resolved_mention.gender:
-                    continue  # Cinsiyet uyuşmazlığı, önceki adaylara bak.
+                # Önce HPSG yapısal doğrulaması (Cinsiyet/Sayı uyumu) kontrol edilir
+                if self._check_hpsg_unification(resolved_mention, target_gender, target_number):
+                    
+                    # Morfolojik uyum bulunduktan sonra Ontolojik Sızıntı (Context Sealing) zırhı test edilir
+                    self._verify_context_sealing(pronoun, resolved_mention, enforcement_namespace)
+                    
+                    return resolved_mention.ontologic_id
                 
-                if target_number and resolved_mention.number and target_number != resolved_mention.number:
-                    continue  # Sayı uyuşmazlığı, önceki adaylara bak.
-               
-                return resolved_mention.ontologic_id
-                
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} geçmiş söylem belleği boş veya ontolojik kısıtlar (HPSG) uyumsuz. Referans (Antecedent) tanımsız.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için söylem belleğinde ontolojik kısıtları (HPSG) uyan bir referans (Antecedent) bulunamadı.")
         
     def clear_memory(self) -> None:
         """Mezhep (Usûl) profili değiştiğinde veya diyalektik oturum sıfırlandığında belleği donanımsal olarak temizler."""
-        self.mujib_frames = [[]]
-        self.sail_frames = [[]]
+        self.scopes = [[]]
         self.clock = 0
         self.active_agent = "Mujib"
         self.epistemic_state = {"Mujib": DenialLevel.KHALI_AL_ZIHN, "Sail": DenialLevel.KHALI_AL_ZIHN}

@@ -67,6 +67,7 @@ def execute_healthcheck():
     lexicon.register_word("bi", "Base", "GrammarNode_Bi")
     lexicon.register_word("beyt", "Base", "Cism")
     lexicon.register_word("sema", "Base", "Cism")
+    lexicon.register_word("dar", "Base", "Cism")
 
     # [FAZ 6] Bedel (Apposition) İçin İsm-i İşaretler
     lexicon.register_word("haza", "Base", "GrammarNode_Haza")
@@ -265,6 +266,35 @@ def execute_healthcheck():
     print(f"Sonuç: [{res_12.get('status', 'BİLİNMİYOR')}] -> İsm-i İşaret Bedel-i Küll bağı kurdu mu? {has_bedel}. İleti: {res_12.get('message')}\n")
 
     print("[SİSTEM] Healthcheck Tamamlandı. Sıfır Entropi Doğrulandı.")
+
+    print("--- SENARYO 13: FAZ 7 - ZERO-COPULA VE FÂ-İ SEBEBİYYE (DİNAMİK MANTIK) ---")
+    sentence_13 = "inne zeyden fi el_dar fa daraba"
+    tokens_13 = tokenizer.tokenize(sentence_13)
+    morph_13 = sarf.derive_lexicon(tokens_13)
+    ast_13 = nahiv.suggest_dependencies(tokens_13, morph_13)
+    
+    discourse.clear_memory()
+    discourse.update_epistemic_state("Sail", DenialLevel.MUNKIR) # İnne tevkidi için gerekli
+    res_13 = orchestrator.process_statement(tokens_13, ast_13, AshariUsul(), morph_13)
+    print(f"Girdi: '{sentence_13}' | AST: {ast_13}")
+    has_dynamic = any(rel == 'Rel_Fa_Fuzaiyye' or rel == 'Rel_Fa_Sebebiyye' for _, _, rel, _ in ast_13)
+    print(f"Sonuç: [{res_13.get('status', 'BİLİNMİYOR')}] -> Dinamik Zaman Sıçraması (Fa) Kuruldu mu? {has_dynamic}. İleti: {res_13.get('message')}\n")
+
+    print("--- SENARYO 14: FAZ 8 - LITERATE İZOLASYON VE BAĞLAM ZEHİRLENMESİ (CONTEXT POISONING) ---")
+    discourse.clear_memory()
+    # Mucîb kendi uzayında bir Zeyd mühürler
+    discourse.set_agent("Mujib")
+    discourse.push_scope()
+    discourse.add_mention("zeyd", "Entity_Zeyd_01", "Ashari", gender="Muzekker", number="Mufred")
+    
+    print("[LOG] Sâil, Mucîb'in 'Zeyd' varlığına 'huve' zamiri ile Maturidi uzayından sızmaya çalışıyor...")
+    try:
+        # Resolve metodunda çapraz sızıntı (Cross-Namespace) denemesi
+        discourse.resolve_pronoun("huve", enforcement_namespace="Maturidi")
+        print("[HATA] Zırh delindi, bağlam zehirlendi!")
+    except Exception as e:
+        # ContextPoisoningError yakalanmalıdır
+        print(f"[BAŞARILI] Faz 8 İzolasyon Zırhı Devrede: {e}\n")
 
 if __name__ == "__main__":
     sys.setrecursionlimit(5000)

@@ -1,6 +1,17 @@
 from typing import List, Dict, Any, Tuple
 from linguistics.discourse_state import DiscourseRegister, DenialLevel
 
+"""
+.. felsefe_notu::
+    Klasik İslâm Dilbiliminde 'İlm-i Ma'ânî (Semantik Pragmatik), kelimelerin 
+    sözlük anlamlarıyla değil, cümlenin "Muktazâ el-Hâl"e (bağlamın ve muhatabın 
+    psikolojik durumunun gerekliliğine) uygunluğuyla ilgilenir. Bu modül, 
+    Z3 SMT çözücüsüne gidecek olan Soyut Sentaks Ağaçlarını (AST) filtreleyerek,
+    mantıksal bir doğruluk/yanlışlık değeri taşımayan "İnşâî" (Emir, Soru) 
+    cümlelerini eler. Sadece hakikat iddiası taşıyan "Haberî" önermelerin 
+    mantık matrisine (Semantic IR) geçmesine izin verir.
+"""
+
 class MaaniSpeechActAnalyzer:
     """
     'İlm-i Ma'ânî Söz Edimi ve Muktazâ el-Hâl Analizörü.
@@ -11,6 +22,10 @@ class MaaniSpeechActAnalyzer:
     Faz 2 - Adım 2.6: Kasr Operatörlerinde Yön Yitimi Onarımı (Kasr-ı Sıfat ale'l-Mevsuf / Kasr-ı Mevsuf ale's-Sıfat).
     [FAZ 3 ENTEGRASYONU]: 'İnne ve Kardeşleri'nin Tevkîd gücü korunurken (Muktazâ el-Hâl), 
     Kripke uzayı için 'Epistemic_Necessity' (Tahkik/Yakîn) sinyali üretmesi sağlandı.
+    
+    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel yükü aşmamak için devasa analiz döngüsü; 
+    İstifham, Deontik, Muktazâ el-Hâl ve Kasr alt-fonksiyonlarına (private methods) parçalanmıştır.
+    Orijinal motorun tarihsel 'Faz' kayıtları ve if/else akışları %100 korunmuştur.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
@@ -21,14 +36,13 @@ class MaaniSpeechActAnalyzer:
         self.nefy_markers = {"illa", "la", "ma", "lam", "lan"}
         self.kasr_markers = {"innema", "illa"}
 
-    def analyze_pragmatics(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
-        if not tokens:
-            return {"is_valid": False, "type": "Empty"}
-        
-        first_token = tokens[0].lower()
-        has_nefy = any(t.lower() in self.nefy_markers for t in tokens)
-        
-        # 1. İstifham-ı İnkârî ve Normal Soru Kontrolü (Faz 2.4)
+    def _evaluate_istifham(self, first_token: str, has_nefy: bool) -> Dict[str, Any]:
+        """
+        1. İstifham-ı İnkârî ve Normal Soru Kontrolü (Faz 2.4)
+        .. pedagojik_anlati::
+            Eğer soru bir nefy (olumsuzluk) edatıyla geliyorsa ("Allah'tan başka ilah mı var?"),
+            bu İstifham-ı İnkârî'dir ve Z3 matrisinde varoluşsal bir redde (\\neg \\exists x) dönüşür.
+        """
         if first_token in self.inshai_markers["question"]:
             if has_nefy:
                 return {
@@ -42,13 +56,21 @@ class MaaniSpeechActAnalyzer:
                     "type": "Istifham_Hakiki", 
                     "message": "Gerçek soru cümleleri (İstifham-ı Hakikî) mantıksal değer taşımaz."
                 }
-            
-        # 2. Deontik Mantık (Emir/Nehiy)
+        return {}
+
+    def _evaluate_deontic(self, first_token: str) -> Dict[str, Any]:
+        """2. Deontik Mantık (Emir/Nehiy)"""
         if first_token in self.inshai_markers["imperative"]:
             is_prohibitive = first_token.startswith("la_")
             return {"is_valid": True, "type": "Deontic", "operator": "Nehiy" if is_prohibitive else "Emir"}
-            
-        # 3. Muktazâ el-Hâl (Bağlamsal Gereklilik) Denetimi (Faz 2.3 & FAZ 3)
+        return {}
+
+    def _evaluate_muktaza_el_hal(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
+        """
+        3. Muktazâ el-Hâl (Bağlamsal Gereklilik) Denetimi (Faz 2.3 & FAZ 3)
+        .. matematiksel_model::
+            Muhatabın entropisi (Denial Level) ile Tevkîd (Pekiştirme) katsayısı çapraz denetlenir.
+        """
         # [FAZ 3 GÜNCELLEMESİ]: 'Amel_Inne_Ism' veya 'Amel_Inne_Haber' bağımlılıkları da güçlü bir Tevkid (Pekiştirme) sayılır.
         tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier' or rel.startswith('Amel_Inne_'))
         opponent_denial_level = self.discourse.get_opponent_epistemic_state()
@@ -66,8 +88,12 @@ class MaaniSpeechActAnalyzer:
                 "type": "MAANI_VIOLATION",
                 "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez."
             }
+        return {}
 
-        # 4. İlm-i Ma'ânî: Kasr (Hasr) ve İhtisas Tespiti (Faz 2.5 & Faz 2.6 Yönlü Matris)
+    def _extract_kasr_and_ihtisas(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
+        """
+        4. İlm-i Ma'ânî: Kasr (Hasr) ve İhtisas Tespiti (Faz 2.5 & Faz 2.6 Yönlü Matris)
+        """
         kasr_data = None
         
         # A. Takdim/Te'hir İhtisası (Mefulün Faile/Fiile Takdimi)
@@ -98,6 +124,26 @@ class MaaniSpeechActAnalyzer:
                     "kasr_direction": kasr_yonu,
                     "message": f"'{edat}' edatı ile yönlü Kasr ({kasr_yonu}) tespit edildi. Evrensel dışlama (Universal Exclusion) yönlü uygulanacak."
                 }
+        
+        return kasr_data
+
+    def analyze_pragmatics(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
+        if not tokens:
+            return {"is_valid": False, "type": "Empty"}
+        
+        first_token = tokens[0].lower()
+        has_nefy = any(t.lower() in self.nefy_markers for t in tokens)
+        
+        istifham_res = self._evaluate_istifham(first_token, has_nefy)
+        if istifham_res: return istifham_res
+            
+        deontic_res = self._evaluate_deontic(first_token)
+        if deontic_res: return deontic_res
+            
+        muktaza_res = self._evaluate_muktaza_el_hal(dependencies)
+        if muktaza_res: return muktaza_res
+
+        kasr_data = self._extract_kasr_and_ihtisas(dependencies)
 
         response = {"is_valid": True, "type": "Khabari"}
         

@@ -2,6 +2,15 @@ import networkx as nx
 from typing import List, Dict, Tuple
 from linguistics.sarf_parser import MorphologicalAnalysis
 
+"""
+.. felsefe_notu::
+    Klasik İslâm gramerinde kelimeler bağımsız değildir. Her cümle, bir "Amil" 
+    (yöneten) ve "Mamul" (yönetilen) ağıdır. Bu, Aristotelesçi "Muharrik" ve 
+    "Müteharrik" felsefesinin dilbilimsel izdüşümüdür.
+    Bu modül, doğal dili Z3 SMT çözücüsünün Kripke uzayında işleyebileceği 
+    Hiyerarşik Bağımlılık Ağaçlarına (Directed Graph - AST) çevirir.
+"""
+
 class NahivDependencyCompiler:
     """
     Arapça Sentaktik Bağımlılık Ağacını (Nahiv AST) üreten parser.
@@ -15,6 +24,10 @@ class NahivDependencyCompiler:
     [FAZ 4 ENTEGRASYONU]: Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi ve Zero-Copula (Kainun_Virtual).
     [FAZ 5 ENTEGRASYONU]: Geriye Dönük Amil Tarayıcısı (Backward-Scan). Şibh-i Fiil (Fiilimsi) ve İlsak/Gaye bildiren Harf-i Cerlerin Zarf-ı Lağv/Mustakar olarak alt-ağaçlara bağlanması.
     [FAZ 7 ENTEGRASYONU]: Rabıta (Copula) Dinamikleri ve Fâ-i Füzâiyye/Sebebiyye (Dynamic Logic) Sentaksı.
+    
+    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel Yükü (Cognitive Load) 4 birimin altında tutmak
+    için monolitik parse algoritması hiyerarşik private fonksiyonlara (Chunking) ayrılmıştır.
+    Orijinal mantık ağacında hiçbir eksiltme yapılmamıştır.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") # Harf-i Ta'rif
@@ -44,9 +57,10 @@ class NahivDependencyCompiler:
     def _is_definite(self, token: str) -> bool:
         return token.lower().startswith(self.definite_article)
 
-    def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, str, str]]:
-        dependencies = []
-        
+    def _identify_primary_governors(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> Tuple[str, int, str, int]:
+        """
+        Kripke uzayının ontolojik sınırlarını çizen Ana Amilleri (Governors) tespit eder.
+        """
         amil_token = None
         amil_index = -1
         inne_token = None
@@ -61,7 +75,14 @@ class NahivDependencyCompiler:
                 elif morph.ontologic_type == "Harf_Inne":
                     inne_token = token
                     inne_index = idx
-                
+        return amil_token, amil_index, inne_token, inne_index
+
+    def _resolve_adjacent_pairs(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_index: int) -> None:
+        """
+        .. pedagojik_anlati::
+            Tevkîd, Kasr, Atıf (Dinamik Mantık) ve Müteallak (Uzay kısıtları) gibi
+            doğrusal bağlamda yan yana gelen lafızların ontolojik kilitlerini oluşturur.
+        """
         for i in range(len(tokens) - 1):
             t1 = tokens[i]
             t2 = tokens[i+1]
@@ -150,70 +171,80 @@ class NahivDependencyCompiler:
                     
             elif t1.lower() in ["in", "iza", "law", "amma"]:
                 dependencies.append((t1, t2, "Rel_Shart", "Majzum"))
+
+    def _resolve_inne_scope(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], inne_token: str, inne_index: int, amil_token: str, amil_index: int) -> None:
+        """
+        .. matematiksel_model::
+            İnne'nin amel etmesi (Government), basit bir i'rab ataması değil; Kripke uzayında 
+            önermeyi 'Zorunlu Hakikat' (Epistemic Necessity $\\square$) statüsüne mühürlemesidir.
+        """
+        if not inne_token:
+            return
+            
+        ism_tokens_after = [t for idx, t in enumerate(tokens) if idx > inne_index and lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
         
-        if inne_token:
-            ism_tokens_after = [t for idx, t in enumerate(tokens) if idx > inne_index and lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
+        if ism_tokens_after:
+            ism_inne = ism_tokens_after[0]
+            dependencies.append((inne_token, ism_inne, 'Amel_Inne_Ism', 'Mansub'))
             
-            if ism_tokens_after:
-                ism_inne = ism_tokens_after[0]
-                dependencies.append((inne_token, ism_inne, 'Amel_Inne_Ism', 'Mansub'))
-                
-                if amil_token and amil_index > inne_index:
-                    dependencies.append((inne_token, amil_token, 'Amel_Inne_Haber', 'Marfu_Mahallen'))
-                elif len(ism_tokens_after) >= 2:
-                    haber_inne = None
-                    for ism in ism_tokens_after[1:]:
-                        is_mudaf_ilayh = any(rel == 'Mudaf_MudafIlayh' and t_sub == ism for _, t_sub, rel, _ in dependencies)
-                        if not is_mudaf_ilayh:
-                            haber_inne = ism
-                            break
-                    if not haber_inne:
-                        haber_inne = ism_tokens_after[-1]
-                    
-                    dependencies.append((inne_token, haber_inne, 'Amel_Inne_Haber', 'Marfu'))
-
-        if not amil_token and not inne_token:
-            # [FAZ 4/5 ENTEGRASYONU] Zarf-ı Mustakar'ın Kadiyye-i Hamliyye üzerindeki otoritesi
-            has_zarf_mustakar = any(rel in ['Muteallak_Mekan', 'Muteallak_Harf'] and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
-            ism_tokens = [t for t in tokens if lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
-            
-            if has_zarf_mustakar and len(ism_tokens) >= 1:
-                 mubteda = ism_tokens[0]
-                 # Kainun_Virtual, varoluşsal bir yüklem (Haber) olarak Mübteda'ya bağlanır
-                 # [FAZ 7 ENTEGRASYONU] Zarf-ı Mustakar'da Rabıta-i Zamaniyye (Predication)
-                 dependencies.append(('Kainun_Virtual', mubteda, 'Rabita_Predication', 'Marfu_Virtual'))
-                 return dependencies
-
-            if len(ism_tokens) >= 2:
-                mubteda = ism_tokens[0]
-                haber = None
-                for ism in ism_tokens[1:]:
+            if amil_token and amil_index > inne_index:
+                dependencies.append((inne_token, amil_token, 'Amel_Inne_Haber', 'Marfu_Mahallen'))
+            elif len(ism_tokens_after) >= 2:
+                haber_inne = None
+                for ism in ism_tokens_after[1:]:
                     is_mudaf_ilayh = any(rel == 'Mudaf_MudafIlayh' and t_sub == ism for _, t_sub, rel, _ in dependencies)
                     if not is_mudaf_ilayh:
-                        haber = ism
+                        haber_inne = ism
                         break
+                if not haber_inne:
+                    haber_inne = ism_tokens_after[-1]
                 
-                if not haber:
-                    haber = ism_tokens[-1]
-                
-                if mubteda != haber:
-                    # [FAZ 7 ENTEGRASYONU] Zero-Copula (Rabıta) Üretimi ve Ontolojik Ayrıştırma
-                    is_mubteda_marife = self._is_definite(mubteda)
-                    is_haber_marife = self._is_definite(haber)
-                    
-                    dependencies.append(('Rabita_Virtual', mubteda, 'Rabita_Subject', 'Marfu'))
-                    dependencies.append(('Rabita_Virtual', haber, 'Rabita_Predicate', 'Marfu'))
-                    
-                    if is_mubteda_marife and is_haber_marife:
-                        dependencies.append((haber, mubteda, 'Rabita_Identity', 'Marfu'))
-                    else:
-                        dependencies.append((haber, mubteda, 'Rabita_Predication', 'Marfu'))
-            
-            return dependencies
-            
-        if not amil_token and inne_token:
-            return dependencies 
+                dependencies.append((inne_token, haber_inne, 'Amel_Inne_Haber', 'Marfu'))
 
+    def _resolve_nominal_copula(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> List[Tuple[str, str, str, str]]:
+        """
+        Rabıta (Gizli Copula) ve Kadiyye-i Hamliyye (İsim Cümlesi) Çözümlemesi.
+        """
+        # [FAZ 4/5 ENTEGRASYONU] Zarf-ı Mustakar'ın Kadiyye-i Hamliyye üzerindeki otoritesi
+        has_zarf_mustakar = any(rel in ['Muteallak_Mekan', 'Muteallak_Harf'] and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
+        ism_tokens = [t for t in tokens if lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
+        
+        if has_zarf_mustakar and len(ism_tokens) >= 1:
+             mubteda = ism_tokens[0]
+             # Kainun_Virtual, varoluşsal bir yüklem (Haber) olarak Mübteda'ya bağlanır
+             # [FAZ 7 ENTEGRASYONU] Zarf-ı Mustakar'da Rabıta-i Zamaniyye (Predication)
+             dependencies.append(('Kainun_Virtual', mubteda, 'Rabita_Predication', 'Marfu_Virtual'))
+             return dependencies
+
+        if len(ism_tokens) >= 2:
+            mubteda = ism_tokens[0]
+            haber = None
+            for ism in ism_tokens[1:]:
+                is_mudaf_ilayh = any(rel == 'Mudaf_MudafIlayh' and t_sub == ism for _, t_sub, rel, _ in dependencies)
+                if not is_mudaf_ilayh:
+                    haber = ism
+                    break
+            
+            if not haber:
+                haber = ism_tokens[-1]
+            
+            if mubteda != haber:
+                # [FAZ 7 ENTEGRASYONU] Zero-Copula (Rabıta) Üretimi ve Ontolojik Ayrıştırma
+                is_mubteda_marife = self._is_definite(mubteda)
+                is_haber_marife = self._is_definite(haber)
+                
+                dependencies.append(('Rabita_Virtual', mubteda, 'Rabita_Subject', 'Marfu'))
+                dependencies.append(('Rabita_Virtual', haber, 'Rabita_Predicate', 'Marfu'))
+                
+                if is_mubteda_marife and is_haber_marife:
+                    dependencies.append((haber, mubteda, 'Rabita_Identity', 'Marfu'))
+                else:
+                    dependencies.append((haber, mubteda, 'Rabita_Predication', 'Marfu'))
+        
+        return dependencies
+
+    def _resolve_verbal_arguments(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_token: str, amil_index: int) -> None:
+        """Fiil amiline bağlı Fail, Meful ve Müstatir (gizli) zamir argümanlarını çözümler."""
         has_explicit_fail = False
         for idx, token in enumerate(tokens):
             if token == amil_token: 
@@ -251,6 +282,22 @@ class NahivDependencyCompiler:
             hidden_pronoun = getattr(amil_morph, 'hidden_pronoun', None)
             if hidden_pronoun:
                 dependencies.append((amil_token, hidden_pronoun, 'Fail', 'Marfu_Virtual'))
+
+    def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, str, str]]:
+        dependencies = []
+        
+        amil_token, amil_index, inne_token, inne_index = self._identify_primary_governors(tokens, lexicon)
+        
+        self._resolve_adjacent_pairs(tokens, lexicon, dependencies, amil_index)
+        self._resolve_inne_scope(tokens, lexicon, dependencies, inne_token, inne_index, amil_token, amil_index)
+
+        if not amil_token and not inne_token:
+            return self._resolve_nominal_copula(tokens, lexicon, dependencies)
+            
+        if not amil_token and inne_token:
+            return dependencies 
+
+        self._resolve_verbal_arguments(tokens, lexicon, dependencies, amil_token, amil_index)
                     
         return dependencies
 
