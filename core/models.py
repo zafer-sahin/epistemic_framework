@@ -14,6 +14,12 @@ class TermModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ar: str
     ar_script: Optional[str] = None
+    
+    # [FAZ 10 ENTEGRASYONU]: OntoLex Bağlantısı
+    lexical_entry_uri: Optional[str] = Field(
+        default=None, 
+        description="W3C OntoLex: Bu terimi dışsal RDF grafındaki ontolex:LexicalEntry düğümüne bağlayan URI"
+    )
 
 class RelationalConstraint(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -49,6 +55,13 @@ class EpistemicEntity(BaseModel):
 
     ontologic_id: str
     namespace: str = "Base" 
+    
+    # [FAZ 10 ENTEGRASYONU]: OntoLex Semantik Köprüsü (Semantic Bridge)
+    concept_uri: Optional[str] = Field(
+        default=None, 
+        description="W3C OntoLex/SKOS: Dışsal RDF grafındaki semantik kavrama (skos:Concept) işaret eden URI"
+    )
+    
     terms: TermModel
     level: Optional[int] = None
     

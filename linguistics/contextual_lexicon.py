@@ -1,6 +1,44 @@
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any, List, Tuple, Protocol
 from linguistics.discourse_state import DiscourseRegister
 from core.exceptions import DiachronicViolationError
+
+class IOntoLexSemanticClient(Protocol):
+    """
+    [FAZ 10] Dışsal OntoLex Semantic Graph (Sense/Reference) Arayüzü.
+    İhtilafsız (Base) kök kelimelerin ontolojik ID'lerini RDF üzerinden sorgular.
+    """
+    def get_base_concept_id(self, word: str, epoch: str) -> Optional[str]: ...
+
+
+class LocalOntoLexSemanticClient:
+    """
+    [FAZ 10] RAM üzerinde çalışan, dışsal semantik graf simülatörü.
+    Manuel register_word yükünü sıfırlayarak temel İslâm ontolojisini (Base) otonom bağlar.
+    """
+    def __init__(self):
+        self._base_ontology_map = {
+            "allah": "Wajib_al_Wujud",
+            "cemad": "Cemad",
+            "nam": "Nami",
+            "zeyd": "Insan",
+            "drb": "Bats",
+            "masiy": "Masi",
+            "fi": "GrammarNode_Fi",
+            "bi": "GrammarNode_Bi",
+            "beyt": "Cism",
+            "sema": "Cism",
+            "dar": "Cism",
+            "haza": "GrammarNode_Haza"
+        }
+    
+    def get_base_concept_id(self, word: str, epoch: str) -> Optional[str]:
+        if epoch != "Classical":
+            return None
+        return self._base_ontology_map.get(word.lower())
+
+# ==============================================================================
+# LEKSİKON VE İLM-İ VAZ' (CONTEXTUAL LEXICON)
+# ==============================================================================
 
 """
 .. felsefe_notu::
@@ -17,16 +55,19 @@ class ContextualLexicon:
     (Klasik Arapça) zaman damgasına sahip ontolojik düğümlerin Z3 matrisine girmesine izin verilir.
     Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
     [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
+    [FAZ 10 ENTEGRASYONU]: OntoLex Fallback (Geri Dönüş) mekanizması ile otonom RDF sorgulaması entegre edildi.
     
     [FAZ 8 LITERATE PROGRAMMING]: Bilişsel Yükü (Cognitive Load) 4 birimin altında tutmak
     için monolitik parse algoritması hiyerarşik private fonksiyonlara (Chunking) ayrılmıştır.
     Orijinal motorun tarihsel 'Faz' kayıtları, değişkenleri ve akışları %100 korunmuştur.
     """
-    def __init__(self):
+    def __init__(self, semantic_client: Optional[IOntoLexSemanticClient] = None):
         # 4 Boyutlu Tensör Hiyerarşisi: Word -> Epoch -> Namespace -> PropositionType
         self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Dict[str, Any]]]]] = {}
         # İlm-i Ma'ânî Kasr (Hasr) Operatörleri
         self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
+        # Faz 10 Bağımlılık Enjeksiyonu
+        self.semantic_client = semantic_client or LocalOntoLexSemanticClient()
 
     def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None, epoch: str = "Classical") -> None:
         """
@@ -110,19 +151,26 @@ class ContextualLexicon:
         if word_lower in self.kasr_operators:
             return f"Harf_{self.kasr_operators[word_lower]}"
 
+        # Leksikon Tensör Taraması (Theological/Contextual Overrides)
+        if word_lower in self._tensor:
+            if epoch not in self._tensor[word_lower]:
+                raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{word}' kelimesi için '{epoch}' zaman damgasına sahip bir karşılık bulunamadı. Seküler/MSA sızıntısı reddedildi.")
+
+            namespace_map = self._tensor[word_lower][epoch]
+
+            resolved = self._get_from_namespace(namespace_map, active_namespace, proposition_type, word, dependencies)
+            if resolved: return resolved
+            
+            resolved_base = self._get_from_namespace(namespace_map, "Base", proposition_type, word, dependencies)
+            if resolved_base: return resolved_base
+
+        # [FAZ 10] OntoLex Semantik Graf (Fallback) Taraması
+        fallback_id = self.semantic_client.get_base_concept_id(word_lower, epoch)
+        if fallback_id:
+            return fallback_id
+
         if word_lower not in self._tensor:
-            raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' tensörde kayıtlı değil.")
-
-        if epoch not in self._tensor[word_lower]:
-            raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{word}' kelimesi için '{epoch}' zaman damgasına sahip bir karşılık bulunamadı. Seküler/MSA sızıntısı reddedildi.")
-
-        namespace_map = self._tensor[word_lower][epoch]
-
-        resolved = self._get_from_namespace(namespace_map, active_namespace, proposition_type, word, dependencies)
-        if resolved: return resolved
-        
-        resolved_base = self._get_from_namespace(namespace_map, "Base", proposition_type, word, dependencies)
-        if resolved_base: return resolved_base
+            raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' ne yerel tensörde ne de dışsal OntoLex semantik grafında kayıtlı değil.")
             
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{word}' kelimesi '{active_namespace}' alanında (Epoch: {epoch}) çözümlenemedi.")
         
