@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional, Union, Tuple, Protocol
 from pydantic import BaseModel, ConfigDict, Field
+from linguistics.contextual_lexicon import StrictAirGapValidator
+from core.exceptions import DiachronicViolationError
 
 # ==============================================================================
 # BÖLÜM 0: 'İLM-İ SARF VE ÜRETKEN MORFOLOJİ (GENERATIVE MORPHOLOGY)
@@ -17,6 +19,7 @@ class MorphologicalAnalysis(BaseModel):
     gender: Optional[str] = Field(default=None, description="HPSG Kısıtı: Muzekker veya Muennes")
     number: Optional[str] = Field(default=None, description="HPSG Kısıtı: Mufred, Tesniye, Cemi")
     hidden_pronoun: Optional[str] = Field(default=None, description="DRT Matrisi: Müstatir Zamir (Huve, Hiye vb.)")
+    provenance_locked: bool = Field(default=True, description="[FAZ 11] İstatistiksel Stemmer/NLP sızıntısını engelleyen mühür")
 
 class OntoLexRule(BaseModel):
     """OntoLex-Morph standardında kelime üretim/çekim kuralları"""
@@ -126,11 +129,15 @@ class SarfEngine:
     [FAZ 8 BÜTÜNCÜL (HOLISTIC) GÜNCELLEME]: Bilişsel yükü parçalama (Chunking) uygulanmıştır.
     Sarf motoru, tanınmayan veya harekesiz yazılan kelimeleri (Waqf) çökerterek reddetmek yerine,
     'Alem/Camid_Waqf' formunda işaretler. Ontolojik meşruiyet denetimini İlm-i Vaz'a (Lexicon) devreder.
+    
+    [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator ile istatistiksel kök buluculara (stemmer) gidiş yolları kapatılmış, i'lâl deterministik bırakılmıştır.
     """
     def __init__(self, graph_client: Optional[IOntoLexGraphClient] = None):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
         # Bağımlılık Enjeksiyonu (Dependency Injection): Eğer dışsal istemci yoksa, izole lokal grafi yükle.
         self.graph_client = graph_client or LocalOntoLexGraphClient()
+        # [FAZ 11] Motorun çalışacağı dönemi kilitler
+        StrictAirGapValidator.validate_epoch("Classical")
 
     def _generate_structural_signature(self, word: str) -> str:
         sig = ""
@@ -173,9 +180,12 @@ class SarfEngine:
                         resolved_root += word_lower[1] 
                 else:
                     raise ValueError(f"Geçersiz OntoLex-Morph kural parametresi: {pos}")
+            
+            # [FAZ 11] Türetilen kök üzerinde dışsal kütüphane sızıntı denetimi.
+            StrictAirGapValidator.validate_provenance(resolved_root)
             return resolved_root
         except IndexError:
-            raise ValueError(f"[İ'LÂL HATASI] '{word}' kelimesinin yapısal indeksi OntoLex kural sınırlarını taştı.")
+            raise ValueError(f"[İ'LÂL HATASI] '{word}' kelimesinin yapısal indeksi OntoLex kural sınırlarını taştı. Olasılıksal Stemmer kullanımı yasaktır.")
 
     def _strip_definite_article(self, original_word: str) -> Tuple[str, bool]:
         core_word = original_word

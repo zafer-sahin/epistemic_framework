@@ -14,7 +14,7 @@ from core.exceptions import DiachronicViolationError
 from linguistics.tokenizer import EpistemicTokenizer
 from linguistics.sarf_parser import SarfEngine, LocalOntoLexGraphClient
 from linguistics.nahiv_ast import NahivDependencyCompiler
-from linguistics.contextual_lexicon import ContextualLexicon, LocalOntoLexSemanticClient
+from linguistics.contextual_lexicon import ContextualLexicon, LocalOntoLexSemanticClient, StrictAirGapValidator
 from linguistics.discourse_state import DiscourseRegister, DenialLevel
 from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR
 
@@ -326,7 +326,22 @@ def execute_healthcheck():
     print(f"Otonom Semantik Çözümleme (Tensörde kayıt yok): 'drb' -> {resolved_drb} (Beklenen: Bats)")
     print("[BAŞARILI] Faz 10 OntoLex-Morph ve Semantik Graf geçişi eksiksiz doğrulandı.\n")
 
-    print("[SİSTEM] Tüm Faz 1-10 Healthcheck (Uçtan Uca) Tamamlandı. Sıfır Entropi Doğrulandı.")
+    print("--- SENARYO 17: FAZ 11 - AIR-GAPPED ONTOLOGY VE ÇİFTE DÖNÜŞÜM İZOLASYONU ---")
+    print("[LOG] Tokenizer üzerinde seküler dönem (MSA) sızıntısı deneniyor...")
+    try:
+        tokenizer.tokenize("ve-innema", epoch="MSA")
+        print("[HATA] Tokenizer Air-Gap kalkanını geçemedi!")
+    except DiachronicViolationError as e:
+        print(f"[BAŞARILI] Tokenizer İzolasyonu: {e}")
+        
+    print("[LOG] IlmWadAdapter üzerinde seküler namespace (wordnet) sızıntısı deneniyor...")
+    try:
+        adapter.generate_ir(["zeydun"], [], active_namespace="wordnet", epoch="Classical")
+        print("[HATA] Adapter Air-Gap kalkanını geçemedi!")
+    except DiachronicViolationError as e:
+        print(f"[BAŞARILI] SMT IR Çifte Dönüşüm İzolasyonu: {e}\n")
+
+    print("[SİSTEM] Tüm Faz 1-11 Healthcheck (Uçtan Uca) Tamamlandı. Sıfır Entropi Doğrulandı.")
 
 if __name__ == "__main__":
     sys.setrecursionlimit(5000)

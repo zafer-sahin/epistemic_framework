@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Tuple, Dict, Union, Optional, Any
 from pydantic import BaseModel, ConfigDict
-from linguistics.contextual_lexicon import ContextualLexicon
+from linguistics.contextual_lexicon import ContextualLexicon, StrictAirGapValidator
 from linguistics.pragmatics import MaaniSpeechActAnalyzer
 from linguistics.discourse_state import DiscourseRegister
 from linguistics.sarf_parser import MorphologicalAnalysis
@@ -19,6 +19,7 @@ class SemanticStatementIR(BaseModel):
     active_namespace: str
     predicates: List[Union[Tuple[str, str, int], NestedPredicate]] 
     is_valid_for_z3: bool
+    provenance_locked: bool = True  # [FAZ 11] Çifte Dönüşüm (Double Conversion) önleme mühürü
 
 class StructuralPositingEngine:
     """Tematik rolleri (Thematic Roles) FOL uzayında yapısal kısıtlara çevirir."""
@@ -46,6 +47,8 @@ class IlmWadAdapter:
     ve 'Kiplik (Pragmatics)' şeklinde izole private method'lara (Chunking) bölünmüştür.
     Her semantik düğümün Z3 SMT motorundaki felsefi/ontolojik kısıt karşılığı 
     pedagojik anlatılarla (LaTeX destekli) kod bloklarına dokunmuştur (Weaving).
+    
+    [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator Z3'e giden tüm düğümleri ontolojik olarak denetler.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -254,8 +257,8 @@ class IlmWadAdapter:
         return ir_predicates
 
     def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical") -> SemanticStatementIR:
-        if epoch != "Classical":
-            raise DiachronicViolationError("[ÇİFTE DÖNÜŞÜM İHLALİ] Semantic IR Matrisi yalnızca 'Classical' Arapça ontolojisini derleyebilir. Çeviri katmanları yasaktır.")
+        StrictAirGapValidator.validate_epoch(epoch)
+        StrictAirGapValidator.validate_namespace(active_namespace)
             
         if auto_lexicon is None: auto_lexicon = {}
         if tevil_fallback_nodes is None: tevil_fallback_nodes = []
@@ -264,7 +267,7 @@ class IlmWadAdapter:
         
         pragmatics_res = self.pragmatics.analyze_pragmatics(tokens, dependencies)
         if not pragmatics_res["is_valid"]:
-            return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False)
+            return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False, provenance_locked=True)
 
         atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         
@@ -287,11 +290,12 @@ class IlmWadAdapter:
                 seen.add(frozen_item)
                 unique_predicates.append(item)
 
-        return SemanticStatementIR(active_namespace=active_namespace, predicates=unique_predicates, is_valid_for_z3=True)
+        return SemanticStatementIR(active_namespace=active_namespace, predicates=unique_predicates, is_valid_for_z3=True, provenance_locked=True)
         
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str) -> str:
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
+            StrictAirGapValidator.validate_provenance(pronoun_res)
             return pronoun_res
             
         search_key = word
@@ -318,6 +322,8 @@ class IlmWadAdapter:
         else:
             ontologic_id = base_ontologic_id
         
+        StrictAirGapValidator.validate_provenance(ontologic_id)
+
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
             self.discourse.add_mention(word, ontologic_id, active_namespace)
             

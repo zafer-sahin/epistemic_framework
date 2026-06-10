@@ -1,5 +1,5 @@
-import re
 from typing import List
+from linguistics.contextual_lexicon import StrictAirGapValidator
 
 class EpistemicTokenizer:
     """
@@ -9,6 +9,11 @@ class EpistemicTokenizer:
     Faz 2 - İlm-i Ma'ânî: Kasr edatlarının (İnnemâ, İllâ) bitişik formlardan korunması.
     'wa-', 'fa-', 'bi-', 'li-', 'ka-', 'la-' gibi ön ekleri (Prefixes) gövdeden
     ayırarak Sarf motorunun yapısal imza (C-V) algoritmasını korur.
+    
+    [FAZ 11 ENTEGRASYONU]: İstatistiksel/Regex tabanlı ayıklama (re modülü) 
+    donanımsal olarak yasaklanmış; yerine karakter tabanlı cebirsel dizi 
+    (algebraic sequence traversal) mantığı getirilmiştir. Air-Gapped izolasyon 
+    gereği, metin parçalama işlemi deterministik sınırlarla mühürlenmiştir.
     """
     def __init__(self):
         # Bitişik yazılan edat ve bağlaçlar (Harf-i Cer, Atıf harfleri ve Lam-ı Tevkîd)
@@ -16,12 +21,36 @@ class EpistemicTokenizer:
         # Kasr edatları yapısal olarak bölünmemelidir.
         self.protected_particles = ['innema', 'illa']
         
-    def tokenize(self, sentence: str) -> List[str]:
+    def _algebraic_extract_tokens(self, sentence: str) -> List[str]:
+        """
+        Regex (re.findall) yerine, cebirsel karakter taraması (State Machine).
+        Olasılıksal sınır kaymalarını engeller ve deterministik parçalama sağlar.
+        """
+        tokens = []
+        current_token = []
+        # Klasik transliterasyon harfleri (i'rab ve uzatma şapkaları dahil)
+        allowed_chars = set("abcdefghijklmnopqrstuvwxyzâêîôûıöüçşğ_'-")
+        
+        for char in sentence.lower():
+            if char in allowed_chars:
+                current_token.append(char)
+            else:
+                if current_token:
+                    tokens.append("".join(current_token))
+                    current_token = []
+        if current_token:
+            tokens.append("".join(current_token))
+        return tokens
+        
+    def tokenize(self, sentence: str, epoch: str = "Classical") -> List[str]:
+        # [FAZ 11] Tokenizasyon katmanında da tarihsel (epoch) izolasyon doğrulaması
+        StrictAirGapValidator.validate_epoch(epoch)
+        
         if not sentence:
             return []
             
-        # 1. Noktalama işaretlerini ayıkla ve boşluklara göre böl
-        raw_tokens = re.findall(r'\b\w+\b', sentence.lower())
+        # 1. Noktalama işaretlerini ayıkla ve cebirsel diziye göre böl
+        raw_tokens = self._algebraic_extract_tokens(sentence)
         
         normalized_tokens = []
         for token in raw_tokens:

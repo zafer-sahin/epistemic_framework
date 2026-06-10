@@ -2,6 +2,32 @@ from typing import Dict, Optional, Any, List, Tuple, Protocol
 from linguistics.discourse_state import DiscourseRegister
 from core.exceptions import DiachronicViolationError
 
+class StrictAirGapValidator:
+    """
+    [FAZ 11] Air-Gapped Ontology Validator
+    Klasik İslâm dilbilimi (İlm-i Vaz') ile seküler/istatistiksel NLP ontolojileri 
+    arasındaki "Çifte Dönüşüm" (Double Conversion) sızıntılarını donanımsal olarak engeller.
+    """
+    SECULAR_NAMESPACES = {"wordnet", "nltk", "spacy", "msa", "modern", "english", "secular_nlp", "babelnet"}
+    SECULAR_ID_SIGNATURES = {"wn:", "synset:", "lemma:", "en_"}
+
+    @staticmethod
+    def validate_epoch(epoch: str) -> None:
+        if epoch != "Classical":
+            raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{epoch}' dönemi reddedildi. Z3 matrisi yalnızca 'Classical' ontolojileri işleyebilir.")
+
+    @staticmethod
+    def validate_namespace(namespace: str) -> None:
+        if namespace.lower() in StrictAirGapValidator.SECULAR_NAMESPACES:
+            raise DiachronicViolationError(f"[ÇİFTE DÖNÜŞÜM İHLALİ] '{namespace}' ontolojisi tespit edildi. Sistem istatistiksel NLP kütüphanelerinden yalıtılmıştır (Air-Gapped).")
+            
+    @staticmethod
+    def validate_provenance(ontologic_id: str) -> None:
+        id_lower = ontologic_id.lower()
+        if any(sig in id_lower for sig in StrictAirGapValidator.SECULAR_ID_SIGNATURES):
+             raise DiachronicViolationError(f"[ÇİFTE DÖNÜŞÜM İHLALİ] Ontolojik ID '{ontologic_id}' Batılı bir semantik ağa (WordNet vb.) işaret ediyor. Hakikat inşasında seküler köprüler kullanılamaz.")
+
+
 class IOntoLexSemanticClient(Protocol):
     """
     [FAZ 10] Dışsal OntoLex Semantic Graph (Sense/Reference) Arayüzü.
@@ -14,6 +40,7 @@ class LocalOntoLexSemanticClient:
     """
     [FAZ 10] RAM üzerinde çalışan, dışsal semantik graf simülatörü.
     Manuel register_word yükünü sıfırlayarak temel İslâm ontolojisini (Base) otonom bağlar.
+    [FAZ 11] Air-Gapped doğrulamasına tabi tutulmuştur.
     """
     def __init__(self):
         self._base_ontology_map = {
@@ -32,9 +59,11 @@ class LocalOntoLexSemanticClient:
         }
     
     def get_base_concept_id(self, word: str, epoch: str) -> Optional[str]:
-        if epoch != "Classical":
-            return None
-        return self._base_ontology_map.get(word.lower())
+        StrictAirGapValidator.validate_epoch(epoch)
+        concept_id = self._base_ontology_map.get(word.lower())
+        if concept_id:
+            StrictAirGapValidator.validate_provenance(concept_id)
+        return concept_id
 
 # ==============================================================================
 # LEKSİKON VE İLM-İ VAZ' (CONTEXTUAL LEXICON)
@@ -56,6 +85,7 @@ class ContextualLexicon:
     Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
     [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
     [FAZ 10 ENTEGRASYONU]: OntoLex Fallback (Geri Dönüş) mekanizması ile otonom RDF sorgulaması entegre edildi.
+    [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator ile Çifte Dönüşüm (Double Conversion) yasakları donanıma işlendi.
     
     [FAZ 8 LITERATE PROGRAMMING]: Bilişsel Yükü (Cognitive Load) 4 birimin altında tutmak
     için monolitik parse algoritması hiyerarşik private fonksiyonlara (Chunking) ayrılmıştır.
@@ -74,10 +104,11 @@ class ContextualLexicon:
         .. pedagojik_anlati::
             Sisteme modern bir kelime veya İngilizce bir terim girmeye çalışılırsa, 
             sistem bunu Diachronic (Tarihsel) bir ihlal kabul eder. Sadece 'Classical'
-            kökler Z3 evrenine mühürlenir.
+            kökler Z3 evrenine mühürlenir. Çifte Dönüşüm (Double Conversion) engellenir.
         """
-        if epoch != "Classical":
-            raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{word}' kelimesi '{epoch}' dönemine ait. Yalnızca 'Classical' (Klasik Arapça) kökleri sisteme kaydedilebilir.")
+        StrictAirGapValidator.validate_epoch(epoch)
+        StrictAirGapValidator.validate_namespace(namespace)
+        StrictAirGapValidator.validate_provenance(ontologic_id)
 
         word_lower = word.lower()
         self._initialize_tensor_dimensions(word_lower, epoch, namespace, proposition_type)
@@ -139,12 +170,19 @@ class ContextualLexicon:
         if target_map:
             context_id = self._scan_ast_for_sibak(word, target_map.get("context_triggers", {}), dependencies)
             if context_id:
+                StrictAirGapValidator.validate_provenance(context_id)
                 return context_id
             
-            return target_map.get("default")
+            default_id = target_map.get("default")
+            if default_id:
+                StrictAirGapValidator.validate_provenance(default_id)
+            return default_id
         return None
 
     def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None, epoch: str = "Classical") -> str:
+        StrictAirGapValidator.validate_epoch(epoch)
+        StrictAirGapValidator.validate_namespace(active_namespace)
+        
         word_lower = word.lower()
 
         # [FAZ 2 ENTEGRASYONU] Kasr Operatörleri Doğrudan Çözümlenir
