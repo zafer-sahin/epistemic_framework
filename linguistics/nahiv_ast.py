@@ -3,66 +3,75 @@ from typing import List, Dict, Tuple, Optional
 from linguistics.sarf_parser import MorphologicalAnalysis
 
 """
-.. felsefe_notu::
-    Klasik İslâm gramerinde kelimeler bağımsız değildir. Her cümle, bir "Amil" 
-    (yöneten) ve "Mamul" (yönetilen) ağıdır. Bu, Aristotelesçi "Muharrik" ve 
-    "Müteharrik" felsefesinin dilbilimsel izdüşümüdür.
-    Bu modül, doğal dili Z3 SMT çözücüsünün Kripke uzayında işleyebileceği 
-    Hiyerarşik Bağımlılık Ağaçlarına (Directed Graph - AST) çevirir.
+.. felsefe_notu:: İlm-i Nahiv ve Dilin Ontolojik Mimarisi
+    Klasik İslâm gramerinde kelimeler zihinde veya metinde başıboş (bağımsız) dolaşamazlar. 
+    Her cümle, bir "Amil" (etken/yöneten) ve "Mamul" (edilgen/yönetilen) ağıdır. Bu yapı, 
+    Aristotelesçi "Muharrik" (Hareket Ettirici) ve "Müteharrik" (Hareket Eden) felsefesinin, 
+    ve İslâm kelamındaki nedensellik (İlliyet) ilkesinin dilbilimsel izdüşümüdür.
+    Bu modül, ardışık doğal dil dizgilerini Z3 SMT çözücüsünün Kripke uzayında işleyebileceği 
+    Hiyerarşik Bağımlılık Ağaçlarına (Directed Graph - AST) çevirerek, cümlenin mantıksal 
+    anatomisini çıkarır.
 """
 
 class NahivDependencyCompiler:
     """
-    Arapça Sentaktik Bağımlılık Ağacını (Nahiv AST) üreten parser.
-    Faz 10.2: Alt-ağaç (Sub-Tree) çözümleyicileri entegre edildi.
-    Faz 2 - Adım 2.2: İlm-i Ma'ânî Tevkîd (Pekiştirme) edatlarının AST düğümüne bağlanması.
-    Faz 2 - Adım 2.5: Takdim (Pre-positioning) ve İhtisas (Kasr) tespiti.
-    Faz 2 - Adım 2.6: Kasr (Hasr) Operatörlerinde Yön Tespiti (Sıfat/Mevsuf) ve Harf-i Atıf (Fasıl/Vasıl) Entegrasyonu.
-    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) kelimelerin cer durumundaki (fetha) i'rab istisnaları AST mantığına işlendi.
-    [FAZ 2 ENTEGRASYONU]: Müstatir Zamir (Hidden Pronoun) otonom düğüm enjeksiyonu eklendi (Zero-Node Agent).
-    [FAZ 3 ENTEGRASYONU]: İnne ve Kardeşleri (Amel Statüleri) cümlenin ana amili olarak AST'ye eklendi.
-    [FAZ 4 ENTEGRASYONU]: Mekân Bildiren Harf-i Cerlerin Müteallak (Bağlantı) Prensibi ve Zero-Copula (Kainun_Virtual).
-    [FAZ 5 ENTEGRASYONU]: Geriye Dönük Amil Tarayıcısı (Backward-Scan). Şibh-i Fiil (Fiilimsi) ve İlsak/Gaye bildiren Harf-i Cerlerin Zarf-ı Lağv/Mustakar olarak alt-ağaçlara bağlanması.
-    [FAZ 7 ENTEGRASYONU]: Rabıta (Copula) Dinamikleri ve Fâ-i Füzâiyye/Sebebiyye (Dynamic Logic) Sentaksı.
-    [FAZ 10 ENTEGRASYONU]: Dışsal OntoLex veri kaynağına dayalı Gayri Munsarif (Diptote) Mecrur Override kuralı.
+    .. pedagojik_anlati:: Sentaktik Derleyici (Amil-Mamul Orkestrasyonu)
+    Bu sınıf, kelimelerin i'rab (son hareke) durumlarına ve ontolojik tiplerine bakarak, 
+    onların Kripke uzayında birbirlerine nasıl bağlanacağını (Dependency) tespit eder. 
+    Geleneksel AST (Abstract Syntax Tree) mantığının aksine, buradaki her düğüm (node) bir 
+    varlığı, her kenar (edge) ise ontolojik bir kısıtı (constraint) temsil eder.
     
-    [FAZ 9 LITERATE CHUNKING]: Bilişsel Yükü (Cognitive Load) 4 birimin altında tutmak
-    için monolitik parse algoritması hiyerarşik private fonksiyonlara ayrılmıştır.
-    Her sentaktik düğümün Z3 SMT motorundaki ontolojik kısıt karşılığı (Muktazâ el-Hâl)
-    pedagojik anlatılarla (LaTeX destekli) kod bloklarına dokunmuştur (Weaving).
+    [FAZ 9 LITERATE CHUNKING]: Bilişsel Yükü (Cognitive Load) asgari seviyede tutmak için, 
+    karmaşık çözümleme algoritması hiyerarşik alt fonksiyonlara (Private Methods) yalıtılmıştır. 
+    Her kural bloğu kendi mantıksal anlatısını taşır.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") 
         self.dependency_graph = nx.DiGraph()
         
-        # Kâtibî'nin Şemsiyye kipliklerini tetikleyecek sentaktik bağlar (Hal ve Şart)
+        # .. mantik_kurali:: Şemsiyye Kiplikleri (Modalities)
+        # Kâtibî'nin Şemsiyye mantığında, önermelerin zaman (Zaman) ve durum (Hal) 
+        # kısıtlarına bağlanmasını sağlayan tetikleyiciler.
         self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart"]
-        # Kadiyye-i Şartiyye (Fasıl/Vasıl) tetikleyicileri
+        
+        # Kadiyye-i Şartiyye (Hipotetik Önerme) için Fasıl (Ayrılma) ve Vasıl (Birleşme) operatörleri
         self.atif_particles = ["wa", "fa", "aw", "summe", "am", "bal", "la", "lakin"]
         
-        # [FAZ 5 ENTEGRASYONU] Kapsamlı Harf-i Cer ve Müteallak Ontolojisi
+        # .. felsefe_notu:: Uzaysal/Bağıntısal Kısıtlar (SpaceSort Operators)
+        # Harf-i cerler basit bağlaçlar değil, varlığın (Entity) Kripke dünyasında 
+        # (WorldSort) hangi uzaysal düzleme yerleştiğini tayin eden ontolojik fonksiyonlardır.
         self.harf_i_cerler = {
-            "fi": "Zarfiyye",
-            "ala": "Isti_la",
-            "min": "Ibtida_i_Gaye",
-            "ila": "Intiha_i_Gaye",
-            "bi": "Ilsak_Alet",
-            "li": "Ihtisas_Mulk",
+            "fi": "Zarfiyye",           # İçindelik kısıtı
+            "ala": "Isti_la",           # Üzerindelik kısıtı
+            "min": "Ibtida_i_Gaye",     # Başlangıç noktası
+            "ila": "Intiha_i_Gaye",     # Bitiş/Gaye noktası
+            "bi": "Ilsak_Alet",         # Bitişiklik veya araçsallık
+            "li": "Ihtisas_Mulk",       # Aidiyet/Mülkiyet bağıntısı
             "inde": "Zarfiyye",
             "tahta": "Zarfiyye",
             "fawqa": "Zarfiyye",
             "beyne": "Zarfiyye",
             "khalf": "Zarfiyye",
             "amam": "Zarfiyye",
-            "an": "Mucaveze"
+            "an": "Mucaveze"            # Uzaklaşma/Aşma kısıtı
         }
 
     def _is_definite(self, token: str) -> bool:
+        """
+        .. mantik_kurali:: Ma'rife ve Nekra (Belirlilik ve Belirsizlik)
+        Bir varlığın 'al-' takısı alması, onun evrensel kümeden (Universal Set) çekilip, 
+        dış dünyada aktüelleşmiş spesifik bir varlığa (Instantiated Entity) dönüşmesidir.
+        Bu durum Z3 SMT'de Skolemizasyon sürecini doğrudan etkiler.
+        """
         return token.lower().startswith(self.definite_article)
 
     def _identify_primary_governors(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> Tuple[Optional[str], int, Optional[str], int]:
         """
-        Kripke uzayının ontolojik sınırlarını çizen Ana Amilleri (Governors) tespit eder.
+        .. felsefe_notu:: Amil-i Kıyâsî ve Amil-i Semâî'nin Tespiti
+        Kripke uzayının sınırlarını çizen temel yöneticileri (Governors) arar. 
+        'Fiil', yapısal bir amildir (Kıyâsî) ve cümleye ontolojik hareket katar. 
+        'İnne' ise duyuma/nakle dayalı bir amildir (Semâî) ve cümlenin epistemolojik 
+        kesinliğini (Zorunluluk - $\\square P$) mühürler. SMT ağacı bu kökler üzerine bina edilir.
         """
         amil_token = None
         amil_index = -1
@@ -82,11 +91,11 @@ class NahivDependencyCompiler:
 
     def _apply_pragmatic_modifiers(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], amil_index: int, idx: int, dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
-        .. pedagojik_anlati::
-            İlm-i Ma'ânî'de 'Tevkîd' muhatabın şüphesini gidermek için önermeyi Modal Mantık'ta 
-            'Zorunlu' (Necessity: $\\square P$) statüsüne yükseltir (Muktazâ el-Hâl).
-            'Kasr' ise evrensel nicelik kısıtıdır; $\\forall x (Sifat(x) \\iff Mevsuf(x))$ mantıksal 
-            çift yönlü gerektirmesini SMT motoruna mühürler.
+        .. pedagojik_anlati:: Muktazâ el-Hâl, Tevkîd ve Kasr
+            İlm-i Ma'ânî'de 'Tevkîd' (Pekiştirme), muhatabın (Sâil'in) şüphesini gidermek için 
+            önermeyi Modal Mantık'ta 'Zorunlu' (Necessity: $\\square P$) statüsüne yükseltir.
+            'Kasr' ise niteliği bir varlığa hapsetme işlemidir; $\\forall x (Sifat(x) \\iff Mevsuf(x))$ 
+            şeklindeki mantıksal çift yönlü gerektirmeyi (Biconditional) SMT motoruna mühürler.
         """
         if m1 and m1.ontologic_type == "Harf_Tevkid":
             dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
@@ -109,11 +118,11 @@ class NahivDependencyCompiler:
 
     def _apply_dynamic_transitions(self, t1: str, t2: str, tokens: List[str], idx: int, dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
-        .. pedagojik_anlati::
-            'Fâ-i Füzâiyye' ve 'Sebebiyye', klasik statik mantıkta (FOL) bir karşılığı olmayan 
-            zaman/durum sıçramalarını (State Transition) ifade eder.
-            Dinamik Mantıkta (Dynamic Logic) bir eylemin aniden diğerini var etmesi, SMT'de 
-            ardışık Kripke dünyalarının ($W_0 \\implies W_1$) yaratılmasını zorunlu kılar.
+        .. pedagojik_anlati:: Fâ-i Füzâiyye ve Dinamik Mantık (Dynamic Logic)
+            Klasik statik mantıkta (FOL) 'Fâ-i Füzâiyye' ve 'Sebebiyye'nin karşılığı yoktur, zira 
+            bunlar zaman/durum sıçramalarını (State Transition) ifade eder. Bir eylemin (A) 
+            aniden diğerini (B) var etmesi, SMT'de ardışık Kripke dünyalarının ($W_0 \\implies W_1$) 
+            yaratılmasını zorunlu kılar.
         """
         if t1.lower() in self.atif_particles:
             if idx > 0:
@@ -131,26 +140,25 @@ class NahivDependencyCompiler:
 
     def _apply_spatial_mutaallak(self, t1: str, t2: str, tokens: List[str], idx: int, lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
-        .. pedagojik_anlati::
-            Harf-i Cerler ontolojik olarak tek başlarına var olamazlar. SMT evreninde, 
-            Mekânsal Boyut (SpaceSort), eylemin (Amil) veya zımnî bir mevcudiyetin (Kainun_Virtual) 
-            üzerine $\\exists e. \\text{LocatedIn}(e, \\text{Space}, \\text{World})$ 
-            fonksiyonuyla bağlanmak (Müteallak) zorundadır.
-            [FAZ 10] Gayri Munsarif kelimelerin harf-i cer sonrası aldığı fetha (-a) 
-            harekesi, zımnî olarak majrur (Mecrur_Diptote_Override) kabul edilir.
+        .. pedagojik_anlati:: Müteallak Prensibi ve Kripke Uzay Sabitlemesi
+            Harf-i Cerler ontolojik olarak askıda var olamazlar. SMT evreninde, eylemin (Amil) 
+            veya zımnî bir mevcudiyetin (Kainun_Virtual) üzerine bir uzaysal boyut (SpaceSort) 
+            olarak bağlanmak (Müteallak) zorundadırlar: 
+            $\\exists e. \\text{LocatedIn}(e, \\text{Space}, \\text{World})$.
+            Eğer bir eylem (Amil) açıksa bu 'Zarf-ı Lağv', açık değilse ve zihnen varlık takdir 
+            ediliyorsa bu 'Zarf-ı Mustakar'dır.
         """
         if t1.lower() in self.harf_i_cerler:
             sem_type = self.harf_i_cerler[t1.lower()]
             rel_name = 'Muteallak_Mekan' if sem_type in ["Zarfiyye", "Isti_la"] else 'Muteallak_Harf'
 
             m2 = lexicon.get(t2)
-            # Gayri Munsarif Override Kontrolü
+            # Gayri Munsarif kelimeler harf-i cer sonrası fetha alsa da ontolojik olarak Mecrurdur.
             if m2 and getattr(m2, 'is_diptote', False):
                 dependencies.append((t1, t2, 'Mecrur_Diptote_Override', 'Majrur'))
             else:
                 dependencies.append((t1, t2, 'Harf_Mecrur', 'Majrur'))
             
-            # Müteallak Amili Taraması: Sadece ana fiil değil, en yakın Şibh-i Fiil de amil olabilir.
             potential_amils = []
             for prev_idx in range(idx - 1, -1, -1):
                 prev_token = tokens[prev_idx]
@@ -166,19 +174,18 @@ class NahivDependencyCompiler:
             closest_amil = potential_amils[0] if potential_amils else None
 
             if closest_amil:
-                # Zarf-ı Lağv: Açıkça zikredilmiş bir amile (fiil veya şibh-i fiil) ontolojik kısıt ekler.
                 dependencies.append((closest_amil, t1, rel_name, 'Zarf_Lagv'))
             else:
-                # Zarf-ı Mustakar: Amil zikredilmemiştir. Zımnî 'Kainun' (Mevcut) sanal amili takdir edilir.
                 dependencies.append(('Kainun_Virtual', t1, rel_name, 'Zarf_Mustakar'))
             return True
         return False
 
     def _apply_nominal_adjuncts(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
-        .. pedagojik_anlati::
+        .. mantik_kurali:: İzafet (Tamlamalar) ve Kesişim (Intersection) Uzayı
             İsim tamlamaları (İzafet) ve Sıfat uyumları, Z3 uzayında varlıkların 
-            alt-kümelerini (Subset: $x \\in Y$) veya kesişimlerini (Intersection: $x \\in A \\cap B$) tanımlar.
+            alt-kümelerini (Subset: $x \\in Y$) veya özellik kesişimlerini 
+            (Intersection: $x \\in A \\cap B$) matematiksel olarak tanımlar.
         """
         if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
             is_diptote_majrur = getattr(m2, 'is_diptote', False) and t2.lower().endswith('a')
@@ -202,8 +209,9 @@ class NahivDependencyCompiler:
 
     def _apply_conditional_logic(self, t1: str, t2: str, dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
-        .. pedagojik_anlati::
-            Şart edatları, mantıksal gerektirmeyi (Implication: $P \\implies Q$) AST yapısına mühürler.
+        .. mantik_kurali:: Kadiyye-i Şartiyye (Hipotetik Önerme)
+            Şart edatları (İn, İza vb.), SMT'deki mantıksal gerektirmeyi (Implication: $P \\implies Q$) 
+            AST yapısına mühürler.
         """
         if t1.lower() in ["in", "iza", "law", "amma"]:
             dependencies.append((t1, t2, "Rel_Shart", "Majzum"))
@@ -212,10 +220,10 @@ class NahivDependencyCompiler:
 
     def _resolve_adjacent_pairs(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_index: int) -> None:
         """
-        [FAZ 9 CHUNKING MİMARİSİ]
-        Doğrusal bağlamda yan yana gelen lafızların ontolojik kilitlerini oluşturur.
-        Okunabilirliği artırmak ve çalışma belleğini korumak adına tüm kurallar
-        kendi felsefi/matematiksel yalıtım alanlarına (Private Methods) aktarılmıştır.
+        .. pedagojik_anlati:: Yanal Bağlam (Adjacent Context) İşleyicisi
+        Doğrusal bağlamda yan yana gelen lafızların ontolojik kilitlerini oluşturur. 
+        Çalışma belleğini (Working Memory) aşırı yüklememek adına, Kripke uzayı kısıtlamaları 
+        hiyerarşik olarak izole edilmiştir.
         """
         for i in range(len(tokens) - 1):
             t1 = tokens[i]
@@ -232,10 +240,11 @@ class NahivDependencyCompiler:
 
     def _resolve_inne_scope(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], inne_token: Optional[str], inne_index: int, amil_token: Optional[str], amil_index: int) -> None:
         """
-        .. pedagojik_anlati::
-            'İnne'nin amel etmesi (Government), basit bir i'rab ataması değil; Kripke uzayında 
-            önermeyi 'Zorunlu Hakikat' statüsüne mühürlemesidir. Nasb ve Ref' durumları, 
-            SMT'de fail-meful karışıklığını önleyerek Ex Falso Quodlibet hatasını engeller.
+        .. pedagojik_anlati:: İnne'nin Ameli ve Epistemik Zorunluluk (Epistemic Necessity)
+            İnne'nin ismini nasb, haberini ref' yapması basit bir sentaktik kural değildir.
+            Kripke uzayında bu işlem, önermeyi 'Zorunlu Hakikat' (Necessity) statüsüne kilitler. 
+            İ'rabın (Nasb/Ref) yanlış tespiti SMT motorunda Fail ile Meful'ü birbirine karıştırıp, 
+            "Ex Falso Quodlibet" (Çelişkiden her şey çıkar) mantıksal patlamasına yol açar.
         """
         if not inne_token:
             return
@@ -262,10 +271,13 @@ class NahivDependencyCompiler:
 
     def _resolve_nominal_copula(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> List[Tuple[str, str, str, str]]:
         """
-        .. pedagojik_anlati::
-            Rabıta (Gizli Copula) Üretimi. Deterministik SMT çözücüsü, isim cümlelerindeki
-            boşluğu okuyamaz. Bu metod, görünmez bir sıfır-noktası (Zero-Copula Node) üreterek
-            mübteda ile haber arasına mantıksal eşdeğerlik ($x = y$) veya aidiyet ($x \\in Y$) bağını kurar.
+        .. pedagojik_anlati:: Kadiyye-i Hamliyye ve Rabıta (Zero-Copula) Düğümü
+            Arapça isim cümlelerinde (Kadiyye-i Hamliyye) 'dır/dir' bildirme eki genellikle 
+            görünmez. Zihin bu boşluğu otomatik doldursa da, deterministik SMT çözücüsü için 
+            bu durum ölümcüldür. Bu algoritma, soyut AST'de görünmez bir "Rabıta Düğümü" 
+            (Zero-Copula Node) üreterek; mübteda ile haber arasına mantıksal eşdeğerlik 
+            (Identity: $x = y$) veya aidiyet (Predication: $x \\in Y$) bağını matematiksel 
+            olarak enjekte eder.
         """
         has_zarf_mustakar = any(rel in ['Muteallak_Mekan', 'Muteallak_Harf'] and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
         ism_tokens = [t for t in tokens if lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
@@ -303,11 +315,11 @@ class NahivDependencyCompiler:
 
     def _resolve_verbal_arguments(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_token: str, amil_index: int) -> None:
         """
-        .. pedagojik_anlati::
-            Fiil amiline bağlı Fail, Meful ve Müstatir (gizli) zamir argümanlarını çözümler.
-            Eğer cümlede açık bir fail yoksa, "Her eylemin bir faili vardır" nedensellik 
-            aksiyomu gereği, fiilin morfolojisindeki gizli zamiri Z3'e varoluşsal değişken 
-            ($\\exists x$) olarak zerk eder.
+        .. pedagojik_anlati:: Amil-Mamul Ataması ve Müstatir (Gizli) Zamirler
+            Eğer cümlede eylemi yapan açık bir Fail yoksa, "Her eylemin bir faili vardır" 
+            şeklindeki felsefi aksiyom gereği sistem çökmemelidir. Bu metod, İlm-i Sarf'ın 
+            kökten çıkardığı gizli zamiri (Müstatir Zamir) alarak Z3 uzayına varoluşsal 
+            bir değişken ($\\exists x$) olarak zerk eder ve nedensellik krizini önler.
         """
         has_explicit_fail = False
         for idx, token in enumerate(tokens):
@@ -347,6 +359,12 @@ class NahivDependencyCompiler:
                 dependencies.append((amil_token, hidden_pronoun, 'Fail', 'Marfu_Virtual'))
 
     def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, str, str]]:
+        """
+        .. pedagojik_anlati:: Ontolojik Orkestrasyon Akışı
+        Cümlenin başından sonuna kadar, mantıksal önceliğe (Precedence) göre amillerin 
+        mamullere etkisini sıraya koyar. Önce Kıyâsî ve Semâî kökler tespit edilir, sonra 
+        bağlamsal operatörler işlenir.
+        """
         dependencies = []
         
         amil_token, amil_index, inne_token, inne_index = self._identify_primary_governors(tokens, lexicon)
@@ -366,6 +384,12 @@ class NahivDependencyCompiler:
         return dependencies
 
     def build_ast(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> nx.DiGraph:
+        """
+        .. felsefe_notu:: Yönlü Grafik (Directed Graph) ve Determinizm
+        Listeler halinde çıkarılan tüm mantıksal bağları NetworkX üzerinden Yönlü Bir Grafiğe 
+        (DiGraph) döker. Bu graf, Z3 motoru için bir veri yapısı değil, teolojik hakikatlerin 
+        test edileceği sarsılmaz bir epistemolojik matristir.
+        """
         self.dependency_graph.clear()
          
         for token in tokens:
@@ -382,6 +406,11 @@ class NahivDependencyCompiler:
         return self.dependency_graph
     
     def extract_temporal_conditions(self, ast: nx.DiGraph) -> Dict[str, str]:
+        """
+        .. mantik_kurali:: Şemsiyye Kiplikleri ve Zaman Bağlamı
+        Zaman/Durum zarflarını ve şart koşullarını AST'den filtreleyerek, Kripke 
+        semantiğindeki TimeSort/WorldSort sıçrama noktalarını (Transition Nodes) ayıklar.
+        """
         conditions = {}
         for u, v, data in ast.edges(data=True):
             if data.get('relation') in self.temporal_triggers:

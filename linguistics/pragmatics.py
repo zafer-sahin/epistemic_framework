@@ -2,46 +2,54 @@ from typing import List, Dict, Any, Tuple
 from linguistics.discourse_state import DiscourseRegister, DenialLevel
 
 """
-.. felsefe_notu::
-    Klasik İslâm Dilbiliminde 'İlm-i Ma'ânî (Semantik Pragmatik), kelimelerin 
-    sözlük anlamlarıyla değil, cümlenin "Muktazâ el-Hâl"e (bağlamın ve muhatabın 
-    psikolojik durumunun gerekliliğine) uygunluğuyla ilgilenir. Bu modül, 
-    Z3 SMT çözücüsüne gidecek olan Soyut Sentaks Ağaçlarını (AST) filtreleyerek,
-    mantıksal bir doğruluk/yanlışlık değeri taşımayan "İnşâî" (Emir, Soru) 
-    cümlelerini eler. Sadece hakikat iddiası taşıyan "Haberî" önermelerin 
-    mantık matrisine (Semantic IR) geçmesine izin verir.
+.. felsefe_notu:: İlm-i Ma'ânî ve Hakikatin Psikolojik Düzlemi
+    Klasik İslâm Dilbiliminde 'İlm-i Ma'ânî (Semantik/Pragmatik), lafızların sözlük 
+    anlamlarıyla (Lügat) değil, önermenin "Muktazâ el-Hâl"e, yani bağlamın ve muhatabın 
+    (Sâil) psikolojik inkar durumunun gerekliliğine uygunluğuyla ilgilenir. Deterministik 
+    Z3 SMT çözücüsü her girdiyi Boolean mantığında "True/False" olarak işlemeye çalışır; 
+    oysa dilde mantıksal bir doğruluk/yanlışlık değeri taşımayan "İnşâî" (Emir, Soru) 
+    yapılar vardır. Bu modül, sentaks ağaçlarını (AST) Kripke uzayına inmeden önce felsefi 
+    bir filtreden geçirerek, sadece ontolojik hakikat iddiası taşıyan "Haberî" önermelerin 
+    hesaplanmasına izin verir.
 """
 
 class MaaniSpeechActAnalyzer:
     """
-    'İlm-i Ma'ânî Söz Edimi ve Muktazâ el-Hâl Analizörü.
-    Faz 2 - Adım 2.3: PragmaticsFilter'ın yerine inşa edilmiştir.
-    Cümlenin formunu (vurgu/tevkîd) muhatabın epistemik inkâr derecesiyle (Denial Level) çapraz denetler.
-    Faz 2 - Adım 2.4: İstifham-ı İnkârî (Reddedici Soru) tespiti.
-    Faz 2 - Adım 2.5: Kasr/Hasr (Kısıtlama) ve İhtisas (Takdim/Te'hir) tespiti.
-    Faz 2 - Adım 2.6: Kasr Operatörlerinde Yön Yitimi Onarımı (Kasr-ı Sıfat ale'l-Mevsuf / Kasr-ı Mevsuf ale's-Sıfat).
-    [FAZ 3 ENTEGRASYONU]: 'İnne ve Kardeşleri'nin Tevkîd gücü korunurken (Muktazâ el-Hâl), 
-    Kripke uzayı için 'Epistemic_Necessity' (Tahkik/Yakîn) sinyali üretmesi sağlandı.
+    .. pedagojik_anlati:: Söz Edimi (Speech Act) ve Muktazâ el-Hâl Hakemi
+    Bu sınıf, cümlenin formunu (vurgu/tevkîd) muhatabın epistemik inkâr derecesiyle 
+    (Denial Level) çapraz denetler. SMT motoruna salt bir veri akışı sağlamak yerine, 
+    cümledeki Kasr (Kısıtlama) ve İstifham (Soru) gibi yapıları Modal Mantık (Deontik 
+    ve Epistemik) operatörlerine dönüştürür.
     
-    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel yükü aşmamak için devasa analiz döngüsü; 
-    İstifham, Deontik, Muktazâ el-Hâl ve Kasr alt-fonksiyonlarına (private methods) parçalanmıştır.
-    Orijinal motorun tarihsel 'Faz' kayıtları ve if/else akışları %100 korunmuştur.
+    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel yükü yönetmek adına (Chunking), devasa analiz 
+    matrisi İstifham, Deontik, Muktazâ el-Hâl ve Kasr gibi atomik İlm-i Ma'ânî kurallarına 
+    (Private Methods) bölünmüş ve tarihsel 'Faz' akışları korunarak her birinin matematiksel 
+    gerekçesi açıklanmıştır.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
+        
+        # .. mantik_kurali:: İnşâî Önermeler (Performatives)
+        # Soru (İstifham) ve Emir (Talep) cümleleri diş dünyayı (A'yân) tasvir etmezler, 
+        # dolayısıyla Kadiyye (Önerme) sayılmazlar ve SMT'nin SAT/UNSAT kararına tabi tutulamazlar.
         self.inshai_markers = {
             "question": ["hal", "a", "mata", "kayfa", "man", "ma", "eyne"],
             "imperative": ["if'al", "la_taf'al", "ef'al", "li_yaf'al"]
         }
         self.nefy_markers = {"illa", "la", "ma", "lam", "lan"}
+        
+        # .. mantik_kurali:: Hasr ve Monadlar
+        # Yüklemi özneye mutlak surette hapseden evrensel dışlama (Universal Exclusion) operatörleri.
         self.kasr_markers = {"innema", "illa"}
 
     def _evaluate_istifham(self, first_token: str, has_nefy: bool) -> Dict[str, Any]:
         """
-        1. İstifham-ı İnkârî ve Normal Soru Kontrolü (Faz 2.4)
-        .. pedagojik_anlati::
-            Eğer soru bir nefy (olumsuzluk) edatıyla geliyorsa ("Allah'tan başka ilah mı var?"),
-            bu İstifham-ı İnkârî'dir ve Z3 matrisinde varoluşsal bir redde (\\neg \\exists x) dönüşür.
+        .. pedagojik_anlati:: İstifham-ı İnkârî ve Varoluşsal Red (Existential Negation)
+        Gerçek soru cümleleri (İstifham-ı Hakikî) mantıksal değer (True/False) taşımaz. 
+        Ancak, eğer soru bir nefy (olumsuzluk) edatıyla geliyorsa ("Allah'tan başka ilah mı var?"),
+        bu retorik bir söz edimi olan İstifham-ı İnkârî'dir. İlm-i Ma'ânî gereği bu yapı, 
+        soru formunda görünse de Z3 matrisinde kesin bir varoluşsal redde ($\\neg \\exists x$) 
+        veya evrensel olumsuzlamaya ($\\forall x \\neg P(x)$) dönüştürülmelidir.
         """
         if first_token in self.inshai_markers["question"]:
             if has_nefy:
@@ -59,7 +67,12 @@ class MaaniSpeechActAnalyzer:
         return {}
 
     def _evaluate_deontic(self, first_token: str) -> Dict[str, Any]:
-        """2. Deontik Mantık (Emir/Nehiy)"""
+        """
+        .. mantik_kurali:: Deontik Mantık (Emir ve Nehiy)
+        Emir (Yap) ve Nehiy (Yapma) kipleri mevcut Kripke dünyasını ($W_0$) tasvir etmezler. 
+        Onlar, ahlaki veya hukuki (Fıkhî) olarak erişilebilir (accessible) ideal dünyalarda 
+        ($W_1$) geçerli olması gereken kuralları ($O(P)$ veya $F(P)$) mühürlerler.
+        """
         if first_token in self.inshai_markers["imperative"]:
             is_prohibitive = first_token.startswith("la_")
             return {"is_valid": True, "type": "Deontic", "operator": "Nehiy" if is_prohibitive else "Emir"}
@@ -67,11 +80,13 @@ class MaaniSpeechActAnalyzer:
 
     def _evaluate_muktaza_el_hal(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         """
-        3. Muktazâ el-Hâl (Bağlamsal Gereklilik) Denetimi (Faz 2.3 & FAZ 3)
-        .. matematiksel_model::
-            Muhatabın entropisi (Denial Level) ile Tevkîd (Pekiştirme) katsayısı çapraz denetlenir.
+        .. matematiksel_model:: Muktazâ el-Hâl (Entropi ve Tevkîd Uyumu)
+        Âdâb-ı Bahs (Münazara kuralları) uyarınca muhatabın şüphe seviyesi (Denial Level) ile 
+        cümlenin yapısal pekiştirmesi (Tevkîd katsayısı) matematiksel olarak dengelenmelidir.
+        Eğer muhatabın zihni boşsa (Khali_al_Zihn), tevkîd kullanmak retorik bir israftır (Fazlalık).
+        Eğer muhatap kesin inkâr (Munkir) durumundaysa, cümleyi pekiştirmeden kurmak hakikatin 
+        savunulmasında acziyettir. Sistem bu dengesizlikleri otonom olarak reddeder.
         """
-        # [FAZ 3 GÜNCELLEMESİ]: 'Amel_Inne_Ism' veya 'Amel_Inne_Haber' bağımlılıkları da güçlü bir Tevkid (Pekiştirme) sayılır.
         tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier' or rel.startswith('Amel_Inne_'))
         opponent_denial_level = self.discourse.get_opponent_epistemic_state()
 
@@ -92,7 +107,14 @@ class MaaniSpeechActAnalyzer:
 
     def _extract_kasr_and_ihtisas(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         """
-        4. İlm-i Ma'ânî: Kasr (Hasr) ve İhtisas Tespiti (Faz 2.5 & Faz 2.6 Yönlü Matris)
+        .. felsefe_notu:: Kasr, İhtisas ve Evrensel Dışlama
+        Klasik Arapçada sentaktik dizilimin (Takdim/Te'hir) bozulması veya Kasr edatlarının 
+        kullanımı, eylemi belirli bir varlığa mülk kılar. 
+        Örn: (İyyâke Na'budu - Yalnız sana ibadet ederiz). 
+        Z3 FOL matrisinde bu durum, sıradan bir varoluşsal beyandan ($\\exists x$), 
+        çift yönlü gerektirmeli (Biconditional) bir evrensel dışlama fonksiyonuna 
+        ($\\forall x (\\text{Action}(x) \\iff \\text{Target}(x))$) yükseltilir.
+        Yönün (Sıfat'tan Mevsuf'a veya tersi) yanlış tespiti, ontolojide fatal hatalara yol açar.
         """
         kasr_data = None
         
@@ -105,7 +127,7 @@ class MaaniSpeechActAnalyzer:
                 "kasr_type": "Takdim_Ihtisas",
                 "kasr_target": mamul,
                 "kasr_predicate": amil,
-                "kasr_direction": "Sifat_to_Mevsuf",  # Fiil eylemi (sıfat) tamamen takdim edilen mefule (mevsuf) hasredilir.
+                "kasr_direction": "Sifat_to_Mevsuf", 
                 "message": f"Takdim (İhtisas) tespit edildi. Eylem ({amil}) sadece hedefe ({mamul}) kısıtlanacak."
             }
         
@@ -113,10 +135,9 @@ class MaaniSpeechActAnalyzer:
         if not kasr_data:
             kasr_deps = [dep for dep in dependencies if dep[2] == 'Kasr_Modifier']
             if kasr_deps:
-                # dep formati: (hedef_kelime, edat, 'Kasr_Modifier', kasr_yonu)
                 hedef_kelime = kasr_deps[0][0]
                 edat = kasr_deps[0][1].lower()
-                kasr_yonu = kasr_deps[0][3] # 'Mevsuf_to_Sifat' veya 'Sifat_to_Mevsuf'
+                kasr_yonu = kasr_deps[0][3]
                 
                 kasr_data = {
                     "kasr_type": f"Kasr_{edat.capitalize()}",
@@ -128,6 +149,12 @@ class MaaniSpeechActAnalyzer:
         return kasr_data
 
     def analyze_pragmatics(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
+        """
+        .. pedagojik_anlati:: İlm-i Ma'ânî Orkestrasyonu
+        Soyut Sentaks Ağacını (AST) baştan sona tarayarak cümlenin ontolojik meşruiyetini 
+        tescil eden ana hakemdir. Eğer cümle Haberî (Khabari) ise ve Muktazâ el-Hâl 
+        ihlal edilmemişse Z3 çözümleyicisine geçit (pass) verilir.
+        """
         if not tokens:
             return {"is_valid": False, "type": "Empty"}
         
@@ -147,7 +174,10 @@ class MaaniSpeechActAnalyzer:
 
         response = {"is_valid": True, "type": "Khabari"}
         
-        # [FAZ 3 ENTEGRASYONU]: Epistemic Necessity (Tahkik) Tespiti
+        # .. mantik_kurali:: Tahkik ve Epistemik Zorunluluk (Epistemic Necessity)
+        # İnne ve kardeşleri (Huruf-u Müşebbehe bil-Fiil) sadece gramerik bir amel yapmaz, 
+        # Modal Mantık'ta önermeyi $\\square P$ (Bütün Kripke dünyalarında geçerli zorunluluk) 
+        # derecesine (Tahkik/Yakîn) kilitler.
         has_epistemic_necessity = any(rel.startswith('Amel_Inne_') for _, _, rel, _ in dependencies)
         if has_epistemic_necessity:
             response["epistemic_modality"] = "Epistemic_Necessity"
@@ -163,5 +193,11 @@ class MaaniSpeechActAnalyzer:
         return response
         
     def is_khabari(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> bool:
+        """
+        .. felsefe_notu:: Kadiyye (Önerme) Onayı
+        Eğer cümle tüm İlm-i Ma'ânî testlerinden geçip 'is_valid: True' döndürürse, 
+        bu söz diziminin artık mantıksal bir yalanlanma veya doğrulanma ihtimali 
+        taşıdığı (Haberî) kesinleşmiştir.
+        """
         res = self.analyze_pragmatics(tokens, dependencies)
         return res["is_valid"]

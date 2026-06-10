@@ -4,15 +4,28 @@ from core.exceptions import DiachronicViolationError, ContextPoisoningError
 
 class StrictAirGapValidator:
     """
-    [FAZ 11] Air-Gapped Ontology Validator
-    Klasik İslâm dilbilimi (İlm-i Vaz') ile seküler/istatistiksel NLP ontolojileri 
-    arasındaki "Çifte Dönüşüm" (Double Conversion) sızıntılarını donanımsal olarak engeller.
+    .. pedagojik_anlati:: 'İlm-i Vaz' ve Ontolojik Yalıtım (Air-Gap)
+    Klasik İslâm dilbiliminde (İlm-i Vaz'), lafzın ma'nâya (anlama) delaleti seküler veya 
+    istatistiksel bir sözlük eşleşmesi değildir. Kelimeler, ilahî veya felsefi bir hakikate 
+    (Vâzı') bağlanırlar. Sistem dışarıdan WordNet, NLTK veya SpaCy gibi modern NLP kütüphanelerine 
+    bağlanırsa, İbn Sînâ'nın veya Cürcânî'nin ontolojisi Batılı evrimsel biyoloji veya 
+    istatistiksel semantik ağlara kurban edilmiş olur. 
+    Bu sınıf (Validator), bu sızıntıyı donanımsal olarak engeller ve "Çifte Dönüşüm" 
+    (Double Conversion) riskini sıfıra indirir. SMT matrisine sadece "Classical" (Klasik) 
+    döneme ait mühürlü ontolojiler girebilir.
     """
+    # Sistemin kirlenmesini önleyecek yasaklı seküler ontoloji uzayları
     SECULAR_NAMESPACES = {"wordnet", "nltk", "spacy", "msa", "modern", "english", "secular_nlp", "babelnet"}
+    # Dışsal kütüphanelerden sızabilecek yasaklı kimlik belirteçleri
     SECULAR_ID_SIGNATURES = {"wn:", "synset:", "lemma:", "en_"}
 
     @staticmethod
     def validate_epoch(epoch: str) -> None:
+        """
+        .. mantik_kurali:: Anakronizm Filtresi
+        Kavramların modern anlamlara kaymasını engellemek için, Z3 SMT matrisi yalnızca 
+        tarihsel olarak izole edilmiş 'Classical' döneme kilitlenmiştir.
+        """
         if epoch != "Classical":
             raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{epoch}' dönemi reddedildi. Z3 matrisi yalnızca 'Classical' ontolojileri işleyebilir.")
 
@@ -23,6 +36,11 @@ class StrictAirGapValidator:
             
     @staticmethod
     def validate_provenance(ontologic_id: str) -> None:
+        """
+        .. felsefe_notu:: Delâletin Kaynağı
+        Bir kelimenin ontolojik kökeni (Provenance), bir Batılı WordNet Synset'i olamaz. 
+        Ontolojik ID'ler incelenerek seküler imzalar (Örn: wn:dog) ayıklanır.
+        """
         id_lower = ontologic_id.lower()
         if any(sig in id_lower for sig in StrictAirGapValidator.SECULAR_ID_SIGNATURES):
              raise DiachronicViolationError(f"[ÇİFTE DÖNÜŞÜM İHLALİ] Ontolojik ID '{ontologic_id}' Batılı bir semantik ağa (WordNet vb.) işaret ediyor. Hakikat inşasında seküler köprüler kullanılamaz.")
@@ -30,32 +48,37 @@ class StrictAirGapValidator:
 
 class IOntoLexSemanticClient(Protocol):
     """
-    [FAZ 10] Dışsal OntoLex Semantic Graph (Sense/Reference) Arayüzü.
-    İhtilafsız (Base) kök kelimelerin ontolojik ID'lerini RDF üzerinden sorgular.
+    .. pedagojik_anlati:: Dışsal Hakikat ve W3C Standartları
+    Yerel (Local) hafızadaki kod blokları (hardcoding) felsefi indirgemeciliğe (Reductionism) 
+    yol açar. Gerçek hakikat (anlamın aslı), dışsal bir OntoLex Semantic Graph (RDF/SPARQL) 
+    üzerinde yaşamalıdır. Bu arayüz, lokal hafızada (Tensör) bulunamayan kelimelerin 
+    evrensel 'Base' (Müsellemât) kavramlarını otonom olarak oradan çeker.
     """
     def get_base_concept_id(self, word: str, epoch: str) -> Optional[str]: ...
 
 
 class LocalOntoLexSemanticClient:
     """
-    [FAZ 10] RAM üzerinde çalışan, dışsal semantik graf simülatörü.
-    Manuel register_word yükünü sıfırlayarak temel İslâm ontolojisini (Base) otonom bağlar.
-    [FAZ 11] Air-Gapped doğrulamasına tabi tutulmuştur.
+    .. felsefe_notu:: Yerel Hafıza (Active Intellect Simulation)
+    Gerçek bir devasa Triple-Store (Graf Veritabanı) bağlanana kadar, sistem RAM üzerinde 
+    temel varlık hiyerarşisini (Porphyrios Ağacı) simüle eder. Böylece her kelime için 
+    'register_word' yapma zorunluluğu (Cognitive Load) kalkar, kelimeler otonom olarak 
+    Cevher (Cism) veya Araz'lara bağlanır.
     """
     def __init__(self):
         self._base_ontology_map = {
-            "allah": "Wajib_al_Wujud",
-            "cemad": "Cemad",
-            "nam": "Nami",
-            "zeyd": "Insan",
-            "drb": "Bats",
-            "masiy": "Masi",
-            "fi": "GrammarNode_Fi",
-            "bi": "GrammarNode_Bi",
-            "beyt": "Cism",
-            "sema": "Cism",
-            "dar": "Cism",
-            "haza": "GrammarNode_Haza"
+            "allah": "Wajib_al_Wujud", # Zorunlu Varlık
+            "cemad": "Cemad",          # Cansız Cevher
+            "nam": "Nami",             # Büyüyen/Canlı Cevher
+            "zeyd": "Insan",           # Düşünen Canlı Cevher
+            "drb": "Bats",             # Eylem/Şiddet Arazı
+            "masiy": "Masi",           # Eylem/Yürüme Arazı
+            "fi": "GrammarNode_Fi",    # Zarfiyye (İçindelik) Bağıntısı
+            "bi": "GrammarNode_Bi",    # İlsak (Bitişiklik) Bağıntısı
+            "beyt": "Cism",            # Cisim (Ev)
+            "sema": "Cism",            # Cisim (Gökyüzü)
+            "dar": "Cism",             # Cisim (Yurt/Diyar)
+            "haza": "GrammarNode_Haza" # İsm-i İşaret
         }
     
     def get_base_concept_id(self, word: str, epoch: str) -> Optional[str]:
@@ -69,43 +92,32 @@ class LocalOntoLexSemanticClient:
 # LEKSİKON VE İLM-İ VAZ' (CONTEXTUAL LEXICON)
 # ==============================================================================
 
-"""
-.. felsefe_notu::
-    Klasik İslâm Dilbilimi'nde lafzın ma'nâya delaleti statik bir sözlük eşleşmesi değil, 
-    dinamik bir ontolojik atama (Vaz') işlemidir. Bu modül, bir lafzın bağlam 
-    ve usûl profiline göre kazandığı ontolojik ağırlığı (ID) deterministik olarak bulur.
-"""
-
 class ContextualLexicon:
     """
-    N-boyutlu Leksikon Tensörü: (word -> epoch -> namespace -> proposition_type -> {default, context_triggers})
-    'İlm-i Vaz adaptasyonunu destekler.
-    [FAZ 1 ENTEGRASYONU]: Diachronic (Tarihsel-Dönemsel) yalıtım eklendi. Yalnızca 'Classical' 
-    (Klasik Arapça) zaman damgasına sahip ontolojik düğümlerin Z3 matrisine girmesine izin verilir.
-    Faz 6 - Adım 1: Siyak-Sibak (Bağlam Avcısı) AST Sentaks (İzafet) Genişletmesi.
-    [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
-    [FAZ 10 ENTEGRASYONU]: OntoLex Fallback (Geri Dönüş) mekanizması ile otonom RDF sorgulaması entegre edildi.
-    [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator ile Çifte Dönüşüm (Double Conversion) yasakları donanıma işlendi.
-    [FAZ 12 ENTEGRASYONU]: Leksikal Zehirlenme (Lexical Poisoning) kalkanı eklendi. Sâil'in arka kapıdan Mucîb'e ait ID'leri çalması engellendi.
+    .. pedagojik_anlati:: Çok Boyutlu İlm-i Vaz' Tensörü
+    Leksikon, iki boyutlu basit bir sözlük (Key-Value) değildir. Kelimenin anlamı, 
+    içinde bulunduğu döneme (Epoch), kelam okuluna (Namespace: Ashari/Salafi vb.), 
+    önermenin felsefi türüne (PropositionType) ve cümle içindeki sentaktik 
+    bağımlılığına (Sibak/Context Trigger) göre farklılaşan N-Boyutlu bir Tensörde 
+    çözümlenir.
     
-    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel Yükü (Cognitive Load) 4 birimin altında tutmak
-    için monolitik parse algoritması hiyerarşik private fonksiyonlara (Chunking) ayrılmıştır.
-    Orijinal motorun tarihsel 'Faz' kayıtları, değişkenleri ve akışları %100 korunmuştur.
+    Örneğin: 'Yed' (El) kelimesi 'Salafi' uzayında Cisimsel bir uzuv (Haqiqi_Yad), 
+    'Ashari' uzayında ise 'Kudret' (Power) anlamına gelebilir.
+    
+    [FAZ 8 LITERATE CHUNKING]: Bellek yükünü yönetmek için Tensör tarama ve Siyak-Sibak 
+    bağımlılık ağacı kontrolleri izole özel fonksiyonlara (Private Methods) ayrılmıştır.
     """
     def __init__(self, semantic_client: Optional[IOntoLexSemanticClient] = None):
         # 4 Boyutlu Tensör Hiyerarşisi: Word -> Epoch -> Namespace -> PropositionType
         self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Dict[str, Any]]]]] = {}
         # İlm-i Ma'ânî Kasr (Hasr) Operatörleri
         self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
-        # Faz 10 Bağımlılık Enjeksiyonu
         self.semantic_client = semantic_client or LocalOntoLexSemanticClient()
 
     def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None, epoch: str = "Classical") -> None:
         """
-        .. pedagojik_anlati::
-            Sisteme modern bir kelime veya İngilizce bir terim girmeye çalışılırsa, 
-            sistem bunu Diachronic (Tarihsel) bir ihlal kabul eder. Sadece 'Classical'
-            kökler Z3 evrenine mühürlenir. Çifte Dönüşüm (Double Conversion) engellenir.
+        Lafzı belirlenen uzaya mühürler. Diachronic ve Secular sızıntılara karşı 
+        katı denetim (Air-Gap Validation) uygular.
         """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(namespace)
@@ -120,7 +132,9 @@ class ContextualLexicon:
             self._tensor[word_lower][epoch][namespace][proposition_type]["default"] = ontologic_id
 
     def _initialize_tensor_dimensions(self, word_lower: str, epoch: str, namespace: str, proposition_type: str) -> None:
-        """Tensör boyutlarını güvenli (memory-safe) şekilde inşa eder."""
+        """
+        Tensör boyutlarını güvenli (memory-safe) şekilde inşa eder.
+        """
         if word_lower not in self._tensor:
             self._tensor[word_lower] = {}
         if epoch not in self._tensor[word_lower]:
@@ -132,10 +146,12 @@ class ContextualLexicon:
 
     def _scan_ast_for_sibak(self, target_word: str, triggers: Dict[str, str], dependencies: List[Tuple[str, str, str, str]] = None) -> Optional[str]:
         """
-        İbn Teymiyye'nin Hakikat felsefesine uygun olarak (Faz 6), 
-        kelimenin hedef uzaya (Bila_Kayf) taşınabilmesi için rastgele bir 
-        aynı-cümle (token) beraberliği değil, kesin bir İzafet (Mudaf) 
-        veya Yüklem (Haber) AST bağıntısı aranır.
+        .. mantik_kurali:: Siyak-Sibak ve Ontolojik İhtisas (Bağlam Avcısı)
+        Bir kelimenin mecaz mı yoksa hakikat mi olduğu, cümledeki diğer kelimelerle olan rastgele 
+        yan yanalığından (proximity) değil, İlm-i Nahiv'deki kesin amil-mamul bağıntılarından 
+        (AST Dependencies) anlaşılır. Örneğin İbn Teymiyye'nin Hakikat felsefesine göre, "Allah'ın Eli" 
+        (Yedullah) dendiğinde, 'Yed'in anlamı 'Allah' ile 'İzafet' (Mudaf_MudafIlayh) bağına girdiğinde 
+        Bila_Kayf (Nasılı bilinmeyen hakikat) uzayına sıçrar. Bu kural, Z3'e eksiksiz işlenir.
         """
         if not dependencies or not triggers:
             return None
@@ -157,7 +173,9 @@ class ContextualLexicon:
         return None
 
     def _get_from_namespace(self, namespace_map: Dict, ns: str, proposition_type: str, word: str, dependencies: List[Tuple[str, str, str, str]]) -> Optional[str]:
-        """İlgili usûl evreninden (Namespace) kelimenin ontolojik kimliğini süzer (Kadiyye türüne göre daraltma)."""
+        """
+        İlgili usûl evreninden (Namespace) kelimenin ontolojik kimliğini süzer.
+        """
         if ns not in namespace_map:
             return None
             
@@ -182,12 +200,12 @@ class ContextualLexicon:
 
     def _prevent_lexical_poisoning(self, word: str, ontologic_id: str, active_namespace: str, discourse: Optional[DiscourseRegister]) -> None:
         """
-        .. pedagojik_anlati::
-            [FAZ 12] Aktör Sızıntı Denetimi (Lexical Poisoning Zırhı):
-            Eğer Sâil, leksikondan bir kelimeyi (Örn: 'Zeyd') çözümlerken dönen ontolojik ID,
-            daha önce Mucîb tarafından kendi özel usûl uzayında (Namespace) mühürlenmişse,
-            Sâil bu ID'yi çalarak SMT motorunda arka kapıdan (backdoor) eşdeğerlik kuramaz.
-            Ortak kabul (Base) dışındaki bu sızıntı anında tespit edilip engellenir.
+        .. pedagojik_anlati:: Leksikal Zehirlenme (Lexical Poisoning) Zırhı
+        Mu'aradah (Çapraz İtiraz) esnasında, eğer Sâil leksikondan bir kelimeyi 
+        (Örn: 'Zeyd') çözümlerken dönen ontolojik ID, daha önce Mucîb tarafından kendi özel 
+        usûl uzayında (Namespace) mühürlenmişse, Sâil bu ID'yi çalarak SMT motorunda 
+        arka kapıdan (backdoor) eşdeğerlik kuramaz. Ortak kabul (Base) dışındaki bu sızıntı 
+        anında tespit edilip engellenir ve motor ContextPoisoningError fırlatarak durur.
         """
         if not discourse or active_namespace == "Base":
             return
@@ -198,7 +216,7 @@ class ContextualLexicon:
             for mention in frame:
                 # Eğer aynı ID'yi rakip daha önce Base harici bir uzayda mühürlediyse
                 if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
-                    # Ve Sâil/Mucîb kendi farklı uzayından bunu çağırıyorsa
+                    # Ve aktif aktör kendi farklı uzayından bunu çağırıyorsa
                     if mention.sealed_namespace != active_namespace:
                         raise ContextPoisoningError(
                             f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
@@ -208,16 +226,23 @@ class ContextualLexicon:
                         )
 
     def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None, epoch: str = "Classical") -> str:
+        """
+        .. pedagojik_anlati:: Orkestrasyon ve Ontolojik Mühürleme
+        Lafzın hangi ID ile Kripke uzayına (Z3) geçeceğine karar veren son filtredir.
+        Önce aktif uzay, sonra Siyak-Sibak, ardından Base (Müsellemât) taranır. 
+        Eğer Tensörde yoksa OntoLex Grafına gidilir (Fallback). Hiçbirinde yoksa 
+        sistem belirsizlikte (Spekülasyon) kalmamak için tahmin yürütmeden UNKNOWN fırlatır.
+        """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
         
         word_lower = word.lower()
 
-        # [FAZ 2 ENTEGRASYONU] Kasr Operatörleri Doğrudan Çözümlenir
+        # Edât-ı Kasr ve Hasr operatörleri mutlak ve evrensel olduğu için tensör dışı çözülür
         if word_lower in self.kasr_operators:
             return f"Harf_{self.kasr_operators[word_lower]}"
 
-        # Leksikon Tensör Taraması (Theological/Contextual Overrides)
+        # Leksikon Tensör Taraması
         if word_lower in self._tensor:
             if epoch not in self._tensor[word_lower]:
                 raise DiachronicViolationError(f"[ONTOLOJİK SIZINTI] '{word}' kelimesi için '{epoch}' zaman damgasına sahip bir karşılık bulunamadı. Seküler/MSA sızıntısı reddedildi.")
@@ -234,14 +259,14 @@ class ContextualLexicon:
                 self._prevent_lexical_poisoning(word, resolved_base, active_namespace, discourse)
                 return resolved_base
 
-        # [FAZ 10] OntoLex Semantik Graf (Fallback) Taraması
+        # OntoLex Semantik Graf Taraması (Fallback)
         fallback_id = self.semantic_client.get_base_concept_id(word_lower, epoch)
         if fallback_id:
             self._prevent_lexical_poisoning(word, fallback_id, active_namespace, discourse)
             return fallback_id
 
         if word_lower not in self._tensor:
-            raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' ne yerel tensörde ne de dışsal OntoLex semantik grafında kayıtlı değil.")
+            raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' ne yerel tensörde ne de dışsal OntoLex semantik grafında kayıtlı değil. Tahmin (inference) yapılmayacaktır.")
             
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{word}' kelimesi '{active_namespace}' alanında (Epoch: {epoch}) çözümlenemedi.")
         

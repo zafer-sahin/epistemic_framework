@@ -8,6 +8,12 @@ from linguistics.sarf_parser import MorphologicalAnalysis
 from core.exceptions import DiachronicViolationError
 
 class NestedPredicate(BaseModel):
+    """
+    .. mantik_kurali:: Kapsüllenmiş Önermeler (Higher-Order Modalities)
+    İslâm mantığında bazı edatlar (Örn: Kasr, İnne, Şart), Kadiyye'nin (önermenin) bir 
+    parçası değil, Kadiyye'nin tamamına hükmeden üst-kapsüllerdir (Modal/Deontik operatörler).
+    Bu model, Z3'te iç içe geçmiş AST düğümlerinin öz-yinelemeli (recursive) inşasını sağlar.
+    """
     model_config = ConfigDict(extra="forbid")
     operator: str
     args: List[Union[Tuple[str, str, int], 'NestedPredicate']]
@@ -15,15 +21,28 @@ class NestedPredicate(BaseModel):
 NestedPredicate.model_rebuild()
 
 class SemanticStatementIR(BaseModel):
+    """
+    .. felsefe_notu:: Ontolojik Mühür (The Seal of Provenance) ve Levh-i Mahfuz Matrisi
+    Bu sınıf basit bir Veri Transfer Nesnesi (DTO) değildir. İlm-i Nahiv, Sarf ve Ma'ânî 
+    tarafından işlenen ve tüm felsefi/psikolojik (Muktazâ el-Hâl) testleri geçen cümlenin, 
+    Z3 SMT motorunda hesaplanabilir bir 'Hakikat İddiası' (Truth Claim) olarak mühürlenmiş halidir.
+    Aktörün (Sâil/Mucîb) ve Uzayın (Namespace) kilitlerini donanımsal olarak üzerinde taşır; 
+    böylece Kripke ispatlarında 'Bağlam Zehirlenmesi'ne (Context Poisoning) geçit vermez.
+    """
     model_config = ConfigDict(extra="forbid")
     active_namespace: str
-    active_agent: Literal["Mujib", "Sail"]  # [FAZ 12] Aktör mührü (Discourse yalıtımı için Z3'te donanımsal kilit)
+    active_agent: Literal["Mujib", "Sail"]  
     predicates: List[Union[Tuple[str, str, int], NestedPredicate]] 
     is_valid_for_z3: bool
-    provenance_locked: bool = True  # [FAZ 11] Çifte Dönüşüm (Double Conversion) önleme mühürü
+    provenance_locked: bool = True  
 
 class StructuralPositingEngine:
-    """Tematik rolleri (Thematic Roles) FOL uzayında yapısal kısıtlara çevirir."""
+    """
+    .. pedagojik_anlati:: Tematik Roller ve Arazların Atanması
+    Bir varlığın (Cevher) cümlede Fail (Agent) veya Meful (Patient) olması, onun ontolojik 
+    kimliğini değiştirmez, sadece Kripke uzayındaki eylemsel pozisyonunu (Araz) belirler. 
+    Bu motor, bu geçici arazları (Thematic Roles) FOL uzayında yapısal kısıtlara çevirir.
+    """
     def extract_structural_roles(self, word: str, ontologic_id: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, int]]:
         predicates = []
         morph_data = auto_lexicon.get(word)
@@ -34,45 +53,41 @@ class StructuralPositingEngine:
 
 class IlmWadAdapter:
     """
-    Doğal dil bileşenlerini (AST ve Sarf) Birinci Dereceden Mantık (FOL) matrislerine (Semantic IR) dönüştürür.
-    Faz 2 - Adım 3.1: İlm-i Ma'ânî'den (Pragmatics) gelen yönlü 'Kasr_Data' verisini 'Kasr_Mevsuf_to_Sifat' veya 'Kasr_Sifat_to_Mevsuf' NestedPredicate formuna çevirerek Z3'e mutlak evrensel dışlama komutu verir.
-    Faz 2 - Adım 3.2: Harf-i Atıf (Fasıl/Vasıl) edatlarını Kadiyye-i Şartiyye (Inadi/Luzumi) düğümlerine dönüştürür.
-    [FAZ 1 ENTEGRASYONU]: Çifte Dönüşüm (Double Conversion) yasaklanmıştır. Tüm ara birim yüklemleri 'Classical' dönemi zaman damgasıyla (epoch) işlenmeye zorlanır. Pivot dil sızıntısı izole edilmiştir.
-    [FAZ 3 ENTEGRASYONU]: Amel_Inne AST bağları çözümlenerek Kripke uzayı için Epistemic_Necessity operatörüne sarmalanır.
-    [FAZ 4 ENTEGRASYONU]: Zarf-ı Mustakar ve Zarf-ı Lağv Muteallak ilişkileri LocatedIn FOL kısıtına çevrilir.
-    [FAZ 5 ENTEGRASYONU]: Muteallak_Harf ve Muteallak_Mekan ayırımı yapılarak Şibh-i Fiil ve diğer ontolojik edat bağları Z3 matrislerine uyarlandı.
-    [FAZ 7 ENTEGRASYONU]: AST'den gelen Rabıta statüleri (Identity/Predication) IR formlarına eşlendi. Fâ-i Füzâiyye 'Luzumi_Dynamic' ve 'Dynamic_Transition' kısıtlarına çevrildi.
+    .. pedagojik_anlati:: Dilbilimden Mantığa Geçiş Köprüsü (Semantic IR Compiler)
+    Doğal dil (AST ve Sarf verisi) doğası gereği esnektir, ancak Z3 FOL (First-Order Logic) 
+    matrisi deterministiktir. Bu sınıf, İlm-i Vaz' adaptörü olarak çalışır ve kelimelerin 
+    sentaktik bağımlılıklarını katı felsefi denklemlere dönüştürür.
     
-    [FAZ 9 LITERATE CHUNKING]: Bilişsel yükü (Cognitive Load) azaltmak için devasa `generate_ir` 
-    fonksiyonu; 'İnne İşlemleri', 'Rabıta Çözümlemesi', 'Dinamik Mantık', 'Müteallak (Uzay)' 
-    ve 'Kiplik (Pragmatics)' şeklinde izole private method'lara (Chunking) bölünmüştür.
-    Her semantik düğümün Z3 SMT motorundaki felsefi/ontolojik kısıt karşılığı 
-    pedagojik anlatılarla (LaTeX destekli) kod bloklarına dokunmuştur (Weaving).
-    
-    [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator Z3'e giden tüm düğümleri ontolojik olarak denetler.
-    
-    [FAZ 12 LITERATE PROGRAMMING & AKTÖR İZOLASYONU]:
-    Z3 IR (SemanticStatementIR) matrislerine aktarım yapılırken Sâil ve Mucîb'in 
-    mühürleri donanımsal olarak korunmuştur. IR yapısına dahil edilen `active_agent`
-    sayesinde Z3 SMT çözücüsü, ispatı kimin uzayından inşa ettiğini net biçimde bilir.
+    [FAZ 9 & 12 LITERATE CHUNKING]: Bilişsel yükü asgariye indirmek için devasa AST ayrıştırma 
+    işlemi; 'İnne İşlemleri', 'Rabıta/Dinamik Mantık', 'Uzaysal Müteallak' ve 'Pragmatik Kiplikler' 
+    olmak üzere izole edilmiş ve felsefesiyle belgelenmiş alt modüllere (Private Methods) bölünmüştür.
+    Z3 IR (SemanticStatementIR) matrislerine aktarım yapılırken Sâil ve Mucîb'in mühürleri 
+    donanımsal olarak korunmuştur.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
         self.discourse = discourse
         self.pragmatics = MaaniSpeechActAnalyzer(self.discourse)
         self.positing_engine = StructuralPositingEngine() 
+        
+        # .. mantik_kurali:: Kadiyye-i Şartiyye'nin Kısıt Sınırları
+        # 'Lüzumî' edatlar, sebep-sonuç bağının zorunlu olduğunu ($P \implies Q$) gösterirken; 
+        # 'İnadî' edatlar varlıkların aynı anda doğru (Mâniatü'l-Cem) veya yanlış (Mâniatü'l-Hulüv) 
+        # olamayacağı mantıksal dışlama (XOR, NAND vb.) durumlarını kodlar.
         self.luzumi_particles = {"in", "iza", "law", "amma"}
         self.inadi_particles = {"imma", "aw", "ya", "am"} 
         self.mani_cem_particles = {"mani_cem", "la_yectemian"} 
         self.mani_huluv_particles = {"mani_huluv", "la_yahtaliyan"} 
+        
         self.current_tevil_targets: List[str] = []
 
     def _resolve_inne_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
         """
-        .. pedagojik_anlati::
-            Amel_Inne İlişkilerini Kadiyye-i Hamliyye'ye (Mubteda_Haber) Döndürme.
-            Z3 SMT motorunda bu yapı $ \square (Ism \implies Haber) $ formunda 
-            Epistemic Necessity (Zorunluluk) düğümüne dönüştürülmek üzere hazırlanır.
+        .. pedagojik_anlati:: İnne'nin Ontolojik Baskısı (Epistemic Operator)
+        'Amel_Inne' ilişkileri sadece bir ismin nasb/ref yapılması değil, önermenin 
+        (Kadiyye-i Hamliyye) Kripke dünyalarındaki varoluşsal statüsünün sarsılmaz bir 
+        Tahkik (Zorunluluk: $\square (Ism \implies Haber)$) makamına yükseltilmesidir.
+        Bu metod, İnne edatının ayırdığı özne ve yüklemi bularak aralarına Rabıta (Predication) kilitlerini vurur.
         """
         inne_relations = {}
         for amil, mamul, rel_type, irab in dependencies:
@@ -94,10 +109,12 @@ class IlmWadAdapter:
 
     def _resolve_rabita_and_dynamic_logic(self, amil: str, mamul: str, rel_type: str, irab: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> bool:
         """
-        .. pedagojik_anlati::
-            Rabıta düğümleri ontolojik eşdeğerliği ($x = y$) veya aidiyeti ($x \in Y$) kurar.
-            Fâ-i Füzâiyye ve Harf-i Atıf ise Kripke semantiğinde dinamik durum sıçramaları 
-            ($W_t \implies W_{t+1}$) ile mantıksal nedenselliği kilitler.
+        .. felsefe_notu:: Rabıta (Gizli Yüklem) ve Dinamik Geçişler (Dynamic Logic)
+        İsim cümlelerindeki görünmez bağlayıcı (Rabıta), iki varlık arasında ya katı bir 
+        eşdeğerlik ($x = y$) ya da özellik aidiyeti ($x \in Y$) kurar. 
+        'Fâ-i Füzâiyye' ve 'Harf-i Atıf' ise, önermenin doğruluğunu zamansal ve nedensel 
+        olarak ardışık Kripke durumlarına ($W_t \implies W_{t+1}$) bölerek Dinamik Mantık 
+        operatörlerini tetikler.
         """
         if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
             return True
@@ -145,10 +162,11 @@ class IlmWadAdapter:
 
     def _resolve_mutaallak_spatial_logic(self, amil: str, mamul: str, rel_type: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> bool:
         """
-        .. pedagojik_anlati::
-            Harf-i Cerlerin Müteallak (Bağlantı) Prensibi:
-            FOL uzayında $\exists x. \text{LocatedIn}(x, l, w, t)$ şeklinde çok boyutlu
-            uzay kısıtını Kripke dünyalarına uygular.
+        .. mantik_kurali:: Mekânın Kısıtlayıcılığı (SpaceSort Mutaallak)
+        Bir varlığın veya eylemin "fi" (içinde) veya "ala" (üzerinde) gibi harf-i cerlerle 
+        konumlandırılması, onun ontolojik olarak sınırlandırılmasıdır. Bu metod, mekânsal 
+        veya bağıntısal kısıtları FOL uzayına $\exists x. \text{LocatedIn}(x, l, w, t)$ 
+        formatında enjekte eder.
         """
         if rel_type in ['Muteallak_Mekan', 'Muteallak_Harf']:
             harf_node = mamul
@@ -175,9 +193,11 @@ class IlmWadAdapter:
 
     def _wrap_with_pragmatic_modalities(self, ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], pragmatics_res: Dict[str, Any]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
         """
-        .. pedagojik_anlati::
-            İlm-i Ma'ânî'den süzülen pragmatik verilerin (Deontik $O(P)$, Kasr $\forall x$, 
-            Epistemik $\square P$) üst-kapsül olarak IR yüklemlerine sarılması işlemidir.
+        .. pedagojik_anlati:: Modal Kapsüller ve İlm-i Ma'ânî İzdüşümü
+        Atomik seviyede çözümlenen FOL matrisleri, en son aşamada İlm-i Ma'ânî'den gelen 
+        üst-düzey felsefi kipliklere (Modalities) sarılır. 
+        Emirler/Nehiyler Deontik Kısıtlara ($O(P)$), İstifham-ı İnkâriler Varoluşsal Redde, 
+        Kasr Edatları ise Yönlü Evrensel Dışlamaya ($\forall x$) dönüştürülür.
         """
         if pragmatics_res.get("type") == "Deontic":
             op = "Wajib_Fiqh" if pragmatics_res.get("operator") == "Emir" else "Haram_Fiqh"
@@ -199,9 +219,10 @@ class IlmWadAdapter:
 
     def _process_atomic_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
         """
-        .. pedagojik_anlati::
-            Temel Amil-Mamul ilişkilerinin, yapısal roller (Agent, Patient) ile 
-            birlikte salt FOL (First-Order Logic) atomlarına ayrıştırılmasıdır.
+        .. matematiksel_model:: FOL Atomizasyonu
+        Yukarıdaki özel felsefi düğümlere takılmayan temel bağımlılıklar (Örn: Fail, Meful, Sıfat), 
+        Kripke uzayında değerlendirilmek üzere ikili ilişki fonksiyonları (Binary Relations: $R(x,y)$) 
+        ve birli varlık fonksiyonları (Unary Functions: $E(x)$) halinde düzleştirilir.
         """
         processed_roles = set()
         for amil, mamul, rel_type, irab in dependencies:
@@ -246,8 +267,10 @@ class IlmWadAdapter:
 
     def _apply_propositional_capsules(self, has_mani_cem: bool, has_mani_huluv: bool, has_inadi: bool, has_luzumi: bool, atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
         """
-        .. pedagojik_anlati::
-            Kadiyye-i Şartiyye (Hipotetik Önermeler) için İnadî/Lüzumî üst kapsülleme işlemleri.
+        .. mantik_kurali:: Kadiyye-i Şartiyye Sarmalaması
+        Önerme parçacıkları toplandıktan sonra, cümlenin bütününde lüzumiyet veya inadiyet 
+        tespit edilmişse, tüm atomik matrisler ilgili mantıksal fonksiyonun (örneğin Mâniatü'l-Cem) 
+        argümanları olarak sarmalanır.
         """
         ir_predicates = []
         if has_mani_cem:
@@ -263,6 +286,12 @@ class IlmWadAdapter:
         return ir_predicates
 
     def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical") -> SemanticStatementIR:
+        """
+        .. pedagojik_anlati:: Orkestrasyon ve SMT'ye Teslimiyet
+        Dilin tüm yüzey arazlarından (Sarf/Nahiv/Ma'ânî) arındırılarak saf matematiksel/felsefi 
+        (IR) haline getirildiği ana döngüdür. İşlem başarılı olursa Z3 çözücüsüne hazır, 
+        Provenance (Köken) mühürlü ve Aktör-yalıtımlı bir SemanticStatementIR matrisi döner.
+        """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
             
@@ -312,12 +341,11 @@ class IlmWadAdapter:
         
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str) -> str:
         """
-        .. pedagojik_anlati::
-            Tahrîr-i Niza' (İzolasyon Sınırı) ve Z3 IR Aktarımı:
-            [FAZ 12] Sâil ve Mucîb'in diyalektik (Mu'aradah) uzaylarındaki varlıklar FOL matrisine 
-            taşınırken 'active_namespace' ve 'active_agent' mührü (Seal) ile korunur. Eğer bir zamir, 
-            rakibin hayalet (phantom) uzayını aşıp kendi hakikatini bulursa, ontolojik ID değişmeden 
-            (fakat mühürlenerek) ispat motoruna gönderilir.
+        .. felsefe_notu:: Tahrîr-i Niza' (Yalıtım Sınırı) ve Ontolojik Atama
+        [FAZ 12] Mu'aradah (Çapraz İtiraz) esnasında, bir lafzın (word) hakiki kimliğini (Ontologic ID) bulur.
+        Eğer Sâil, Mucîb'in daha önce tanımladığı bir varlığa (zamir veya isim yoluyla) ulaşmaya çalışırsa, 
+        'DiscourseRegister' üzerinden 'Hayalet' (Phantom) kalkanına çarpar. 
+        Eğer eşleşme meşru ise ID Z3 matrisine mühürlenir. Mecaz ve Tevil kuralları (Fallback) bu aşamada işletilir.
         """
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
@@ -340,6 +368,7 @@ class IlmWadAdapter:
 
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch)
         
+        # Tevil İhtiyacı: Kelime, Zahir (Hakiki) manasında çıkmaza giriyorsa Mecaz evrenine geçiş yapılır.
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
                 ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch)
@@ -351,7 +380,7 @@ class IlmWadAdapter:
         StrictAirGapValidator.validate_provenance(ontologic_id)
 
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
-            # [FAZ 2 / 12 ENTEGRASYONU]: HPSG Kısıtlarının (Cinsiyet ve Sayı) Belleğe Aktarımı
+            # Varlık Söylem Belleğine (Hâfıza) cinsiyet ve sayı kısıtlarıyla (HPSG) birlikte kaydedilir.
             gender = getattr(morph_data, 'gender', None) if morph_data else None
             number = getattr(morph_data, 'number', None) if morph_data else None
             self.discourse.add_mention(word, ontologic_id, active_namespace, gender=gender, number=number)

@@ -4,10 +4,18 @@ from linguistics.contextual_lexicon import StrictAirGapValidator
 from core.exceptions import DiachronicViolationError
 
 # ==============================================================================
-# BÖLÜM 0: 'İLM-İ SARF VE ÜRETKEN MORFOLOJİ (GENERATIVE MORPHOLOGY)
+# BÖLÜM 0: İLM-İ SARF VE ÜRETKEN MORFOLOJİ (GENERATIVE MORPHOLOGY)
 # ==============================================================================
 
 class MorphologicalAnalysis(BaseModel):
+    """
+    .. pedagojik_anlati:: İlm-i Sarf ve Lafzın Ontolojik Pasaportu
+    Klasik Arapça'da bir kelime (lafız), statik bir karakter dizisi değil; kökünden (Asl) 
+    türeyerek belirli bir kalıba (Vezin) giren, böylece harici dünyadaki (a'yân) bir varlığa, 
+    eyleme veya niteliğe dönüşen dinamik bir yapıdır. Bu model, kelimenin sadece sözlüksel 
+    özelliklerini değil, Z3 SMT motorunda hangi ontolojik kısıtlara (Constraint) tabi olacağını 
+    mühürleyen bir felsefi kimlik kartıdır.
+    """
     model_config = ConfigDict(extra="forbid")
     original_word: str
     root: str           
@@ -22,13 +30,22 @@ class MorphologicalAnalysis(BaseModel):
     provenance_locked: bool = Field(default=True, description="[FAZ 11] İstatistiksel Stemmer/NLP sızıntısını engelleyen mühür")
 
 class OntoLexRule(BaseModel):
-    """OntoLex-Morph standardında kelime üretim/çekim kuralları"""
+    """
+    .. mantik_kurali:: Türetim (Derivation) ve Determinizm
+    İslâm mantığında nedensellik (illiyet) kesindir. Bir kelimenin aslından (root) türemesi,
+    olasılıksal (probabilistic) bir NLP süreciyle tahmin edilemez; katı pozisyonel kurallarla 
+    (Extraction Rules) haritalandırılmak zorundadır.
+    """
     model_config = ConfigDict(extra="forbid")
     rule_type: str
     positions: List[Union[int, str]]
 
 class OntoLexMorphEntry(BaseModel):
-    """OntoLex-Morph RDF/Graf düğümü karşılığı"""
+    """
+    .. felsefe_notu:: A'yân-ı Sâbite ve Kelime Grafları
+    Bu model, W3C OntoLex standardında kelimelerin ideal formlarını (Platonik İdealar / A'yân-ı Sâbite)
+    temsil eder. Fiziksel metindeki her kelime, bu soyut graf düğümlerinden birine refere (instantiation) eder.
+    """
     model_config = ConfigDict(extra="forbid")
     pattern_id: str
     ontologic_type: str
@@ -45,8 +62,10 @@ class OntoLexMorphEntry(BaseModel):
 
 class IOntoLexGraphClient(Protocol):
     """
-    [FAZ 10] Dışsal OntoLex Graf Veritabanı Arayüzü (Interface).
-    Sarf motoru veriyi kendi içinde tutmaz, bu arayüz üzerinden SPARQL veya yerel graf sorguları atar.
+    .. pedagojik_anlati:: Hakikatin Dışsallığı (External Truth)
+    Sarf motoru bilginin kaynağı değil, sadece işleyicisidir (Active Intellect). Kelimelerin 
+    ontolojik statüleri ve bükün kuralları sisteme içkin (hardcoded) olamaz; dışsal ve mutlak 
+    bir hakikat kaynağından (Graf Veritabanı) çekilmelidir. Bu arayüz, epistemolojik sınırları çizer.
     """
     def query_closed_set(self, core_word: str) -> Optional[Dict[str, str]]: ...
     def query_pattern_graph(self, signature: str) -> Optional[OntoLexMorphEntry]: ...
@@ -55,10 +74,13 @@ class IOntoLexGraphClient(Protocol):
 
 class LocalOntoLexGraphClient:
     """
-    [FAZ 10] Gerçek bir Triple-Store (Graf Veritabanı) bağlanana kadar, OntoLex düğümlerini
-    RAM üzerinde simüle eden yerel istemci. Katı veri/mantık izolasyonunu (Air-Gap) sağlar.
+    .. felsefe_notu:: Kapalı Kümeler (Closed Sets) ve Monadlar
+    Harfler (Edatlar), İsm-i İşaretler ve Kasr Edatları üretken morfolojiye (iştikak) tabi olmayan, 
+    kendi içlerine kapalı sâbitelerdir (Monadlar). Bu simülatör, bu mutlak sâbiteleri ve 'Fa'ala' 
+    gibi evrensel kalıpları geçici olarak barındıran bir bellek (Hafıza) işlevi görür.
     """
     def __init__(self):
+        # Bağımsız bir anlam taşımayıp sadece bağlamı belirleyen fonksiyonel yapılar
         self._harf_set = {
             "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
             "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  
@@ -69,12 +91,17 @@ class LocalOntoLexGraphClient:
         self._kasr_set = {"innema", "illa"}
         self._ism_isaret_set = {"haza", "hazihi", "zalike", "tilke", "hula", "ulaika"}
         
-        # İlleteyn (İki İllet) taşıyan Gayri Munsarif Kökleri
+        # .. mantik_kurali:: İlleteyn (İki İllet) ve Ontolojik Ağırlık
+        # Gayri Munsarif kelimeler (Örn: Yabancı kökenlilik ve Özel İsim olma gibi iki illeti taşıyanlar), 
+        # dildeki varoluşsal ağırlıkları (ontological weight) nedeniyle esre (Kesra) ve tenvin almayı reddederler.
         self._diptote_stems = {
             "makkat", "ibrahim", "ismail", "umar", "ahmad", "ahmed", 
             "mesacid", "masabih", "fatimat", "ayishat", "makkah"
         }
 
+        # .. pedagojik_anlati:: Emsile ve Bina'nın Matematiksel Matrisi
+        # Klasik medrese müfredatındaki fiil çekim kalıplarının (Vezinler), cebirsel imzalara 
+        # (Structural Signatures - CaCaCa) dönüştürülmüş halleridir.
         self._pattern_graph: Dict[str, OntoLexMorphEntry] = {
             "CaCaCa": OntoLexMorphEntry(pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
             "CaCaCat": OntoLexMorphEntry(pattern_id="Fa'alat", ontologic_type="Fiil", thematic_role="Action", gender="Muennes", number="Mufred", hidden_pronoun="Hiye", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
@@ -119,27 +146,28 @@ class LocalOntoLexGraphClient:
 
 class SarfEngine:
     """
-    Üretken Morfoloji Motoru ('İlm-i Sarf).
-    [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) bükün sınıfları eklendi.
-    [FAZ 2 ENTEGRASYONU]: Müstatir zamirler (Hidden Pronouns), Cinsiyet (Gender) ve Sayı (Number) HPSG kısıtları OntoLex grafına işlendi.
-    [FAZ 3 ENTEGRASYONU]: Huruf-u Müşebbehe bil-Fiil (İnne ve kardeşleri) izole edilerek Epistemic Operator sınıfı tanımlandı.
-    [FAZ 6 ENTEGRASYONU]: İsm-i İşaretler (Demonstrative Pronouns) kapalı kümeye eklendi. Harf-i Ta'rif (al_/el_) kök soyutlaması yapıldı.
-    [FAZ 10 ENTEGRASYONU]: Veri ve Mantık ayrıştırıldı. SarfEngine sadece derivasyon yapar, ontolojik veriyi graf istemcisinden (IOntoLexGraphClient) çeker.
-    
-    [FAZ 8 BÜTÜNCÜL (HOLISTIC) GÜNCELLEME]: Bilişsel yükü parçalama (Chunking) uygulanmıştır.
-    Sarf motoru, tanınmayan veya harekesiz yazılan kelimeleri (Waqf) çökerterek reddetmek yerine,
-    'Alem/Camid_Waqf' formunda işaretler. Ontolojik meşruiyet denetimini İlm-i Vaz'a (Lexicon) devreder.
-    
-    [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator ile istatistiksel kök buluculara (stemmer) gidiş yolları kapatılmış, i'lâl deterministik bırakılmıştır.
+    .. pedagojik_anlati:: Sarf Motoru ve Sistemin Orkestrasyonu
+    Bu sınıf, İlm-i Sarf kurallarını deterministik bir şekilde icra eden fonksiyonel kalbidir. 
+    Kelimelerin i'rab (son harf harekeleri) ve yapılarındaki zayıf harflerin (İllet) dönüşümlerini 
+    hesaplayarak, Nahiv motorunun (Sentaktik Derleyici) Z3 uzayında ihtiyaç duyacağı saf ontolojik 
+    matrisleri hazırlar. Batılı kelime kökü bulucularının (Stemmer) istatistiksel yanılma paylarını 
+    reddederek, mantıksal nedenselliği (Causality) korur.
     """
     def __init__(self, graph_client: Optional[IOntoLexGraphClient] = None):
         self.vowels = {'a', 'e', 'i', 'ı', 'o', 'ö', 'u', 'ü'}
-        # Bağımlılık Enjeksiyonu (Dependency Injection): Eğer dışsal istemci yoksa, izole lokal grafi yükle.
         self.graph_client = graph_client or LocalOntoLexGraphClient()
-        # [FAZ 11] Motorun çalışacağı dönemi kilitler
+        
+        # .. felsefe_notu:: Anakronizm Zırhı
+        # Kavramların modern seküler çağrışımlarla kirlenmesini önlemek için motor 
+        # zorunlu olarak 'Classical' (Klasik) döneme kilitlenmiştir.
         StrictAirGapValidator.validate_epoch("Classical")
 
     def _generate_structural_signature(self, word: str) -> str:
+        """
+        .. mantik_kurali:: Harekelerden Soyutlama (Abstraction)
+        Kelimenin spesifik sesletiminden (arazlardan) sıyrılarak, kök harflerin (Cevher)
+        ontolojik iskeletini (Signature) ortaya çıkarma işlemidir.
+        """
         sig = ""
         word_lower = word.lower()
         length = len(word_lower)
@@ -158,6 +186,13 @@ class SarfEngine:
         return sig
 
     def _apply_ontolex_rules(self, word: str, rule: OntoLexRule) -> str:
+        """
+        .. felsefe_notu:: İ'lâl ve İbdâl (Ontolojik Çözümleme ve Başkalaşım)
+        İlletli harfler (vav, ya, elif) doğaları gereği zayıftır ve kelimenin kalıba (Vezin)
+        girişi sırasında düşebilir veya birbirlerine dönüşebilir. Bu metod, bir 'String Replace'
+        operasyonu değil; kelimenin bozulan içsel dengesini yeniden kurarak Asl'a (kökene) 
+        rücu etmesini sağlayan felsefi bir restorasyon sürecidir.
+        """
         word_lower = word.lower()
         resolved_root = ""
         
@@ -181,13 +216,18 @@ class SarfEngine:
                 else:
                     raise ValueError(f"Geçersiz OntoLex-Morph kural parametresi: {pos}")
             
-            # [FAZ 11] Türetilen kök üzerinde dışsal kütüphane sızıntı denetimi.
             StrictAirGapValidator.validate_provenance(resolved_root)
             return resolved_root
         except IndexError:
             raise ValueError(f"[İ'LÂL HATASI] '{word}' kelimesinin yapısal indeksi OntoLex kural sınırlarını taştı. Olasılıksal Stemmer kullanımı yasaktır.")
 
     def _strip_definite_article(self, original_word: str) -> Tuple[str, bool]:
+        """
+        .. pedagojik_anlati:: Harf-i Ta'rif ve Belirlilik (Ma'rife)
+        'Al-' takısı, ismin referans noktasını zihindeki herhangi potansiyel bir varlıktan (Nekra), 
+        harici dünyada belirlenmiş ve aktüelleşmiş spesifik bir varlığa (Ma'rife) taşır. Z3 matrisinde 
+        bu, varlıksal bir mühürlemedir.
+        """
         core_word = original_word
         if core_word.startswith("al_"):
             return core_word[3:], True
@@ -211,6 +251,12 @@ class SarfEngine:
         return None
 
     def _evaluate_ontolex_graph(self, original_word: str, core_word: str) -> Optional[MorphologicalAnalysis]:
+        """
+        .. felsefe_notu:: Müstatir Zamir (Hidden Pronoun) İnjeksiyonu
+        Her fiil kalıbı, içerisinde zımni (müstatir) bir zamir barındırır. "Her eylemin bir faili vardır" 
+        felsefi aksiyomu gereği, bu metod fiilin içine gömülü faili (Örn: Huve/Hiye) çıkararak, Z3 uzayının 
+        failsiz kalarak nedensellik bağını yitirmesini (Ex Falso Quodlibet) kesin olarak engeller.
+        """
         signature = self._generate_structural_signature(core_word)
         entry = self.graph_client.query_pattern_graph(signature)
 
@@ -230,9 +276,15 @@ class SarfEngine:
         return None
 
     def _evaluate_nominal_endings_and_diptotes(self, original_word: str, core_word: str, has_al_prefix: bool) -> MorphologicalAnalysis:
+        """
+        .. mantik_kurali:: Gayri Munsarif Zafiyetinin Giderilmesi ve İ'rab
+        Bu aşama, amil-mamul atamalarındaki fatal hataları önler. Eğer bir isim Gayri Munsarif 
+        (Diptote) ise, cer (Majrur) durumunda bile fetha ('a') alır. Sistemin sondaki 'a' sesini 
+        görüp kelimeyi yanlışlıkla Meful (Nesne) sanması, Z3 motorunda fail ile mefulün yer 
+        değiştirmesine ve cümlenin mantıksal predikatının (Semantic Shift) ters dönmesine yol açar.
+        """
         stem_1 = core_word[:-1]
         
-        # Gayri Munsarif Kontrolü 1: Harekeli formlar (Diptote Validation via Graph)
         if self.graph_client.check_diptote_status(stem_1) and core_word[-1] in ("u", "a", "e", "i", "ı"):
             irab_val = "Marfu" if core_word[-1] in ("u", "ü") else "Mansub_or_Majrur"
             return MorphologicalAnalysis(
@@ -241,7 +293,6 @@ class SarfEngine:
                 gender="Muzekker", number="Mufred"
             )
 
-        # Gayri Munsarif Kontrolü 2: Harekesiz/Waqf veya transliterasyon formlar
         if self.graph_client.check_diptote_status(core_word):
             return MorphologicalAnalysis(
                 original_word=original_word, root=core_word, pattern="Gayri_Munsarif",
@@ -265,7 +316,10 @@ class SarfEngine:
         elif core_word.endswith(("i", "ı")):
             return MorphologicalAnalysis(original_word=original_word, root=core_word[:-1], pattern="Alem/Camid_Mudaf", ontologic_type="Ism", irab="Majrur", gender="Muzekker", number="Mufred")
         
-        # BÜTÜNCÜL ÇÖZÜM: HAREKESİZ İSİMLER (WAQF / DURAKLAMA) ZIRHI
+        # .. pedagojik_anlati:: Waqf (Duraklama) Zırhı ve Ontolojik Meşruiyet
+        # Harekeli okumanın olmadığı durumlarda (Waqf) sistem çökertilmez (Silent Fail engeli).
+        # Kelime 'Alem/Camid_Waqf' formunda tutulur ve ontolojik meşruiyet denetimi 
+        # (Discourse State) İlm-i Vaz'a (Lexicon) havale edilir.
         return MorphologicalAnalysis(
             original_word=original_word, root=core_word, pattern="Alem/Camid_Waqf",
             ontologic_type="Ism", thematic_role=None, irab="Waqf", is_diptote=False,

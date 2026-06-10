@@ -4,85 +4,120 @@ from enum import IntEnum
 from core.exceptions import ContextPoisoningError
 
 class DenialLevel(IntEnum):
-    KHALI_AL_ZIHN = 0  # Zihin boş, nötr durum. Tevkîd (pekiştirme) yasaktır.
-    MUTAREDDIT = 1     # Şüphe durumu (Men' saldırısı). Tevkîd kullanımı caiz/önerilendir (Hasan).
-    MUNKIR = 2         # Kesin inkar durumu (Nakz saldırısı). Tevkîd zorunludur (Vâcib).
+    """
+    .. mantik_kurali:: Muktazâ el-Hâl ve Muhatabın Epistemik Halleri
+    İlm-i Ma'ânî'ye göre sözün kıymeti, kelimelerin sözlük anlamında değil, muhatabın (Sâil'in) 
+    hakikate karşı takındığı psikolojik ve epistemik tavra (Muktazâ el-Hâl) uygunluğundadır. 
+    Bu ontolojik hiyerarşi, deterministik SMT motorunun Kripke uzayındaki hesaplamalarına 
+    geçmeden önce uygulayacağı retorik filtrelerin (Tevkîd katsayısı) eşik değerlerini belirler.
+    """
+    KHALI_AL_ZIHN = 0  # Zihin boş, nötr durum. Tevkîd (pekiştirme) israftır ve retorik olarak yasaktır.
+    MUTAREDDIT = 1     # Şüphe durumu (Men' saldırısı). Muhatabın şüphesini gidermek için Tevkîd kullanımı caiz/önerilendir (Hasan).
+    MUNKIR = 2         # Kesin inkar durumu (Nakz saldırısı). Hakikatin savunulması için Tevkîd zorunludur (Vâcib).
 
 class EntityMention(BaseModel):
+    """
+    .. felsefe_notu:: Lafzın Ontolojik Mühürlenmesi (Instantiation)
+    Bir kelime (lafız), sadece dizgisel (string) bir değişken değil; Sâil veya Mucîb tarafından 
+    belirli bir usûl uzayında (Namespace) iddia edilmiş bir varlık yansımasıdır (A'yân-ı Sâbite'nin 
+    cümledeki tezahürü). Varlıkların HPSG (Cinsiyet ve Sayı) kısıtlarıyla mühürlenmesi, 
+    mantıksal argümantasyonda (Kıyas) oluşabilecek terim kaymalarını ve safsataları engeller.
+    """
     word: str
     ontologic_id: str
     timestamp: int
     agent: Literal["Mujib", "Sail"]
-    sealed_namespace: str  # [FAZ 4] Yalıtım Zırhı: Hangi usûl uzayında (Namespace) üretildiğini mühürler.
-    # [FAZ 2 ENTEGRASYONU]: HPSG (Cinsiyet ve Sayı) Kısıt Yapıları
+    sealed_namespace: str  
     gender: Optional[str] = None
     number: Optional[str] = None
 
 class DiscourseRegister:
     """
-    Çok-Aktörlü (Multi-Agent) Kapsamlı Söylem Belleği (Discourse Register).
-    Faz 4 - Adım 1: Sâil ve Mucîb için mutlak Semantik Yalıtım (Context Sealing) zırhı.
-    Faz 2 - Adım 1: Epistemik Durum (Muktazâ el-Hâl) matrisi.
-    [FAZ 2 ENTEGRASYONU]: HPSG Kısıtları ile Discourse Representation Theory (DRT) Anaphora çözümlemesi.
+    .. pedagojik_anlati:: Âdâb-ı Bahs, Kuvve-i Hâfıza ve Diyalektik Matris
+    Bu sınıf, bir yazılım "Stack" (Yığıt) veri yapısı olmanın çok ötesinde, İbn Sînâcı 
+    'Kuvve-i Hâfıza'nın ve Seyyid Şerif el-Cürcânî'nin 'Tahrîr-i Niza' (Tartışma Noktasının Yalıtımı) 
+    prensibinin koda dökülmüş halidir. 
     
-    [FAZ 12 LITERATE PROGRAMMING & BİPARTİTE DRT]: 
-    Mu'aradah (Çapraz İtiraz) evresinde, Sâil (itiraz eden) kendi kıyasını kurarken
-    Mucîb'in (iddia sahibi) mühürlediği ontolojik uzaya çarpıp sistemi çökertmemelidir (False Positive ContextPoisoning).
-    Bu mimari, rakibin uzayını 'Hayalet' (Phantom) olarak değerlendirip üzerinden atlar. 
-    Yalnızca 'Base' (Müsellemât - Ortak Kabuller) uzayı her iki aktör için paylaşımlı ve bağlayıcıdır.
-    Kasti bir namespace dayatması (Enforcement) olursa ContextPoisoningError fırlatılır.
+    Sâil (İtiraz Eden) ve Mucîb (İddia Sahibi) aynı zihinsel sahneyi (Discourse) paylaşsalar da, 
+    birbirlerinin ontolojik önkabullerini (Namespace) çalamazlar veya onlara dayanarak kendi 
+    kıyaslarını kuramazlar. Sistem, iki farklı zihnin aynı anda simüle edildiği, varlıkların 
+    "Ortak Kabul" (Müsellemât) veya "Hayalet" (Phantom) olarak etiketlendiği iki-kutuplu (Bipartite) 
+    bir Discourse Representation Theory (DRT) matrisidir.
     """
     def __init__(self):
-        # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
+        # Yığıt (Stack) mimarisi: index 0 her zaman Global (Kök) bağlamı, yani evrensel hakikatleri temsil eder.
         self.scopes: List[List[EntityMention]] = [[]]  
         self.clock: int = 0
         
-        # [FAZ 2 ENTEGRASYONU]: Munfasıl/Muttasıl Zamirlerin HPSG Cinsiyet ve Sayı Matrisi
+        # .. felsefe_notu:: Arazların Cevhere Tabi Olması (HPSG Matrisi)
+        # Zamirler kendi başlarına var olamazlar; ancak işaret ettikleri cevherin 
+        # cinsiyet (Müzekker/Müennes) ve sayı (Müfred/Cemi/Tesniye) kısıtlarına uyarak varlık kazanırlar.
         self.pronouns = {
             "huve": {"gender": "Muzekker", "number": "Mufred"},
             "hiye": {"gender": "Muennes", "number": "Mufred"},
-            "huma": {"gender": None, "number": "Tesniye"},  # Tesniye (İkil) her iki cinsiyeti de kapsayabilir.
+            "huma": {"gender": None, "number": "Tesniye"},  # Tesniye (İkil) zımnen her iki cinsiyeti de kapsar.
             "hum": {"gender": "Muzekker", "number": "Cemi"},
             "hunne": {"gender": "Muennes", "number": "Cemi"}
         }
         
-        self.active_agent: Literal["Mujib", "Sail"] = "Mujib" # Varsayılan aktör iddia sahibidir (Mucîb)
+        # Münazaranın kurucusu ve iddia sahibi kural gereği Mucîb'dir (Savunucu).
+        self.active_agent: Literal["Mujib", "Sail"] = "Mujib" 
         
-        # [FAZ 2.1] Epistemik Durum Matrisi (Muktazâ el-Hâl)
+        # Epistemik başlangıç durumu: Zihinler tabula rasa (Khali al-Zihn) kabul edilir.
         self.epistemic_state: Dict[Literal["Mujib", "Sail"], DenialLevel] = {
             "Mujib": DenialLevel.KHALI_AL_ZIHN,
             "Sail": DenialLevel.KHALI_AL_ZIHN
         }
 
     def set_agent(self, agent: Literal["Mujib", "Sail"]) -> None:
-        """Diyalektik sırasına göre aktif aktörü (Sâil veya Mucîb) değiştirir."""
+        """
+        .. mantik_kurali:: Diyalektik Nöbet Değişimi
+        Tartışma (Mu'aradah) esnasında aktif zihnin sahibini belirler. SMT motoru bu andan itibaren 
+        bu aktörün usûl kurallarına göre işlem yapacaktır.
+        """
         self.active_agent = agent
 
     def update_epistemic_state(self, agent: Literal["Mujib", "Sail"], level: DenialLevel) -> None:
-        """İlm-i Ma'ânî gereği muhatabın inkâr derecesini günceller."""
+        """
+        .. mantik_kurali:: Epistemik Geri Dönüşsüzlük (Entropy of Denial)
+        Diyalektikte inkar derecesi, mantıksal bir delil (Bürhan) sunulup şüphe giderilmedikçe 
+        kendi kendine geriye düşemez. Muhatap 'Munkir' olduysa, tevkîd zorunluluğu kalıcılaşır.
+        """
         if level < self.epistemic_state[agent]:
-            # Diyalektikte inkar derecesi (şüphe giderilmedikçe) geriye düşemez.
             return
         self.epistemic_state[agent] = level
 
     def get_opponent_epistemic_state(self) -> DenialLevel:
-        """Aktif aktörün muhatabının epistemik durumunu döndürür (Muktazâ el-Hâl denetimi için)."""
+        """
+        Cümlenin retorik inşası (Muktazâ el-Hâl) için rakibin zihinsel inkar durumunu sorgular.
+        """
         opponent = "Sail" if self.active_agent == "Mujib" else "Mujib"
         return self.epistemic_state[opponent]
 
     def push_scope(self) -> None:
-        """Z3.push() veya yeni bir diyalektik iddia açıldığında alt bağlamı yaratır."""
+        """
+        .. felsefe_notu:: Kripke Uzayında Varsayımsal Dünyalar (Possible Worlds)
+        Z3.push() tetiklendiğinde veya yeni bir diyalektik argüman açıldığında (Kadiyye-i Şartiyye), 
+        mutlak gerçeklikten (Frame 0) yalıtılmış yeni bir varsayımsal alt-dünya yaratılır.
+        """
         self.scopes.append([])
 
     def pop_scope(self) -> None:
-        """Z3.pop() tetiklendiğinde veya iddia çürütüldüğünde varsayımsal bağlamı imha eder."""
+        """
+        .. felsefe_notu:: Dünyaların İmhası
+        Z3.pop() tetiklendiğinde veya varsayımsal iddia çürütüldüğünde (Nakz), o bağlam içinde 
+        yaratılmış tüm ontolojik yüklemeler imha edilir ve varlık hiyerarşisi bir önceki duruma rücu eder.
+        """
         if len(self.scopes) > 1:
             self.scopes.pop()
         else:
-            raise RuntimeError(f"[BELLEK HATASI] Global söylem çerçevesi (Frame 0) imha edilemez. Stack underflow.")
+            raise RuntimeError(f"[BELLEK HATASI] Global söylem çerçevesi (Frame 0 - Müsellemât) imha edilemez. Stack underflow.")
 
     def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None) -> None:
-        """Aktif aktörün kapsamına, aktif uzayın mührüyle (namespace) yeni bir ontolojik varlık ataması yapar."""
+        """
+        Aktif aktörün yığıtındaki (scope) en üst dünyaya (top of stack), kendi uzayının mührüyle (namespace) 
+        yeni bir varlık (A'yân) zerk eder.
+        """
         mention = EntityMention(
             word=word, 
             ontologic_id=ontologic_id, 
@@ -97,14 +132,15 @@ class DiscourseRegister:
 
     def _verify_context_sealing(self, pronoun: str, resolved_mention: EntityMention, enforcement_namespace: Optional[str]) -> Literal["VALID", "PHANTOM"]:
         """
-        [FAZ 12] Tahrîr-i Niza' (İzolasyon) ve Hayalet (Phantom) Tespiti.
-        
-        .. felsefe_notu::
-            Mu'aradah (Çapraz İtiraz) anında, Sâil'in LIFO taramasında Mucîb'in nesnesine denk gelmesi 
-            iki hakikatin çarpışması anlamına gelmez. Eğer varlık 'Base' (Müsellemât) uzayındaysa, 
-            ortak kabuldür ve doğrudan bağlanır. Değilse, Sâil bunu 'hayalet' (phantom) kabul edip atlar.
-            Ancak, Sâil bilerek rakibin mühürlü uzayını dayatırsa (enforcement), bu ontolojik bir hırsızlıktır
-            ve sistem ContextPoisoningError fırlatarak motoru durdurur.
+        .. mantik_kurali:: Mu'aradah (Çapraz İtiraz) ve Ontolojik Yalıtım / Hayalet (Phantom) Prensibi
+        Sâil, kendi argümanını (Kıyas) kurarken, Mucîb'in zihnindeki (onun uzayına mühürlenmiş) 
+        bir varlığa atıf yapamaz (veya tam tersi).
+        1. Eğer varlık 'Base' (Müsellemât / Ortak Hakikatler) uzayında ise eşleşme geçerlidir (VALID).
+        2. Eğer varlık rakibin mühürlü uzayındaysa, bu varlık bir 'Hayalet' (PHANTOM) kabul edilir 
+           ve aramada es geçilir (Bypass). 
+        3. Ancak rakibin uzayı kasten parametre olarak dayatılırsa (Enforcement), bu bir 
+           "Bağlam Zehirlenmesi" (Context Poisoning) ve ontolojik hırsızlık (Theft) suçudur. 
+           Sistem derhal durdurulur.
         """
         if resolved_mention.sealed_namespace == "Base":
             return "VALID"
@@ -120,7 +156,7 @@ class DiscourseRegister:
             # Normal akış: Rakibin uzayı hayalet olarak değerlendirilip atlanır (Phantom Bypass)
             return "PHANTOM"
             
-        # Kendi uzayımız: Başka bir uzay dayatması varsa (Kendi içinde zehirlenme)
+        # Kendi uzayımız: Başka bir uzay dayatması varsa (Kendi içinde zehirlenme - Tutarsızlık)
         if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
             raise ContextPoisoningError(
                 f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
@@ -133,20 +169,27 @@ class DiscourseRegister:
 
     def _check_hpsg_unification(self, resolved_mention: EntityMention, target_gender: Optional[str], target_number: Optional[str]) -> bool:
         """
-        [FAZ 2] HPSG Kısıt Doğrulaması (Cinsiyet ve Sayı Uyumu)
+        .. mantik_kurali:: Yapısal Uyum ve Özdeşlik (Unification)
+        Bir zamirin işaret ettiği asıl varlık (Antecedent) ile cinsiyet (Müzekker/Müennes) 
+        ve sayı (Müfred/Cemi) bakımından ontolojik uyumu (Feature Unification) denetlenir. 
+        Uyum yoksa bir önceki düğüm noktasına geçilir.
         """
         if target_gender and resolved_mention.gender and target_gender != resolved_mention.gender:
-            return False  # Cinsiyet uyuşmazlığı, önceki adaylara bak.
+            return False  # Cinsiyet uyuşmazlığı
         
         if target_number and resolved_mention.number and target_number != resolved_mention.number:
-            return False  # Sayı uyuşmazlığı, önceki adaylara bak.
+            return False  # Sayı uyuşmazlığı
             
         return True
 
     def resolve_pronoun(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[str]:
         """
-        [FAZ 12] Aktör-Spesifik, Uzay-Korumalı ve Hayalet (Phantom) Taramalı Zamir Çözümlemesi.
-        [FAZ 2 ENTEGRASYONU] HPSG Feature Structures (Cinsiyet ve Sayı) üzerinden DRT Geriye Dönük Çözümlemesi.
+        .. pedagojik_anlati:: İrcâ-ı Zamir (Zamirin Merciine Döndürülmesi)
+        Klasik felsefi metinlerdeki en büyük kriz, zamirin (Huve, Hiye) kime/neye döndüğünün (Merci) 
+        belirsizliğidir. Bu metod, yığıt içerisinde sondan başa (LIFO - Last In First Out) ilerleyerek,
+        önce HPSG yapısal doğrulaması yapar, ardından 'Hayalet' (Phantom) zırhı ile ontolojik 
+        sızıntıyı (Context Poisoning) engeller. Bulunan ilk meşru merci, Z3 SMT'ye gönderilecek 
+        kesin mantıksal değişken (EntitySort Variable) ataması olur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
@@ -155,25 +198,30 @@ class DiscourseRegister:
         target_gender = self.pronouns[pronoun_lower]["gender"]
         target_number = self.pronouns[pronoun_lower]["number"]
 
-        # Yığıt içerisinde sondan başa (LIFO) doğru ilerleyerek en yakın mantıksal uyumu (Unification) arar.
         for frame in reversed(self.scopes):
             for resolved_mention in reversed(frame):
                 
-                # Önce HPSG yapısal doğrulaması (Cinsiyet/Sayı uyumu) kontrol edilir
+                # 1. HPSG Yapısal Uyum Denetimi
                 if self._check_hpsg_unification(resolved_mention, target_gender, target_number):
                     
-                    # Morfolojik uyum bulunduktan sonra Ontolojik Sızıntı (Context Sealing) ve Phantom zırhı test edilir
+                    # 2. Ontolojik Sızıntı ve Hayalet (Phantom) Denetimi
                     sealing_status = self._verify_context_sealing(pronoun, resolved_mention, enforcement_namespace)
                     
                     if sealing_status == "PHANTOM":
                         continue
                     
+                    # İlk meşru varlık Z3 matrisi için döndürülür
                     return resolved_mention.ontologic_id
                 
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için söylem belleğinde ontolojik kısıtları (HPSG) uyan ve erişilebilir bir referans (Antecedent) bulunamadı.")
         
     def clear_memory(self) -> None:
-        """Mezhep (Usûl) profili değiştiğinde veya diyalektik oturum sıfırlandığında belleği donanımsal olarak temizler."""
+        """
+        .. felsefe_notu:: Zihnin Sıfırlanması
+        Mezhep (Usûl) profili değiştiğinde veya diyalektik oturum (Celse) sona erdiğinde, 
+        tüm Kripke dünyaları ve aktörlerin epistemik durumları silinerek sistem donanımsal 
+        olarak tabula rasa durumuna döndürülür.
+        """
         self.scopes = [[]]
         self.clock = 0
         self.active_agent = "Mujib"
