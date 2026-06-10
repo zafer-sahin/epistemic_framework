@@ -8,7 +8,7 @@ from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
 from core.layer3_smt import Layer3SMTCircuitBreaker
 from core.epistemic_orchestrator import EpistemicOrchestrator
-from core.exceptions import DiachronicViolationError
+from core.exceptions import DiachronicViolationError, ContextPoisoningError
 
 # Dilbilim Katmanları
 from linguistics.tokenizer import EpistemicTokenizer
@@ -138,6 +138,7 @@ def execute_healthcheck():
     discourse.clear_memory()
     ir_mujib = SemanticStatementIR(
         active_namespace="Ashari", 
+        active_agent="Mujib",  # [FAZ 12 YAMASI] Aktör mührü eklendi
         predicates=[("Cemad", "Cemad", 1), ("Insan", "Insan", 1), ("Rel_Mubteda_Haber", "Cemad::Insan", 2)], 
         is_valid_for_z3=True
     )
@@ -282,21 +283,24 @@ def execute_healthcheck():
     has_dynamic = any(rel == 'Rel_Fa_Fuzaiyye' or rel == 'Rel_Fa_Sebebiyye' for _, _, rel, _ in ast_13)
     print(f"Sonuç: [{res_13.get('status', 'BİLİNMİYOR')}] -> Dinamik Zaman Sıçraması (Fa) Kuruldu mu? {has_dynamic}. İleti: {res_13.get('message')}\n")
 
-    print("--- SENARYO 14: FAZ 8 - LITERATE İZOLASYON VE BAĞLAM ZEHİRLENMESİ (CONTEXT POISONING) ---")
+    print("--- SENARYO 14: FAZ 8/12 - LITERATE İZOLASYON VE BAĞLAM ZEHİRLENMESİ (CONTEXT POISONING) ---")
     discourse.clear_memory()
     # Mucîb kendi uzayında bir Zeyd mühürler
     discourse.set_agent("Mujib")
     discourse.push_scope()
     discourse.add_mention("zeyd", "Entity_Zeyd_01", "Ashari", gender="Muzekker", number="Mufred")
     
-    print("[LOG] Sâil, Mucîb'in 'Zeyd' varlığına 'huve' zamiri ile Maturidi uzayından sızmaya çalışıyor...")
+    # Sâil devreye girer
+    discourse.set_agent("Sail")
+    discourse.push_scope()
+    
+    print("[LOG] Sâil, Mucîb'in 'Zeyd' varlığına 'huve' zamiri ile kasten Ashari uzayını dayatarak (Enforcement) sızmaya çalışıyor...")
     try:
-        # Resolve metodunda çapraz sızıntı (Cross-Namespace) denemesi
-        discourse.resolve_pronoun("huve", enforcement_namespace="Maturidi")
+        # Resolve metodunda çapraz sızıntı (Cross-Namespace Enforcement) denemesi
+        discourse.resolve_pronoun("huve", enforcement_namespace="Ashari")
         print("[HATA] Zırh delindi, bağlam zehirlendi!")
-    except Exception as e:
-        # ContextPoisoningError yakalanmalıdır
-        print(f"[BAŞARILI] Faz 8 İzolasyon Zırhı Devrede: {e}\n")
+    except ContextPoisoningError as e:
+        print(f"[BAŞARILI] Faz 12 İzolasyon Zırhı Devrede: {e}\n")
 
     print("--- SENARYO 15: FAZ 9 - LITERATE CHUNKING VE BİLİŞSEL YÜK YÖNETİMİ ---")
     sentence_15 = "inna zeyden fi el_dar fa daraba"
@@ -341,7 +345,41 @@ def execute_healthcheck():
     except DiachronicViolationError as e:
         print(f"[BAŞARILI] SMT IR Çifte Dönüşüm İzolasyonu: {e}\n")
 
-    print("[SİSTEM] Tüm Faz 1-11 Healthcheck (Uçtan Uca) Tamamlandı. Sıfır Entropi Doğrulandı.")
+    print("--- SENARYO 18: FAZ 12 - BİPARTİTE DRT VE HAYALET (PHANTOM) BYPASS ---")
+    discourse.clear_memory()
+    discourse.set_agent("Mujib")
+    discourse.push_scope()
+    discourse.add_mention("zeyd", "Entity_Zeyd_Ashari", "Ashari", gender="Muzekker", number="Mufred")
+
+    discourse.set_agent("Sail")
+    discourse.push_scope()
+    discourse.add_mention("racul", "Entity_Man_Base", "Base", gender="Muzekker", number="Mufred")
+    
+    print("[LOG] Sâil, 'huve' zamirini kullanıyor. LIFO'da önce Mucîb'in 'Zeyd'ine çarpacak, ancak Phantom Bypass ile atlayıp Base uzayındaki 'racul'a ulaşmalıdır.")
+    resolved_id = discourse.resolve_pronoun("huve", enforcement_namespace="Maturidi")
+    print(f"Sonuç: 'huve' -> {resolved_id}")
+    if resolved_id == "Entity_Man_Base":
+        print("[BAŞARILI] Phantom Bypass: Sâil, Mucîb'in uzayını hayalet olarak atladı ve doğru varlığa bağlandı.\n")
+    else:
+        print("[HATA] Phantom Bypass başarısız.\n")
+
+    print("--- SENARYO 19: FAZ 12 - AKTÖR SIZINTI DENETİMİ (LEXICAL POISONING KORUMASI) ---")
+    discourse.clear_memory()
+    discourse.set_agent("Mujib")
+    discourse.push_scope()
+    discourse.add_mention("ruh", "Entity_Ruh_01", "Ashari")
+    lexicon.register_word("ruh", "Base", "Entity_Ruh_01", epoch="Classical")
+    
+    discourse.set_agent("Sail")
+    discourse.push_scope()
+    print("[LOG] Sâil, Maturidi uzayından leksikona giderek 'ruh' kelimesinin ID'sini çekmeye çalışıyor...")
+    try:
+        lexicon.resolve_id("ruh", active_namespace="Maturidi", discourse=discourse, epoch="Classical")
+        print("[HATA] Zırh delindi, leksikal zehirlenme gerçekleşti!")
+    except ContextPoisoningError as e:
+        print(f"[BAŞARILI] Faz 12 Leksikal Zehirlenme Koruması Devrede: {e}\n")
+
+    print("[SİSTEM] Tüm Faz 1-12 Healthcheck (Uçtan Uca) Tamamlandı. Sıfır Entropi Doğrulandı.")
 
 if __name__ == "__main__":
     sys.setrecursionlimit(5000)

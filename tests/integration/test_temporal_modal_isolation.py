@@ -122,6 +122,7 @@ class TestTemporalModalIsolation(unittest.TestCase):
         
         ir_matrix = SemanticStatementIR(
             active_namespace="Base",
+            active_agent="Mujib",  # [FAZ 12 YAMASI] Aktör mührü eklendi
             is_valid_for_z3=True,
             predicates=[
                 NestedPredicate(

@@ -85,6 +85,7 @@ class TestDialecticsFSM(unittest.TestCase):
         
         mujib_ir = SemanticStatementIR(
             active_namespace="Ashari", 
+            active_agent="Mujib",
             predicates=[("Cevher", "Cevher", 1), ("Zeyd_Entity", "Zeyd_Entity", 1), ("Rel_Mubteda_Haber", "Cevher::Zeyd_Entity", 2)], 
             is_valid_for_z3=True
         )

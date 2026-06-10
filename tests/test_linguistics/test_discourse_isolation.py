@@ -70,15 +70,17 @@ class TestDiscourseIsolation(unittest.TestCase):
         self.discourse.push_scope()
         self.discourse.add_mention("ruh", "Entity_Ruh_01", "Ashari")
         
-        # Leksikonda bu kelime Ashari'ye aittir
-        self.lexicon.register_word("ruh", "Ashari", "Entity_Ruh_01")
+        # Sâil'in 'ruh' kelimesini Leksikondan çekebilmesi için Base uzayında da aynı ID ile 
+        # (veya Fallback'te) tanımlı olması gerekir. Fallback dönüşü yapıldığında sistem zehirlenmeyi yakalar.
+        self.lexicon.register_word("ruh", "Base", "Entity_Ruh_01")
         
         # Sâil devreye girer
         self.discourse.set_agent("Sail")
         self.discourse.push_scope()
         
         with self.assertRaises(ContextPoisoningError) as context:
-            # Sâil Maturidi uzayındayken 'ruh' kelimesini çözmek ister. Fallback Ashari ID'sini getirirse patlamalıdır.
+            # Sâil Maturidi uzayındayken 'ruh' kelimesini çözer. Base üzerinden 'Entity_Ruh_01' döner.
+            # Fakat ID, daha önce Mucîb tarafından Ashari olarak mühürlenmiştir. Zırh devreye girmelidir.
             self.lexicon.resolve_id("ruh", active_namespace="Maturidi", discourse=self.discourse)
 
         self.assertIn("Lexical Poisoning", str(context.exception))
@@ -97,7 +99,7 @@ class TestDiscourseIsolation(unittest.TestCase):
         
         # Kukla Sarf Verisi
         auto_lexicon = {
-            "zeyd": MorphologicalAnalysis(root="zeyd", pattern="fa'l", ontologic_type="Isim_Camid")
+            "zeyd": MorphologicalAnalysis(original_word="zeyd", root="zeyd", pattern="fa'l", ontologic_type="Isim_Camid")
         }
         
         dependencies: List[Tuple[str, str, str, str]] = [
