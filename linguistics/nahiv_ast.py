@@ -1,5 +1,5 @@
 import networkx as nx
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from linguistics.sarf_parser import MorphologicalAnalysis
 
 """
@@ -207,6 +207,24 @@ class NahivDependencyCompiler:
             return True
         return False
 
+    def _apply_bedel_apposition(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
+        """
+        .. pedagojik_anlati:: Bedel ve Mantıksal Kimlik Çözümlemesi (Pointer Aliasing)
+            Bedel, kendisinden önce geçen ismin (Mübdelun Minh) ontolojik kimliğine 
+            doğrudan işaret eden (Pointer Aliasing) bir amil-mamul yapısıdır.
+            Z3 uzayında bu durum Entity değişkenlerinin (EntitySort) eşitlenmesi 
+            (z3.And(x == y)) anlamına gelir. Çift yönlü kısıt döngülerini (Cycle) 
+            önlemek için yön sabittir: Bedel -> Mübdelun Minh.
+        """
+        if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
+            if self._is_definite(t1) and self._is_definite(t2) and t1[-2:] == t2[-2:]:
+                if m1.thematic_role == "Entity" and m2.thematic_role == "Entity":
+                    is_already_sifat = any((rel == 'Sifat_Mevsuf' and u == t1 and v == t2) for u, v, rel, _ in dependencies)
+                    if not is_already_sifat:
+                        dependencies.append((t1, t2, 'Bedel_Identity', 'Tabi_Identity'))
+                        return True
+        return False
+
     def _apply_conditional_logic(self, t1: str, t2: str, dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
         .. mantik_kurali:: Kadiyye-i Şartiyye (Hipotetik Önerme)
@@ -236,6 +254,7 @@ class NahivDependencyCompiler:
             if self._apply_dynamic_transitions(t1, t2, tokens, i, dependencies): continue
             if self._apply_spatial_mutaallak(t1, t2, tokens, i, lexicon, dependencies): continue
             if self._apply_nominal_adjuncts(t1, t2, m1, m2, dependencies): continue
+            if self._apply_bedel_apposition(t1, t2, m1, m2, dependencies): continue
             if self._apply_conditional_logic(t1, t2, dependencies): continue
 
     def _resolve_inne_scope(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], inne_token: Optional[str], inne_index: int, amil_token: Optional[str], amil_index: int) -> None:
@@ -404,7 +423,7 @@ class NahivDependencyCompiler:
             self.dependency_graph.add_edge(amil, mamul, relation=rel, irab=irab)
             
         return self.dependency_graph
-    
+
     def extract_temporal_conditions(self, ast: nx.DiGraph) -> Dict[str, str]:
         """
         .. mantik_kurali:: Şemsiyye Kiplikleri ve Zaman Bağlamı
@@ -416,3 +435,71 @@ class NahivDependencyCompiler:
             if data.get('relation') in self.temporal_triggers:
                 conditions[u] = v
         return conditions
+
+    # -------------------------------------------------------------------------
+    # FAZ 14 - KISIT İZOLASYONU VE TOPOLOJİK SAĞLIK (E2E SMT HEALTH PROTECTION)
+    # -------------------------------------------------------------------------
+
+    def _isolate_smt_constraints(self, ast: nx.DiGraph) -> Dict[str, List[Tuple[str, str, Dict[str, Any]]]]:
+        """
+        .. pedagojik_anlati:: Kısıt İzolasyon Bariyeri (Constraint Isolation)
+        Z3 motoruna tek tiple aktarılan ilişkiler, İnne (Zorunluluk), Bedel (Kimlik) 
+        ve Fâ (Dinamik Geçiş) gibi birbiriyle çelişen ontolojik düzlemlerde Combinatorial 
+        Explosion yaratır. Bu metod, bağımlılıkları SMT derlenme fazlarına (Phases) ayırır.
+        """
+        isolated_phases = {
+            "PHASE_1_STATIC_ONTOLOGY": [],   # Sabit kimlikler (Entity, Fail, Meful)
+            "PHASE_2_IDENTITY_ALIAS": [],    # İşaretçi eşitleme (Bedel, Rabita)
+            "PHASE_3_NECESSITY_SCOPE": [],   # Epistemik zorunluluk (İnne, Tevkid)
+            "PHASE_4_SPATIAL_TEMPORAL": [],  # Müteallak (Mekân) ve Şartlar
+            "PHASE_5_DYNAMIC_TRANSITION": [] # Fâ-i Füzâiyye ve Dinamik Geçişler
+        }
+        
+        for u, v, data in ast.edges(data=True):
+            rel = data.get('relation', '')
+            if rel in ['Bedel_Identity', 'Rabita_Identity', 'Rabita_Predication']:
+                isolated_phases["PHASE_2_IDENTITY_ALIAS"].append((u, v, data))
+            elif rel in ['Amel_Inne_Ism', 'Amel_Inne_Haber', 'Tevkid_Modifier', 'Kasr_Modifier']:
+                isolated_phases["PHASE_3_NECESSITY_SCOPE"].append((u, v, data))
+            elif rel in ['Muteallak_Mekan', 'Muteallak_Harf', 'Rel_Zarf_Zaman', 'Rel_Shart']:
+                isolated_phases["PHASE_4_SPATIAL_TEMPORAL"].append((u, v, data))
+            elif rel in ['Rel_Fa_Fuzaiyye', 'Rel_Fa_Sebebiyye']:
+                isolated_phases["PHASE_5_DYNAMIC_TRANSITION"].append((u, v, data))
+            else:
+                isolated_phases["PHASE_1_STATIC_ONTOLOGY"].append((u, v, data))
+                
+        return isolated_phases
+
+    def _enforce_topological_order(self, ast: nx.DiGraph) -> List[str]:
+        """
+        .. mantik_kurali:: Asiklik Bağımlılık Zorlayıcı (DAG Enforcement)
+        Z3 First-Order Logic (FOL) motorunun 'Ex Falso Quodlibet' tuzağına düşmemesi için,
+        gramer ağacı kesinlikle Yönlü Asiklik Graf (DAG) olmalıdır. Döngü (Cycle) tespit
+        edilirse, sistem felsefi çelişkiyi raporlar ve hiyerarşik derleme sırasını çıkarır.
+        """
+        if not nx.is_directed_acyclic_graph(ast):
+            cycles = list(nx.simple_cycles(ast))
+            raise ValueError(f"[LOGIC_FAILURE_PROBABILITY: HIGH] AST içerisinde ontolojik "
+                             f"döngü (Cyclic Dependency) tespit edildi. Z3 sonsuz kısıt yayılımına "
+                             f"girecektir. Döngü oluşturan düğümler: {cycles}")
+        
+        # Z3'te tanımlamalar yaprak (leaf) düğümlerden kök (root) düğümlere doğru 
+        # (Dependency-first) derlenmelidir. Bu yüzden Topological Sort listesi ters çevrilir.
+        compilation_order = list(reversed(list(nx.topological_sort(ast))))
+        return compilation_order
+
+    def run_e2e_health_check(self, ast: nx.DiGraph) -> Dict[str, Any]:
+        """
+        .. pedagojik_anlati:: Faz 14 Gramer Sağlık Taraması (Health Check Orchestrator)
+        Kripke uzayı kombinatoryal patlamalarını engellemek üzere AST'yi denetler. 
+        Topolojik sırayı (Topological Order) ve faz izoleli kısıtları (Isolated Phases) 
+        döndürerek Z3 motorunun güvenle çalışacağı bir "SAT-Safe" yürütme planı sunar.
+        """
+        compilation_order = self._enforce_topological_order(ast)
+        isolated_phases = self._isolate_smt_constraints(ast)
+        
+        return {
+            "is_dag": True,
+            "compilation_order": compilation_order,
+            "isolated_phases": isolated_phases
+        }

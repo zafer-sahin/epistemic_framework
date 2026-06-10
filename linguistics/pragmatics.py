@@ -94,14 +94,14 @@ class MaaniSpeechActAnalyzer:
             return {
                 "is_valid": False,
                 "type": "MAANI_VIOLATION",
-                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatabın zihni boş (Khali_al_Zihn) iken tevkîd (pekiştirme) kullanılamaz."
+                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatabın zihni boş (Khali_al_Zihn) iken tevkîd (pekiştirme) kullanılamaz. Z3 Kripke uzayına gereksiz Zorunluluk (Necessity) matrisi basmak Kombinatoryal Patlamaya yol açar."
             }
             
         if opponent_denial_level == DenialLevel.MUNKIR and tevkid_count == 0:
             return {
                 "is_valid": False,
                 "type": "MAANI_VIOLATION",
-                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez."
+                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez. Önerme, epistemik zorunluluk taşımadığı için geçersiz kılınmıştır."
             }
         return {}
 
@@ -201,3 +201,46 @@ class MaaniSpeechActAnalyzer:
         """
         res = self.analyze_pragmatics(tokens, dependencies)
         return res["is_valid"]
+
+    # -------------------------------------------------------------------------
+    # FAZ 14 - PRAGMATİK VE NAHİV SAĞLIK BARİYERİ (CROSS-LAYER HEALTH BARRIER)
+    # -------------------------------------------------------------------------
+
+    def enforce_pragmatic_syntax_consistency(self, pragmatics_meta: Dict[str, Any], isolated_phases: Dict[str, List[Any]]) -> None:
+        """
+        .. pedagojik_anlati:: Çapraz Katman Sağlık Taraması (Cross-Layer Verification)
+        Nahiv (Sentaks) katmanındaki Topolojik FOL fazları ile İlm-i Ma'ânî'den (Pragmatik)
+        gelen kipliklerin (Modality) birbiriyle çelişmesini engeller. Z3 motoru, 
+        teolojik ve sentaktik çatışmaları aynı anda işleyemez; bu bariyer sistemin 
+        tutarlılığını garanti altına alır.
+        """
+        
+        # 1. Necessity vs Contingency (Tahkik vs Füzâiyye) Çatışması
+        has_necessity = len(isolated_phases.get("PHASE_3_NECESSITY_SCOPE", [])) > 0
+        has_dynamic_transition = len(isolated_phases.get("PHASE_5_DYNAMIC_TRANSITION", [])) > 0
+        
+        if has_necessity and has_dynamic_transition:
+            raise ValueError(
+                "[LOGIC_FAILURE_PROBABILITY: HIGH] Ontolojik Çelişki (Epistemic Collapse): "
+                "'İnne' (Epistemic Necessity / Zorunluluk) ile 'Fâ-i Füzâiyye' (Dynamic Transition / Ani Geçiş) "
+                "aynı Kripke uzayında eşzamanlı barınamaz. Mutlak zorunlu olan bir hakikat, "
+                "anlık durum geçişine tabi tutulamaz. Z3 SMT derlemesi durduruldu."
+            )
+            
+        # 2. İnkâr Derecesi ve Zorunluluk Uyuşmazlığı (Muktazâ el-Hâl Hard Fail)
+        if pragmatics_meta.get("type") == "MAANI_VIOLATION":
+            raise ValueError(
+                f"[LOGIC_FAILURE_PROBABILITY: HIGH] Bağlam Zehirlenmesi (Context Poisoning): "
+                f"{pragmatics_meta.get('message')} Veri akışı durduruldu."
+            )
+            
+        # 3. Kısıtlama (Kasr) ve İşaretçi Eşitleme (Bedel) Zafiyeti
+        has_kasr = "kasr_data" in pragmatics_meta
+        has_bedel = len(isolated_phases.get("PHASE_2_IDENTITY_ALIAS", [])) > 0
+        
+        if has_kasr and has_bedel:
+            pragmatics_meta["alias_warning"] = (
+                "[ADAB_WARNING] Kasr (Evrensel Dışlama) ve Bedel (Pointer Aliasing) "
+                "hiper-kombinasyonu tespit edildi. DiscourseRegister üzerinde kimliklerin "
+                "(Identity Unification) mutlak surette eşitlendiği SMT motoruna iletilmelidir."
+            )
