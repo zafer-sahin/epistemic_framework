@@ -7,7 +7,7 @@ class DenialLevel(IntEnum):
     """
     .. mantik_kurali:: Muktazâ el-Hâl ve Muhatabın Epistemik Halleri
     İlm-i Ma'ânî'ye göre sözün kıymeti, kelimelerin sözlük anlamında değil, muhatabın (Sâil'in) 
-    hakikate karşı takındığı psikolojik ve epistemik tavra (Muktazâ el-Hâl) uygunluğundadır. 
+    hakikate karşı takındığı psikolojik ve epistemik tavra (Muktazâ el-Hâl) uygunluğundadır.
     Bu ontolojik hiyerarşi, deterministik SMT motorunun Kripke uzayındaki hesaplamalarına 
     geçmeden önce uygulayacağı retorik filtrelerin (Tevkîd katsayısı) eşik değerlerini belirler.
     """
@@ -18,10 +18,10 @@ class DenialLevel(IntEnum):
 class EntityMention(BaseModel):
     """
     .. felsefe_notu:: Lafzın Ontolojik Mühürlenmesi (Instantiation)
-    Bir kelime (lafız), sadece dizgisel (string) bir değişken değil; Sâil veya Mucîb tarafından 
-    belirli bir usûl uzayında (Namespace) iddia edilmiş bir varlık yansımasıdır (A'yân-ı Sâbite'nin 
-    cümledeki tezahürü). Varlıkların HPSG (Cinsiyet ve Sayı) kısıtlarıyla mühürlenmesi, 
-    mantıksal argümantasyonda (Kıyas) oluşabilecek terim kaymalarını ve safsataları engeller.
+    Bir kelime (lafız), sadece dizgisel (string) bir değişken değil;
+    Sâil veya Mucîb tarafından belirli bir usûl uzayında (Namespace) iddia edilmiş bir varlık yansımasıdır (A'yân-ı Sâbite'nin 
+    cümledeki tezahürü).
+    Varlıkların HPSG (Cinsiyet ve Sayı) kısıtlarıyla mühürlenmesi, mantıksal argümantasyonda (Kıyas) oluşabilecek terim kaymalarını ve safsataları engeller.
     """
     word: str
     ontologic_id: str
@@ -36,12 +36,11 @@ class DiscourseRegister:
     .. pedagojik_anlati:: Âdâb-ı Bahs, Kuvve-i Hâfıza ve Diyalektik Matris
     Bu sınıf, bir yazılım "Stack" (Yığıt) veri yapısı olmanın çok ötesinde, İbn Sînâcı 
     'Kuvve-i Hâfıza'nın ve Seyyid Şerif el-Cürcânî'nin 'Tahrîr-i Niza' (Tartışma Noktasının Yalıtımı) 
-    prensibinin koda dökülmüş halidir. 
-    
+    prensibinin koda dökülmüş halidir.
     Sâil (İtiraz Eden) ve Mucîb (İddia Sahibi) aynı zihinsel sahneyi (Discourse) paylaşsalar da, 
     birbirlerinin ontolojik önkabullerini (Namespace) çalamazlar veya onlara dayanarak kendi 
-    kıyaslarını kuramazlar. Sistem, iki farklı zihnin aynı anda simüle edildiği, varlıkların 
-    "Ortak Kabul" (Müsellemât) veya "Hayalet" (Phantom) olarak etiketlendiği iki-kutuplu (Bipartite) 
+    kıyaslarını kuramazlar.
+    Sistem, iki farklı zihnin aynı anda simüle edildiği, varlıkların "Ortak Kabul" (Müsellemât) veya "Hayalet" (Phantom) olarak etiketlendiği iki-kutuplu (Bipartite) 
     bir Discourse Representation Theory (DRT) matrisidir.
     """
     def __init__(self):
@@ -94,6 +93,15 @@ class DiscourseRegister:
         opponent = "Sail" if self.active_agent == "Mujib" else "Mujib"
         return self.epistemic_state[opponent]
 
+    def set_opponent_epistemic_state(self, level: DenialLevel) -> None:
+        """
+        [FAZ 14 E2E RED-TEAMING YAMASI]
+        Test ortamlarında rakibin epistemik durumunu doğrudan manüple etmek (Zehirlenme Senaryosu) 
+        için kullanılır. Sadece test senaryolarında çağrılmalıdır.
+        """
+        opponent = "Sail" if self.active_agent == "Mujib" else "Mujib"
+        self.epistemic_state[opponent] = level
+
     def push_scope(self) -> None:
         """
         .. felsefe_notu:: Kripke Uzayında Varsayımsal Dünyalar (Possible Worlds)
@@ -137,10 +145,10 @@ class DiscourseRegister:
         bir varlığa atıf yapamaz (veya tam tersi).
         1. Eğer varlık 'Base' (Müsellemât / Ortak Hakikatler) uzayında ise eşleşme geçerlidir (VALID).
         2. Eğer varlık rakibin mühürlü uzayındaysa, bu varlık bir 'Hayalet' (PHANTOM) kabul edilir 
-           ve aramada es geçilir (Bypass). 
+           ve aramada es geçilir (Bypass).
         3. Ancak rakibin uzayı kasten parametre olarak dayatılırsa (Enforcement), bu bir 
-           "Bağlam Zehirlenmesi" (Context Poisoning) ve ontolojik hırsızlık (Theft) suçudur. 
-           Sistem derhal durdurulur.
+           "Bağlam Zehirlenmesi" (Context Poisoning) ve ontolojik hırsızlık (Theft) suçudur.
+        Sistem derhal durdurulur.
         """
         if resolved_mention.sealed_namespace == "Base":
             return "VALID"
@@ -186,10 +194,11 @@ class DiscourseRegister:
         """
         .. pedagojik_anlati:: İrcâ-ı Zamir (Zamirin Merciine Döndürülmesi)
         Klasik felsefi metinlerdeki en büyük kriz, zamirin (Huve, Hiye) kime/neye döndüğünün (Merci) 
-        belirsizliğidir. Bu metod, yığıt içerisinde sondan başa (LIFO - Last In First Out) ilerleyerek,
+        belirsizliğidir.
+        Bu metod, yığıt içerisinde sondan başa (LIFO - Last In First Out) ilerleyerek,
         önce HPSG yapısal doğrulaması yapar, ardından 'Hayalet' (Phantom) zırhı ile ontolojik 
-        sızıntıyı (Context Poisoning) engeller. Bulunan ilk meşru merci, Z3 SMT'ye gönderilecek 
-        kesin mantıksal değişken (EntitySort Variable) ataması olur.
+        sızıntıyı (Context Poisoning) engeller.
+        Bulunan ilk meşru merci, Z3 SMT'ye gönderilecek kesin mantıksal değişken (EntitySort Variable) ataması olur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
