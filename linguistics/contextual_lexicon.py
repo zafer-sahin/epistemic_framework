@@ -1,6 +1,6 @@
 from typing import Dict, Optional, Any, List, Tuple, Protocol
 from linguistics.discourse_state import DiscourseRegister
-from core.exceptions import DiachronicViolationError
+from core.exceptions import DiachronicViolationError, ContextPoisoningError
 
 class StrictAirGapValidator:
     """
@@ -86,6 +86,7 @@ class ContextualLexicon:
     [FAZ 2 ENTEGRASYONU]: İlm-i Ma'ânî Kasr (Hasr) Operatör Çözümleyicisi Eklendi.
     [FAZ 10 ENTEGRASYONU]: OntoLex Fallback (Geri Dönüş) mekanizması ile otonom RDF sorgulaması entegre edildi.
     [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator ile Çifte Dönüşüm (Double Conversion) yasakları donanıma işlendi.
+    [FAZ 12 ENTEGRASYONU]: Leksikal Zehirlenme (Lexical Poisoning) kalkanı eklendi. Sâil'in arka kapıdan Mucîb'e ait ID'leri çalması engellendi.
     
     [FAZ 8 LITERATE PROGRAMMING]: Bilişsel Yükü (Cognitive Load) 4 birimin altında tutmak
     için monolitik parse algoritması hiyerarşik private fonksiyonlara (Chunking) ayrılmıştır.
@@ -179,6 +180,33 @@ class ContextualLexicon:
             return default_id
         return None
 
+    def _prevent_lexical_poisoning(self, word: str, ontologic_id: str, active_namespace: str, discourse: Optional[DiscourseRegister]) -> None:
+        """
+        .. pedagojik_anlati::
+            [FAZ 12] Aktör Sızıntı Denetimi (Lexical Poisoning Zırhı):
+            Eğer Sâil, leksikondan bir kelimeyi (Örn: 'Zeyd') çözümlerken dönen ontolojik ID,
+            daha önce Mucîb tarafından kendi özel usûl uzayında (Namespace) mühürlenmişse,
+            Sâil bu ID'yi çalarak SMT motorunda arka kapıdan (backdoor) eşdeğerlik kuramaz.
+            Ortak kabul (Base) dışındaki bu sızıntı anında tespit edilip engellenir.
+        """
+        if not discourse or active_namespace == "Base":
+            return
+            
+        current_agent = discourse.active_agent
+        
+        for frame in discourse.scopes:
+            for mention in frame:
+                # Eğer aynı ID'yi rakip daha önce Base harici bir uzayda mühürlediyse
+                if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
+                    # Ve Sâil/Mucîb kendi farklı uzayından bunu çağırıyorsa
+                    if mention.sealed_namespace != active_namespace:
+                        raise ContextPoisoningError(
+                            f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
+                            f"{current_agent}, '{word}' kelimesi üzerinden '{ontologic_id}' ID'sini leksikondan çekmeye çalışıyor. "
+                            f"Ancak bu ontolojik ID, rakip ({mention.agent}) tarafından '{mention.sealed_namespace}' uzayında mühürlenmiştir. "
+                            f"Mu'aradah çapraz izolasyonu ihlal edildi, arka kapı (backdoor) eşdeğerliği engellendi."
+                        )
+
     def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None, epoch: str = "Classical") -> str:
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
@@ -197,14 +225,19 @@ class ContextualLexicon:
             namespace_map = self._tensor[word_lower][epoch]
 
             resolved = self._get_from_namespace(namespace_map, active_namespace, proposition_type, word, dependencies)
-            if resolved: return resolved
+            if resolved:
+                self._prevent_lexical_poisoning(word, resolved, active_namespace, discourse)
+                return resolved
             
             resolved_base = self._get_from_namespace(namespace_map, "Base", proposition_type, word, dependencies)
-            if resolved_base: return resolved_base
+            if resolved_base:
+                self._prevent_lexical_poisoning(word, resolved_base, active_namespace, discourse)
+                return resolved_base
 
         # [FAZ 10] OntoLex Semantik Graf (Fallback) Taraması
         fallback_id = self.semantic_client.get_base_concept_id(word_lower, epoch)
         if fallback_id:
+            self._prevent_lexical_poisoning(word, fallback_id, active_namespace, discourse)
             return fallback_id
 
         if word_lower not in self._tensor:

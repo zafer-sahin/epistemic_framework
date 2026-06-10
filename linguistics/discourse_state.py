@@ -25,10 +25,12 @@ class DiscourseRegister:
     Faz 2 - Adım 1: Epistemik Durum (Muktazâ el-Hâl) matrisi.
     [FAZ 2 ENTEGRASYONU]: HPSG Kısıtları ile Discourse Representation Theory (DRT) Anaphora çözümlemesi.
     
-    [FAZ 8 LITERATE PROGRAMMING & BÜTÜNCÜL ÇÖZÜM]: 
-    Fiziksel liste ayrımı (mujib_frames/sail_frames) kaldırılarak paylaşımlı DRT yığıtına geçildi.
-    Sâil ve Mucîb aynı uzayı okuyabilir, ancak 'sealed_namespace' mührü sayesinde karşı tarafın
-    ontolojik varlığına (Tahrîr-i Niza' olmadan) zamir bağlayamaz. Bağlam Zehirlenmesi kök nedenden çözülmüştür.
+    [FAZ 12 LITERATE PROGRAMMING & BİPARTİTE DRT]: 
+    Mu'aradah (Çapraz İtiraz) evresinde, Sâil (itiraz eden) kendi kıyasını kurarken
+    Mucîb'in (iddia sahibi) mühürlediği ontolojik uzaya çarpıp sistemi çökertmemelidir (False Positive ContextPoisoning).
+    Bu mimari, rakibin uzayını 'Hayalet' (Phantom) olarak değerlendirip üzerinden atlar. 
+    Yalnızca 'Base' (Müsellemât - Ortak Kabuller) uzayı her iki aktör için paylaşımlı ve bağlayıcıdır.
+    Kasti bir namespace dayatması (Enforcement) olursa ContextPoisoningError fırlatılır.
     """
     def __init__(self):
         # Stack mimarisi: index 0 her zaman Global (Kök) bağlamı temsil eder.
@@ -93,22 +95,41 @@ class DiscourseRegister:
         self.scopes[-1].append(mention)
         self.clock += 1
 
-    def _verify_context_sealing(self, pronoun: str, resolved_mention: EntityMention, enforcement_namespace: Optional[str]) -> None:
+    def _verify_context_sealing(self, pronoun: str, resolved_mention: EntityMention, enforcement_namespace: Optional[str]) -> Literal["VALID", "PHANTOM"]:
         """
-        Context Sealing (Bağlam Zehirlenmesi Koruması)
+        [FAZ 12] Tahrîr-i Niza' (İzolasyon) ve Hayalet (Phantom) Tespiti.
+        
         .. felsefe_notu::
-            Mu'aradah (Çapraz İtiraz) anında, Sâil'in cümlesindeki bir zamir, 
-            Mucîb'in Z3 matrisindeki bir varlığa temas ederse, iki zıt hakikat 
-            birbirine karışır. Base (Musellemat) uzayı hariç tutulur.
+            Mu'aradah (Çapraz İtiraz) anında, Sâil'in LIFO taramasında Mucîb'in nesnesine denk gelmesi 
+            iki hakikatin çarpışması anlamına gelmez. Eğer varlık 'Base' (Müsellemât) uzayındaysa, 
+            ortak kabuldür ve doğrudan bağlanır. Değilse, Sâil bunu 'hayalet' (phantom) kabul edip atlar.
+            Ancak, Sâil bilerek rakibin mühürlü uzayını dayatırsa (enforcement), bu ontolojik bir hırsızlıktır
+            ve sistem ContextPoisoningError fırlatarak motoru durdurur.
         """
-        if enforcement_namespace and resolved_mention.sealed_namespace != "Base":
-            if resolved_mention.sealed_namespace != enforcement_namespace:
+        if resolved_mention.sealed_namespace == "Base":
+            return "VALID"
+            
+        if resolved_mention.agent != self.active_agent:
+            # Rakibin uzayı: Kasti olarak rakibin mühürlü uzayı dayatılıyorsa (Ontolojik Hırsızlık)
+            if enforcement_namespace and enforcement_namespace == resolved_mention.sealed_namespace:
                 raise ContextPoisoningError(
                     f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
-                    f"'{pronoun}' zamiri, '{enforcement_namespace}' uzayından işlem yapan {self.active_agent} tarafından, "
-                    f"'{resolved_mention.sealed_namespace}' uzayında ({resolved_mention.agent} tarafından) mühürlenmiş "
-                    f"'{resolved_mention.word}' varlığına bağlanmaya çalışıyor. Mu'aradah çapraz izolasyonu ihlal edildi."
+                    f"'{pronoun}' zamiri, kasten rakibin '{resolved_mention.sealed_namespace}' uzayına sızmaya çalışıyor. "
+                    f"Mu'aradah çapraz izolasyonu ihlal edildi."
                 )
+            # Normal akış: Rakibin uzayı hayalet olarak değerlendirilip atlanır (Phantom Bypass)
+            return "PHANTOM"
+            
+        # Kendi uzayımız: Başka bir uzay dayatması varsa (Kendi içinde zehirlenme)
+        if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
+            raise ContextPoisoningError(
+                f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
+                f"'{pronoun}' zamiri, '{enforcement_namespace}' uzayından işlem yapan {self.active_agent} tarafından, "
+                f"'{resolved_mention.sealed_namespace}' uzayında ({resolved_mention.agent} tarafından) mühürlenmiş "
+                f"'{resolved_mention.word}' varlığına bağlanmaya çalışıyor. Mu'aradah çapraz izolasyonu ihlal edildi."
+            )
+            
+        return "VALID"
 
     def _check_hpsg_unification(self, resolved_mention: EntityMention, target_gender: Optional[str], target_number: Optional[str]) -> bool:
         """
@@ -124,10 +145,8 @@ class DiscourseRegister:
 
     def resolve_pronoun(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[str]:
         """
-        [FAZ 4] Aktör-Spesifik ve Uzay-Korumalı Zamir (Anafora) tespiti.
+        [FAZ 12] Aktör-Spesifik, Uzay-Korumalı ve Hayalet (Phantom) Taramalı Zamir Çözümlemesi.
         [FAZ 2 ENTEGRASYONU] HPSG Feature Structures (Cinsiyet ve Sayı) üzerinden DRT Geriye Dönük Çözümlemesi.
-        [FAZ 8 ÇÖZÜMÜ] Paylaşımlı yığıtta LIFO üzerinden tüm varlıklar taranır. Doğru HPSG uyumu 
-        bulunduğu anda _verify_context_sealing çalışır. İzolasyon kırılırsa motor durdurulur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
@@ -143,12 +162,15 @@ class DiscourseRegister:
                 # Önce HPSG yapısal doğrulaması (Cinsiyet/Sayı uyumu) kontrol edilir
                 if self._check_hpsg_unification(resolved_mention, target_gender, target_number):
                     
-                    # Morfolojik uyum bulunduktan sonra Ontolojik Sızıntı (Context Sealing) zırhı test edilir
-                    self._verify_context_sealing(pronoun, resolved_mention, enforcement_namespace)
+                    # Morfolojik uyum bulunduktan sonra Ontolojik Sızıntı (Context Sealing) ve Phantom zırhı test edilir
+                    sealing_status = self._verify_context_sealing(pronoun, resolved_mention, enforcement_namespace)
+                    
+                    if sealing_status == "PHANTOM":
+                        continue
                     
                     return resolved_mention.ontologic_id
                 
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için söylem belleğinde ontolojik kısıtları (HPSG) uyan bir referans (Antecedent) bulunamadı.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için söylem belleğinde ontolojik kısıtları (HPSG) uyan ve erişilebilir bir referans (Antecedent) bulunamadı.")
         
     def clear_memory(self) -> None:
         """Mezhep (Usûl) profili değiştiğinde veya diyalektik oturum sıfırlandığında belleği donanımsal olarak temizler."""

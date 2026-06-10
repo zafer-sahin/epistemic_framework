@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Dict, Union, Optional, Any
+from typing import List, Tuple, Dict, Union, Optional, Any, Literal
 from pydantic import BaseModel, ConfigDict
 from linguistics.contextual_lexicon import ContextualLexicon, StrictAirGapValidator
 from linguistics.pragmatics import MaaniSpeechActAnalyzer
@@ -17,6 +17,7 @@ NestedPredicate.model_rebuild()
 class SemanticStatementIR(BaseModel):
     model_config = ConfigDict(extra="forbid")
     active_namespace: str
+    active_agent: Literal["Mujib", "Sail"]  # [FAZ 12] Aktör mührü (Discourse yalıtımı için Z3'te donanımsal kilit)
     predicates: List[Union[Tuple[str, str, int], NestedPredicate]] 
     is_valid_for_z3: bool
     provenance_locked: bool = True  # [FAZ 11] Çifte Dönüşüm (Double Conversion) önleme mühürü
@@ -49,6 +50,11 @@ class IlmWadAdapter:
     pedagojik anlatılarla (LaTeX destekli) kod bloklarına dokunmuştur (Weaving).
     
     [FAZ 11 ENTEGRASYONU]: StrictAirGapValidator Z3'e giden tüm düğümleri ontolojik olarak denetler.
+    
+    [FAZ 12 LITERATE PROGRAMMING & AKTÖR İZOLASYONU]:
+    Z3 IR (SemanticStatementIR) matrislerine aktarım yapılırken Sâil ve Mucîb'in 
+    mühürleri donanımsal olarak korunmuştur. IR yapısına dahil edilen `active_agent`
+    sayesinde Z3 SMT çözücüsü, ispatı kimin uzayından inşa ettiğini net biçimde bilir.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -267,7 +273,13 @@ class IlmWadAdapter:
         
         pragmatics_res = self.pragmatics.analyze_pragmatics(tokens, dependencies)
         if not pragmatics_res["is_valid"]:
-            return SemanticStatementIR(active_namespace=active_namespace, predicates=[], is_valid_for_z3=False, provenance_locked=True)
+            return SemanticStatementIR(
+                active_namespace=active_namespace, 
+                active_agent=self.discourse.active_agent,
+                predicates=[], 
+                is_valid_for_z3=False, 
+                provenance_locked=True
+            )
 
         atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         
@@ -290,9 +302,23 @@ class IlmWadAdapter:
                 seen.add(frozen_item)
                 unique_predicates.append(item)
 
-        return SemanticStatementIR(active_namespace=active_namespace, predicates=unique_predicates, is_valid_for_z3=True, provenance_locked=True)
+        return SemanticStatementIR(
+            active_namespace=active_namespace, 
+            active_agent=self.discourse.active_agent,
+            predicates=unique_predicates, 
+            is_valid_for_z3=True, 
+            provenance_locked=True
+        )
         
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str) -> str:
+        """
+        .. pedagojik_anlati::
+            Tahrîr-i Niza' (İzolasyon Sınırı) ve Z3 IR Aktarımı:
+            [FAZ 12] Sâil ve Mucîb'in diyalektik (Mu'aradah) uzaylarındaki varlıklar FOL matrisine 
+            taşınırken 'active_namespace' ve 'active_agent' mührü (Seal) ile korunur. Eğer bir zamir, 
+            rakibin hayalet (phantom) uzayını aşıp kendi hakikatini bulursa, ontolojik ID değişmeden 
+            (fakat mühürlenerek) ispat motoruna gönderilir.
+        """
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
             StrictAirGapValidator.validate_provenance(pronoun_res)
@@ -325,6 +351,9 @@ class IlmWadAdapter:
         StrictAirGapValidator.validate_provenance(ontologic_id)
 
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
-            self.discourse.add_mention(word, ontologic_id, active_namespace)
+            # [FAZ 2 / 12 ENTEGRASYONU]: HPSG Kısıtlarının (Cinsiyet ve Sayı) Belleğe Aktarımı
+            gender = getattr(morph_data, 'gender', None) if morph_data else None
+            number = getattr(morph_data, 'number', None) if morph_data else None
+            self.discourse.add_mention(word, ontologic_id, active_namespace, gender=gender, number=number)
             
         return ontologic_id
