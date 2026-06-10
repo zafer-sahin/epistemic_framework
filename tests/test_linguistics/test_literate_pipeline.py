@@ -1,10 +1,19 @@
+# =============================================================================
+# DOSYA: tests/test_linguistics/test_literate_pipeline.py
+# =============================================================================
+import ast
 import unittest
+import tempfile
+from pathlib import Path
+
 from linguistics.contextual_lexicon import ContextualLexicon, LocalOntoLexSemanticClient
 from linguistics.discourse_state import DiscourseRegister, DenialLevel
 from linguistics.nahiv_ast import NahivDependencyCompiler
 from linguistics.ilm_wad_adapter import IlmWadAdapter
 from linguistics.sarf_parser import SarfEngine, LocalOntoLexGraphClient
 from core.exceptions import ContextPoisoningError
+
+from utils.literate_weaver import DarsiNizamiWeaver, EpistemicASTVisitor, EpistemicChunk
 
 class TestLiteratePipeline(unittest.TestCase):
     """
@@ -125,6 +134,104 @@ class TestLiteratePipeline(unittest.TestCase):
             
         self.assertIn("Bağlam Zehirlenmesi", str(context.exception))
         self.assertIn("çapraz izolasyonu ihlal edildi", str(context.exception))
+
+
+class TestDarsiNizamiWeaver(unittest.TestCase):
+    """
+    [FAZ 15] Dars-i Nizâmî Literate Programming altyapısının (Weaver) Red-Teaming stres testleri.
+    Amacı: Felsefi docstring'lerin Z3/FOL komutlarından ayrılırken Semantik Entropiye
+    uğramadığını ve Bilişsel Yük izolasyonunun sağlandığını denetlemek.
+    """
+
+    def setUp(self):
+        self.sample_code = '''
+def apply_inne_amel(ast_node):
+    """
+    .. pedagojik_anlati::
+        İnne ve kardeşleri cümleye dahil olduğunda ismini nasb, haberini ref' yapar.
+        Bu sadece sentaktik bir değişim değil, cümlenin epistemik zorunluluk (Necessity)
+        derecesini mutlaklaştıran bir amildir. HPSG teorisinde bu bir 'head' kısıtıdır.
+    
+    .. mantik_kurali::
+        $\\forall x, y: (Mubteda(x) \\land Haber(y)) \\implies \\square (Identity(x,y))$
+    
+    .. felsefe_notu::
+        Mu'tezile ve Eş'ari ekolleri arasında inne'nin ontolojik bağlayıcılığı 
+        tartışılmıştır. Bu operatör Kripke uzayında modalite değiştirir.
+    """
+    z3_solver.add(z3.ForAll([x, y], z3.Implies(z3.And(Mubteda(x), Haber(y)), Necessity(Identity(x,y)))))
+    return ast_node
+    
+def normal_function():
+    """Bu normal bir docstring, sistem tarafından yok sayılmalıdır."""
+    pass
+'''
+        self.test_dir = tempfile.TemporaryDirectory()
+        self.test_file_path = Path(self.test_dir.name) / "dummy_nahiv.py"
+        with open(self.test_file_path, "w", encoding="utf-8") as f:
+            f.write(self.sample_code)
+
+    def tearDown(self):
+        self.test_dir.cleanup()
+
+    def test_epistemic_ast_visitor_extraction(self):
+        """
+        AST düğümlerinden felsefi (Şerh) ve deterministik (Metin) bileşenlerin
+        sessiz kırpmalara (silent truncation) uğramadan ayrıştırılmasını test eder.
+        """
+        visitor = EpistemicASTVisitor(self.sample_code)
+        parsed_ast = ast.parse(self.sample_code)
+        visitor.visit(parsed_ast)
+        
+        self.assertEqual(len(visitor.chunks), 1, "Sadece epistemik tag barındıran düğümler çıkarılmalıdır. Bilişsel yük izolasyonu başarısız.")
+        
+        chunk = visitor.chunks[0]
+        self.assertEqual(chunk.node_name, "apply_inne_amel")
+        self.assertEqual(chunk.node_type, "Function")
+        
+        # Semantik Entropi Denetimleri
+        self.assertIn("İnne ve kardeşleri", chunk.pedagojik_anlati, "Pedagojik metin parse edilirken kayıp yaşandı.")
+        self.assertIn("\\square (Identity(x,y))", chunk.mantik_kurali, "FOL/LaTeX formülü deforme oldu.")
+        self.assertIn("Mu'tezile ve Eş'ari", chunk.felsefe_notu, "Ontolojik kısıt metni parse edilemedi.")
+        
+        # Metin-Şerh İzolasyonu (Docstring'in ham koddan tamamen arındırılması)
+        self.assertIn("z3_solver.add", chunk.source_code, "Deterministik çekirdek koda ulaşılamadı.")
+        self.assertNotIn(".. pedagojik_anlati::", chunk.source_code, "Şerh metni deterministik koda sızdı (İzolasyon İhlali).")
+
+    def test_darsi_nizami_weaver_markdown_rendering(self):
+        """
+        Hiyerarşik dokuma (Weaving) işleminin LaTeX uyumlu Markdown topolojisini
+        doğru inşa edip etmediğini test eder.
+        """
+        weaver = DarsiNizamiWeaver(str(self.test_file_path))
+        markdown_output = weaver.weave_to_markdown()
+        
+        # Başlık ve Hiyerarşi Kontrolü
+        self.assertIn("# Epistemolojik Çıkarım Matrisi: `dummy_nahiv.py`", markdown_output)
+        self.assertIn("## Function: `apply_inne_amel`", markdown_output)
+        
+        # Katmanların (Şerh, Kadiyye, Hâşiye, Metin) Varlığı
+        self.assertIn("### 📖 Şerh (Pedagojik Anlatı)", markdown_output)
+        self.assertIn("### ➗ Kadiyye (Mantıksal/FOL İzdüşüm)", markdown_output)
+        self.assertIn("### 🏛️ Hâşiye (Ontolojik/Felsefi Kısıtlar)", markdown_output)
+        self.assertIn("### ⚙️ Metin (Deterministik Çekirdek)", markdown_output)
+        
+        # Python Kod Bloğunun Formatlanması
+        self.assertIn("```python\n    z3_solver.add(", markdown_output, "AST segmenti uygun kod bloğuna yerleştirilemedi.")
+
+    def test_empty_file_or_no_tags_handling(self):
+        """
+        İçinde hiçbir epistemik tag bulunmayan dosyalarda Weaver'ın çökmeden
+        sessizce boş matris/uyarı döndürmesini test eder.
+        """
+        empty_code = "def foo():\n    pass\n"
+        empty_path = Path(self.test_dir.name) / "empty_nahiv.py"
+        with open(empty_path, "w", encoding="utf-8") as f:
+            f.write(empty_code)
+            
+        weaver = DarsiNizamiWeaver(str(empty_path))
+        output = weaver.weave_to_markdown()
+        self.assertIn("epistemik dokuma etiketleri bulunamadı", output)
 
 if __name__ == '__main__':
     unittest.main()
