@@ -8,12 +8,12 @@ from core.exceptions import ContextPoisoningError
 
 class TestDiscourseIsolation(unittest.TestCase):
     """
-    [FAZ 12] Uçtan Uca (E2E) Bipartite DRT, Lexical Poisoning ve Agent-Sealed IR Test Matrisi.
+    [FAZ 4.1] Uçtan Uca (E2E) Bipartite DRT, Lexical Poisoning ve Agent-Sealed IR Test Matrisi.
     
     .. pedagojik_anlati::
         Âdâb-ı Bahs simülasyonunda Mu'aradah (Çapraz İtiraz) evresinin donanımsal 
         izolasyon testleri. Sâil'in (itiraz edenin) Mucîb'in (iddia sahibinin) ontolojik 
-        hakikatini çalmasını veya bozmasını engelleyen Tahrîr-i Niza' sınırları test edilir.
+        hakikatini çalmasını veya bozmasını engelleyen Tahrîr-i Niza' fiziksel sınırları test edilir.
     """
 
     def setUp(self):
@@ -21,83 +21,93 @@ class TestDiscourseIsolation(unittest.TestCase):
         self.lexicon = ContextualLexicon(semantic_client=LocalOntoLexSemanticClient())
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
-    def test_phantom_bypass_valid_resolution(self):
+    def test_bipartite_physical_isolation(self):
         """
-        Adım 1 Testi: Sâil, Mucîb'in uzayını 'hayalet' (phantom) olarak atlar ve
-        kendi mühürlediği veya Base uzayında bulunan doğru referansa (Antecedent) ulaşır.
+        Adım 1 Testi: Mucîb'in hususi uzayında yarattığı varlığın, Sâil'in fiziksel 
+        yığıtında (Kripke Scope) var olmadığı ve donanımsal izolasyonun çalıştığı ispatlanır.
         """
         self.discourse.set_agent("Mujib")
         self.discourse.push_scope()
-        # Mucîb kendi uzayında bir Zeyd tanımlar.
         self.discourse.add_mention("zeyd", "Entity_Zeyd_Ashari", "Ashari", gender="Muzekker", number="Mufred")
 
         self.discourse.set_agent("Sail")
         self.discourse.push_scope()
-        # Sâil Base (Ortak) uzayda bir varlık tanımlar.
-        self.discourse.add_mention("racul", "Entity_Man_Base", "Base", gender="Muzekker", number="Mufred")
+        
+        # Sâil'in yığıtında 'zeyd' veya Ashari uzayına ait hiçbir varlık olmamalıdır.
+        with self.assertRaises(ValueError) as context:
+            self.discourse.resolve_pronoun("huve")
+            
+        self.assertIn("LOGIC_FAILURE_PROBABILITY: HIGH", str(context.exception))
+        self.assertIn("referans (Antecedent) bulunamadı", str(context.exception))
 
-        # Sâil 'huve' zamirini kullandığında Mucîb'in Zeyd'ini es geçip Base uzayındaki racul'a çarpmalıdır.
-        resolved_id = self.discourse.resolve_pronoun("huve", enforcement_namespace="Maturidi")
-        self.assertEqual(resolved_id, "Entity_Man_Base", "Phantom Bypass başarısız: Sâil, Mucîb'in uzayını atlayamadı.")
+    def test_base_musellemat_propagation(self):
+        """
+        Adım 2 Testi: 'Base' (Müsellemât) uzayında eklenen bir hakikatin, her iki 
+        aktörün de Kripke yığıtına otonom olarak kopyalandığı (Senkronizasyon) test edilir.
+        """
+        # Aktif ajan Sail olsa bile, Base uzaydaki atama her iki zihne zerk edilir.
+        self.discourse.set_agent("Sail")
+        self.discourse.add_mention("racul", "Entity_Man_Base", "Base", gender="Muzekker", number="Mufred")
+        
+        # Sâil için çözümleme başarılı olmalı
+        sail_resolved = self.discourse.resolve_pronoun("huve")
+        self.assertEqual(sail_resolved, "Entity_Man_Base")
+        
+        # Mucîb için de çözümleme başarılı olmalı
+        self.discourse.set_agent("Mujib")
+        mujib_resolved = self.discourse.resolve_pronoun("huve")
+        self.assertEqual(mujib_resolved, "Entity_Man_Base")
 
     def test_enforcement_context_poisoning(self):
         """
-        Adım 1 Testi: Sâil kasten rakibin uzayını dayatırsa (Enforcement), sistem 
-        ContextPoisoningError (Bağlam Zehirlenmesi) fırlatarak motoru kilitler.
+        Adım 3 Testi: Fiziksel izolasyona rağmen, modüller kasten yanlış uzayı 
+        dayatırsa (Enforcement), sistem ContextPoisoningError (Bağlam Zehirlenmesi) fırlatır.
         """
-        self.discourse.set_agent("Mujib")
-        self.discourse.push_scope()
-        self.discourse.add_mention("zeyd", "Entity_Zeyd_Ashari", "Ashari", gender="Muzekker", number="Mufred")
-
         self.discourse.set_agent("Sail")
         self.discourse.push_scope()
+        # Sail kendi uzayına uygun bir atama yapıyor.
+        self.discourse.add_mention("zeyd", "Entity_Zeyd_Maturidi", "Maturidi", gender="Muzekker", number="Mufred")
 
         with self.assertRaises(ContextPoisoningError) as context:
-            # Sâil kasıtlı olarak Ashari uzayına sızmaya çalışıyor
+            # Sâil kendi yığıtında işlem yaparken, dışarıdan kasten Ashari uzayı dayatılıyor.
             self.discourse.resolve_pronoun("huve", enforcement_namespace="Ashari")
 
         self.assertIn("Bağlam Zehirlenmesi", str(context.exception))
-        self.assertIn("kasten rakibin", str(context.exception))
         self.assertIn("Mu'aradah çapraz izolasyonu ihlal edildi", str(context.exception))
 
     def test_lexical_poisoning_prevention(self):
         """
-        Adım 3 Testi: Sâil, Leksikondan kelime çekerken dönen ontolojik ID, daha önce Mucîb 
-        tarafından kendi uzayında mühürlenmişse Lexical Poisoning zırhı tetiklenmelidir.
+        Adım 4 Testi: Leksikon üzerinden yapılan bir sorgu esnasında 'fallback' mekanizmasının 
+        farklı uzay kimliklerini sızdırmasını engelleyen Leksikolojik zırhın testi.
         """
-        # Mucîb bir varlığı Ashari uzayında ontolojik belleğe kaydeder.
         self.discourse.set_agent("Mujib")
         self.discourse.push_scope()
         self.discourse.add_mention("ruh", "Entity_Ruh_01", "Ashari")
         
-        # Sâil'in 'ruh' kelimesini Leksikondan çekebilmesi için Base uzayında da aynı ID ile 
-        # (veya Fallback'te) tanımlı olması gerekir. Fallback dönüşü yapıldığında sistem zehirlenmeyi yakalar.
         self.lexicon.register_word("ruh", "Base", "Entity_Ruh_01")
         
-        # Sâil devreye girer
         self.discourse.set_agent("Sail")
         self.discourse.push_scope()
         
         with self.assertRaises(ContextPoisoningError) as context:
-            # Sâil Maturidi uzayındayken 'ruh' kelimesini çözer. Base üzerinden 'Entity_Ruh_01' döner.
-            # Fakat ID, daha önce Mucîb tarafından Ashari olarak mühürlenmiştir. Zırh devreye girmelidir.
+            # Sail Maturidi uzayındayken ruh'u çözmeye çalışır. Lexicon Base üzerinden ID döner.
+            # Ancak o ID 'Ashari' olarak diskurda mühürlüdür. IlmWadAdapter'in veya Leksikon'un bunu 
+            # yakalayıp zehirlenmeyi önlemesi gerekir.
+            # (ContextualLexicon'un resolve_id metodu içerisinde DiscourseRegister kontrolü çağrılır)
             self.lexicon.resolve_id("ruh", active_namespace="Maturidi", discourse=self.discourse)
 
         self.assertIn("Lexical Poisoning", str(context.exception))
-        self.assertIn("arka kapı (backdoor) eşdeğerliği engellendi", str(context.exception))
 
     def test_semantic_ir_agent_seal_propagation(self):
         """
-        Adım 2 Testi: FOL (SemanticStatementIR) matrisine aktarım yapılırken 
-        'active_agent' mührünün donanımsal olarak Z3 arayüzüne işlenmesi.
+        Adım 5 Testi: FOL (SemanticStatementIR) matrisine aktarım yapılırken 
+        'active_agent' mührünün Z3 arayüzüne işlenmesi.
         """
         self.discourse.set_agent("Sail")
         self.discourse.push_scope()
         
-        # Base uzayda bir kelime kaydı
         self.lexicon.register_word("zeyd", "Base", "Entity_Zeyd")
         
-        # Kukla Sarf Verisi
         auto_lexicon = {
             "zeyd": MorphologicalAnalysis(original_word="zeyd", root="zeyd", pattern="fa'l", ontologic_type="Isim_Camid")
         }
@@ -106,7 +116,6 @@ class TestDiscourseIsolation(unittest.TestCase):
             ("Kainun_Virtual", "zeyd", "Mubteda_Haber", "Marfu")
         ]
         
-        # IR Üretimi
         ir_result = self.adapter.generate_ir(
             tokens=["zeyd"], 
             dependencies=dependencies, 

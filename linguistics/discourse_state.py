@@ -27,7 +27,7 @@ class EntityMention(BaseModel):
     word: str
     ontologic_id: str
     timestamp: int
-    agent: Literal["Mujib", "Sail"]
+    agent: Literal["Mujib", "Sail", "Base"]
     sealed_namespace: str  
     gender: Optional[str] = None
     number: Optional[str] = None
@@ -42,13 +42,18 @@ class DiscourseRegister:
     Sâil (İtiraz Eden) ve Mucîb (İddia Sahibi) aynı zihinsel sahneyi (Discourse) paylaşsalar da, 
     birbirlerinin ontolojik önkabullerini (Namespace) çalamazlar veya onlara dayanarak kendi 
     kıyaslarını kuramazlar.
-    Sistem, iki farklı zihnin aynı anda simüle edildiği, varlıkların "Ortak Kabul" (Müsellemât) 
-    veya "Hayalet" (Phantom) olarak etiketlendiği iki-kutuplu (Bipartite) bir Discourse 
-    Representation Theory (DRT) matrisidir.
+    [FAZ 4.1 GÜNCELLEMESİ]: Sistem, tekil LIFO yığıtından arındırılarak iki farklı zihnin izole 
+    edildiği (Sâil ve Mucîb matrisleri), varlıkların "Ortak Kabul" (Müsellemât/Base) seviyesinde 
+    senkronize edildiği fiziksel olarak bölünmüş (Bipartite) bir Discourse Representation Theory 
+    (DRT) matrisine yükseltilmiştir.
     """
     def __init__(self):
-        # Yığıt (Stack) mimarisi: index 0 her zaman Global (Kök) bağlamı, yani evrensel hakikatleri temsil eder.
-        self.scopes: List[List[EntityMention]] = [[]]  
+        # Yığıt (Stack) mimarisi: Kripke uzayında aktör izolasyonu
+        # index 0 her zaman Global (Kök) bağlamı, yani evrensel hakikatleri ve Müsellemât'ı temsil eder.
+        self.scopes: Dict[Literal["Mujib", "Sail"], List[List[EntityMention]]] = {
+            "Mujib": [[]],
+            "Sail": [[]]
+        }
         self.clock: int = 0
         
         # .. felsefe_notu:: Arazların Cevhere Tabi Olması (HPSG Matrisi)
@@ -98,7 +103,7 @@ class DiscourseRegister:
 
     def set_opponent_epistemic_state(self, level: DenialLevel) -> None:
         """
-        [FAZ 14 E2E RED-TEAMING YAMASI]
+        [E2E RED-TEAMING YAMASI]
         Test ortamlarında rakibin epistemik durumunu doğrudan manüple etmek (Zehirlenme Senaryosu) 
         için kullanılır. Sadece test senaryolarında çağrılmalıdır.
         """
@@ -110,8 +115,9 @@ class DiscourseRegister:
         .. felsefe_notu:: Kripke Uzayında Varsayımsal Dünyalar (Possible Worlds)
         Z3.push() tetiklendiğinde veya yeni bir diyalektik argüman açıldığında (Kadiyye-i Şartiyye), 
         mutlak gerçeklikten (Frame 0) yalıtılmış yeni bir varsayımsal alt-dünya yaratılır.
+        Bu yaratım sadece aktif aktörün yığıtında gerçekleşir.
         """
-        self.scopes.append([])
+        self.scopes[self.active_agent].append([])
 
     def pop_scope(self) -> None:
         """
@@ -119,27 +125,37 @@ class DiscourseRegister:
         Z3.pop() tetiklendiğinde veya varsayımsal iddia çürütüldüğünde (Nakz), o bağlam içinde 
         yaratılmış tüm ontolojik yüklemeler imha edilir ve varlık hiyerarşisi bir önceki duruma rücu eder.
         """
-        if len(self.scopes) > 1:
-            self.scopes.pop()
+        if len(self.scopes[self.active_agent]) > 1:
+            self.scopes[self.active_agent].pop()
         else:
-            raise RuntimeError(f"[BELLEK HATASI] Global söylem çerçevesi (Frame 0 - Müsellemât) imha edilemez. Stack underflow.")
+            raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} için Global söylem çerçevesi (Frame 0 - Müsellemât) imha edilemez. Stack underflow.")
 
     def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None, is_virtual: bool = False) -> None:
         """
-        Aktif aktörün yığıtındaki (scope) en üst dünyaya (top of stack), kendi uzayının mührüyle (namespace) 
-        yeni bir varlık (A'yân) zerk eder.
+        Müsellemât uzayındaki kavramları her iki aktörün de kök zihnine atar; 
+        hususi iddiaları ise yalnızca iddia sahibinin yığıtına mühürler.
         """
+        mention_agent: Literal["Mujib", "Sail", "Base"] = "Base" if active_namespace == "Base" else self.active_agent
+
         mention = EntityMention(
             word=word, 
             ontologic_id=ontologic_id, 
             timestamp=self.clock,
-            agent=self.active_agent,
+            agent=mention_agent,
             sealed_namespace=active_namespace,
             gender=gender,
             number=number,
             is_virtual=is_virtual
         )
-        self.scopes[-1].append(mention)
+        
+        if active_namespace == "Base":
+            # Müsellemât (Ortak Kabuller) her iki zihnin de kök (Frame 0) uzayına zerk edilir.
+            self.scopes["Mujib"][0].append(mention)
+            self.scopes["Sail"][0].append(mention)
+        else:
+            # Hususi iddialar sadece iddia edenin aktif dünyasına (Kripke Scope) yazılır.
+            self.scopes[self.active_agent][-1].append(mention)
+            
         self.clock += 1
 
     def mint_virtual_entity(self, pronoun: str, active_namespace: str) -> str:
@@ -172,31 +188,16 @@ class DiscourseRegister:
 
     def _verify_context_sealing(self, pronoun: str, resolved_mention: EntityMention, enforcement_namespace: Optional[str]) -> Literal["VALID", "PHANTOM"]:
         """
-        .. mantik_kurali:: Mu'aradah (Çapraz İtiraz) ve Ontolojik Yalıtım / Hayalet (Phantom) Prensibi
-        Sâil, kendi argümanını (Kıyas) kurarken, Mucîb'in zihnindeki (onun uzayına mühürlenmiş) 
-        bir varlığa atıf yapamaz (veya tam tersi).
-        1. Eğer varlık 'Base' (Müsellemât / Ortak Hakikatler) uzayında ise eşleşme geçerlidir (VALID).
-        2. Eğer varlık rakibin mühürlü uzayındaysa, bu varlık bir 'Hayalet' (PHANTOM) kabul edilir 
-           ve aramada es geçilir (Bypass).
-        3. Ancak rakibin uzayı kasten parametre olarak dayatılırsa (Enforcement), bu bir 
-           "Bağlam Zehirlenmesi" (Context Poisoning) ve ontolojik hırsızlık (Theft) suçudur.
-        Sistem derhal durdurulur.
+        .. mantik_kurali:: Mu'aradah İzolasyonu ve Ontolojik Zehirlenme
+        Aktörlerin Kripke yığıtları fiziksel olarak bölündüğü için, bir aktörün diğer aktörün hususi varlığını 
+        yanlışlıkla çözümlemesi (Phantom bypass) riski ontolojik olarak ortadan kaldırılmıştır.
+        Ancak, sistem bileşenlerinden gelen kasti bir dayatma (Enforcement) varsa, 
+        bu bir "Bağlam Zehirlenmesi" (Context Poisoning) teşebbüsü kabul edilerek mantıksal işlem durdurulur.
         """
         if resolved_mention.sealed_namespace == "Base":
             return "VALID"
             
-        if resolved_mention.agent != self.active_agent:
-            # Rakibin uzayı: Kasti olarak rakibin mühürlü uzayı dayatılıyorsa (Ontolojik Hırsızlık)
-            if enforcement_namespace and enforcement_namespace == resolved_mention.sealed_namespace:
-                raise ContextPoisoningError(
-                    f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
-                    f"'{pronoun}' zamiri, kasten rakibin '{resolved_mention.sealed_namespace}' uzayına sızmaya çalışıyor. "
-                    f"Mu'aradah çapraz izolasyonu ihlal edildi."
-                )
-            # Normal akış: Rakibin uzayı hayalet olarak değerlendirilip atlanır (Phantom Bypass)
-            return "PHANTOM"
-            
-        # Kendi uzayımız: Başka bir uzay dayatması varsa (Kendi içinde zehirlenme - Tutarsızlık)
+        # Fiziksel izolasyon ihlal edilip kasten başka uzayın varlığı dayatılıyorsa:
         if enforcement_namespace and resolved_mention.sealed_namespace != enforcement_namespace:
             raise ContextPoisoningError(
                 f"LOGIC_FAILURE_PROBABILITY: HIGH - Context Poisoning (Bağlam Zehirlenmesi) Tespit Edildi! "
@@ -227,9 +228,8 @@ class DiscourseRegister:
         .. pedagojik_anlati:: İrcâ-ı Zamir (Zamirin Merciine Döndürülmesi)
         Klasik felsefi metinlerdeki en büyük kriz, zamirin (Huve, Hiye) kime/neye döndüğünün (Merci) 
         belirsizliğidir.
-        Bu metod, yığıt içerisinde sondan başa (LIFO - Last In First Out) ilerleyerek,
-        önce HPSG yapısal doğrulaması yapar, ardından 'Hayalet' (Phantom) zırhı ile ontolojik 
-        sızıntıyı (Context Poisoning) engeller.
+        Bu metod, *yalnızca aktif aktörün fiziksel yığıtı* içerisinde sondan başa (LIFO - Last In First Out) ilerleyerek,
+        önce HPSG yapısal doğrulaması yapar, ardından Context Sealing kontrolü uygular.
         Bulunan ilk meşru merci (gerçek veya müstatir), Z3 SMT'ye gönderilecek kesin mantıksal değişken 
         (EntitySort Variable) ataması olur.
         """
@@ -240,13 +240,14 @@ class DiscourseRegister:
         target_gender = self.pronouns[pronoun_lower]["gender"]
         target_number = self.pronouns[pronoun_lower]["number"]
 
-        for frame in reversed(self.scopes):
+        # Sadece diyalektik nöbeti elinde tutan aktörün matrisinde LIFO araması yapılır.
+        for frame in reversed(self.scopes[self.active_agent]):
             for resolved_mention in reversed(frame):
                 
                 # 1. HPSG Yapısal Uyum Denetimi
                 if self._check_hpsg_unification(resolved_mention, target_gender, target_number):
                     
-                    # 2. Ontolojik Sızıntı ve Hayalet (Phantom) Denetimi
+                    # 2. Ontolojik Sızıntı (Context Poisoning) Denetimi
                     sealing_status = self._verify_context_sealing(pronoun, resolved_mention, enforcement_namespace)
                     
                     if sealing_status == "PHANTOM":
@@ -255,7 +256,7 @@ class DiscourseRegister:
                     # İlk meşru varlık Z3 matrisi için döndürülür
                     return resolved_mention.ontologic_id
                 
-        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için söylem belleğinde ontolojik kısıtları (HPSG) uyan ve erişilebilir bir referans (Antecedent) bulunamadı.")
+        raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} uzayında ontolojik kısıtları (HPSG) uyan ve erişilebilir bir referans (Antecedent) bulunamadı.")
         
     def clear_memory(self) -> None:
         """
@@ -264,7 +265,7 @@ class DiscourseRegister:
         tüm Kripke dünyaları ve aktörlerin epistemik durumları silinerek sistem donanımsal 
         olarak tabula rasa durumuna döndürülür.
         """
-        self.scopes = [[]]
+        self.scopes = {"Mujib": [[]], "Sail": [[]]}
         self.clock = 0
         self.active_agent = "Mujib"
         self.epistemic_state = {"Mujib": DenialLevel.KHALI_AL_ZIHN, "Sail": DenialLevel.KHALI_AL_ZIHN}

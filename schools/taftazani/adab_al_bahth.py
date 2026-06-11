@@ -6,10 +6,11 @@ from linguistics.discourse_state import DiscourseRegister
 
 class AdabAlBahthEngine:
     """
+    .. pedagojik_anlati:: Cürcânî Diyalektiği ve Z3 Otomatı
     Taftâzânî, Cürcânî ve Gelenbevî temelli Münazara Sonlu Durum Makinesi (FSM).
-    Faz 5: Rekürsif Men' (İç içe İspat Yükümlülüğü), Mülâzama Counter-Model Çözümlemesi 
-    ve Tahrîr-i Mahall-i Niza' Z3 Aksiyom Enjeksiyonu.
-    [FAZ 4 YAMASI]: submit_evidence içindeki Kripke uzayına SpaceSort (Mekân) boyutu eklendi.
+    Faz 4 ve Faz 5 entegrasyonuyla: Rekürsif Men' (İç içe İspat Yükümlülüğü), Mülâzama 
+    Counter-Model Çözümlemesi, Tahrîr-i Mahall-i Niza' (Kavramsal İzolasyon) ve 
+    z3.Optimize tabanlı Mu'aradah (Çapraz-Ekol Kilitlenmesi / Tevcîh) mekanizmalarını barındırır.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
@@ -63,6 +64,13 @@ class AdabAlBahthEngine:
         }
 
     def tahrir_i_niza(self, musellemat: List[str], niza_terms: List[str]) -> Dict[str, Any]:
+        """
+        .. felsefe_notu:: Tahrîr-i Mahall-i Niza' (Kavramsal Senkronizasyon)
+        Sâil ve Mucîb argümantasyona başlamadan önce, itilafın tam olarak nerede olduğunu 
+        izole etmek zorundadır. Bu aşama, varlıkların DiscourseRepresentation (DRT) üzerinde 
+        'Müsellem' (Base/Ortak) veya 'Niza' (Mujib/Çatışmalı) olarak mühürlenmesini sağlar.
+        Bağlam zehirlenmesinin (Context Poisoning) önüne geçilen ilk duvardır.
+        """
         if self.current_state != "ISOLATING_CONTENTION":
             raise ValueError(f"[DİYALEKTİK İHLAL] Tahrîr-i Niza' yalnızca 'ISOLATING_CONTENTION' aşamasında yapılabilir.")
             
@@ -75,6 +83,13 @@ class AdabAlBahthEngine:
 
         self.musellemat = musellemat
         self.niza_terms = niza_terms
+        
+        # [FAZ 4.2 GÜNCELLEMESİ] DRT Context Sealing Enjeksiyonu
+        for term in musellemat:
+            self.discourse.add_mention(word=term, ontologic_id=term, active_namespace="Base")
+            
+        for term in niza_terms:
+            self.discourse.add_mention(word=term, ontologic_id=term, active_namespace="Mujib")
         
         self.current_state = "AWAITING_EVIDENCE"
         self.discourse.set_agent("Mujib") 
@@ -97,7 +112,7 @@ class AdabAlBahthEngine:
             w_env = z3.Const('w_env', self.solver.builder.WorldSort)
             tz_env = z3.Const('tz_env', self.solver.builder.TimeSortZati)
             tv_env = z3.Const('tv_env', self.solver.builder.TimeSortVasfi)
-            s_env = z3.Const('s_env', self.solver.builder.SpaceSort) # [FAZ 4 YAMASI]
+            s_env = z3.Const('s_env', self.solver.builder.SpaceSort) # [FAZ 4.1] Kripke Uzayı - Mekân Boyutu
             x_env = z3.Const('x_env', self.solver.builder.EntitySort)
             
             for m_term in self.musellemat:
@@ -106,7 +121,7 @@ class AdabAlBahthEngine:
                     self.solver.solver.add(self.solver.builder.parse(m_term))
                 else:
                     pred = self.solver.builder.get_or_create_predicate(m_term, arity=1)
-                    # [FAZ 4 YAMASI] S_env enjeksiyonu ile Sort mismatch engellendi
+                    # Çok-boyutlu uzay kısıtı mühürlenir
                     self.solver.solver.add(z3.Exists([w_env, tz_env, tv_env, s_env, x_env], pred(w_env, tz_env, tv_env, s_env, x_env)))
 
             for p in premises:
@@ -157,12 +172,21 @@ class AdabAlBahthEngine:
             self.active_premises = []
             self.current_state = "ISOLATING_CONTENTION"
             
+            # [HATA DÜZELTMESİ]: Yeni Da'vâ eklendiğinde Tahrîr-i Niza' için FSM nöbeti zorunlu olarak Sâil'e geçer.
+            self.discourse.set_agent("Sail")
+            
             return {
                 "status": "MEN_ON_PREMISE", 
                 "message": f"Sâil '{target_premise}' öncülünü kanıtsız bularak reddetti (Men'). Lüzum zinciri askıya alındı. Mucîb, reddedilen bu öncülü yeni bir Da'vâ olarak ispatlamak zorundadır. Tahrîr-i Niza' bekleniyor."
             }
             
         elif attack_type == "Nakz":
+            """
+            .. mantik_kurali:: Nakz ve Mülâzama (Lüzum Bağı Testi)
+            Nakz saldırısı, öncüllerin doğru kabul edildiği bir modelde neticenin (iddianın) yanlış 
+            olabileceğini ispatlama sürecidir. Hadd-i Evsat (orta terim) neticeyi ontolojik bir zorunlulukla 
+            bağlamıyorsa (Mülâzama yoksa), SMT çözücü bir Counter-Model bulacak ve Mucîb'in istidlâli Fâsid sayılacaktır.
+            """
             from linguistics.discourse_state import DenialLevel
             self.discourse.update_epistemic_state("Sail", DenialLevel.MUNKIR)
 
@@ -173,7 +197,7 @@ class AdabAlBahthEngine:
                     self.solver.solver.add(self.solver.builder.parse(p))
                 
                 self._auto_register_predicates(self.active_claim)
-                # İddianın değili eklenerek karşı-model (Counter-Model) aranır
+                # İddianın değili eklenerek karşı-model (Counter-Model) aranır.
                 self.solver.solver.add(z3.Not(self.solver.builder.parse(self.active_claim)))
                 
                 check_result = self.solver.solver.check()
@@ -206,7 +230,62 @@ class AdabAlBahthEngine:
                 return response
                 
         elif attack_type == "Muaradah":
-            return {"status": "PENDING_CROSS_SCHOOL", "message": "Mu'aradah saldırısı için Orkestratör üzerinden çapraz-ekol (z3.Optimize) izolasyon motoru tetiklenmelidir."}
+            """
+            .. felsefe_notu:: Mu'aradah ve Z3 Optimize (Tevcîh Kilitlenmesi)
+            Çapraz ekol çarpışmalarında (Örn: Eş'arî vs. Selefî), Z3'ün deterministik Push/Pop yalıtımı 
+            tek başına yeterli değildir. Rakibin ontolojik ağacı "ödünç alınıp" kendi silahıyla vurulmak 
+            istendiğinde (Tevcîh), 'z3.Optimize()' ve 'Soft Constraints' kullanılarak deterministik kilitlenme 
+            (Stalemate) üretilir. Bu, iki zıt doğrunun aynı anda geçerli olduğu diyalektik bir düğümdür.
+            """
+            if not target_premise:
+                return {"status": "INVALID_ATTACK", "message": "Mu'aradah için bir karşı-iddia (Counter-Claim) sunulmalıdır."}
+                
+            opt = z3.Optimize()
+            
+            w_env = z3.Const('w_env', self.solver.builder.WorldSort)
+            tz_env = z3.Const('tz_env', self.solver.builder.TimeSortZati)
+            tv_env = z3.Const('tv_env', self.solver.builder.TimeSortVasfi)
+            s_env = z3.Const('s_env', self.solver.builder.SpaceSort)
+            x_env = z3.Const('x_env', self.solver.builder.EntitySort)
+            
+            # Müsellemâtı (Ortak Kabulleri) mutlak (Hard Constraint) olarak ekle
+            for m_term in self.musellemat:
+                if "(" in m_term and ")" in m_term:
+                    self._auto_register_predicates(m_term)
+                    opt.add(self.solver.builder.parse(m_term))
+                else:
+                    pred = self.solver.builder.get_or_create_predicate(m_term, arity=1)
+                    opt.add(z3.Exists([w_env, tz_env, tv_env, s_env, x_env], pred(w_env, tz_env, tv_env, s_env, x_env)))
+                    
+            # Mucîb'in asıl argüman öncüllerini mutlak (Hard Constraint) olarak ekle
+            for p in self.active_premises:
+                self._auto_register_predicates(p)
+                opt.add(self.solver.builder.parse(p))
+                
+            # Sâil'in Mu'aradah hedefini (karşı önermesini) Esnek Kısıt (Soft Constraint) olarak ekle
+            self._auto_register_predicates(target_premise)
+            opt.add_soft(self.solver.builder.parse(target_premise), weight=10)
+            
+            # Kilitlenmeyi (Stalemate) simüle etmek için Mucîb'in iddiasının zıttını da Esnek Kısıt olarak ekle
+            opt.add_soft(z3.Not(self.solver.builder.parse(self.active_claim)), weight=10)
+            
+            check_opt = opt.check()
+            
+            self.solver.solver.pop()
+            self.discourse.set_agent("Mujib")
+            self.discourse.pop_scope()
+            self.current_state = "RESOLVED"
+            
+            if check_opt == z3.sat:
+                return {
+                    "status": "STALEMATE",
+                    "message": "Mu'aradah başarılı. Z3 Optimize motoru her iki ekolün de haklı olabileceği esnek bir kilitlenme (Stalemate / Tevcîh) buldu. Argüman askıya alındı."
+                }
+            else:
+                return {
+                    "status": "MUARADAH_FAILED",
+                    "message": "Sâil'in Mu'aradah girişimi ontolojik çelişki yarattı. Çapraz-ekol saldırısı başarısız. Mucîb haklıdır."
+                }
         else:
             return {"status": "ERROR", "message": "Geçersiz Âdâb-ı Bahs saldırı tipi."}
 

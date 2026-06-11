@@ -266,22 +266,39 @@ class ContextualLexicon:
         usûl uzayında (Namespace) mühürlenmişse, Sâil bu ID'yi çalarak SMT motorunda 
         arka kapıdan (backdoor) eşdeğerlik kuramaz. Ortak kabul (Base) dışındaki bu sızıntı 
         anında tespit edilip engellenir ve motor ContextPoisoningError fırlatarak durur.
+        
+        [FAZ 4.1 Bipartite DRT UYUMU]: discourse.scopes yapısının sözlük olmasına uygun tarama yapar.
         """
         if not discourse or active_namespace == "Base":
             return
             
         current_agent = discourse.active_agent
         
-        for frame in discourse.scopes:
-            for mention in frame:
-                if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
-                    if mention.sealed_namespace != active_namespace:
-                        raise ContextPoisoningError(
-                            f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
-                            f"{current_agent}, '{word}' kelimesi üzerinden '{ontologic_id}' ID'sini leksikondan çekmeye çalışıyor. "
-                            f"Ancak bu ontolojik ID, rakip ({mention.agent}) tarafından '{mention.sealed_namespace}' uzayında mühürlenmiştir. "
-                            f"Mu'aradah çapraz izolasyonu ihlal edildi, arka kapı (backdoor) eşdeğerliği engellendi."
-                        )
+        # Bipartite DRT Dict iterasyonu
+        if hasattr(discourse, 'scopes') and isinstance(discourse.scopes, dict):
+            for agent_key, actor_scopes in discourse.scopes.items():
+                for frame in actor_scopes:
+                    for mention in frame:
+                        if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
+                            if mention.sealed_namespace != active_namespace:
+                                raise ContextPoisoningError(
+                                    f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
+                                    f"{current_agent}, '{word}' kelimesi üzerinden '{ontologic_id}' ID'sini leksikondan çekmeye çalışıyor. "
+                                    f"Ancak bu ontolojik ID, rakip ({mention.agent}) tarafından '{mention.sealed_namespace}' uzayında mühürlenmiştir. "
+                                    f"Mu'aradah çapraz izolasyonu ihlal edildi, arka kapı (backdoor) eşdeğerliği engellendi."
+                                )
+        # Fallback (Eski Liste tabanlı yapı)
+        elif hasattr(discourse, 'scopes') and isinstance(discourse.scopes, list):
+            for frame in discourse.scopes:
+                for mention in frame:
+                    if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
+                        if mention.sealed_namespace != active_namespace:
+                            raise ContextPoisoningError(
+                                f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
+                                f"{current_agent}, '{word}' kelimesi üzerinden '{ontologic_id}' ID'sini leksikondan çekmeye çalışıyor. "
+                                f"Ancak bu ontolojik ID, rakip ({mention.agent}) tarafından '{mention.sealed_namespace}' uzayında mühürlenmiştir. "
+                                f"Mu'aradah çapraz izolasyonu ihlal edildi, arka kapı (backdoor) eşdeğerliği engellendi."
+                            )
 
     def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None, epoch: str = "Classical") -> str:
         """

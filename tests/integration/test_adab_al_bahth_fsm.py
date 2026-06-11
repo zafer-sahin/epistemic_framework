@@ -18,6 +18,15 @@ from linguistics.sarf_parser import SarfEngine
 from linguistics.nahiv_ast import NahivDependencyCompiler
 
 class TestDialecticsFSM(unittest.TestCase):
+    """
+    [FAZ 4 ve FAZ 5] Cürcânî Diyalektiği Sonlu Durum Makinesi (FSM) Test Süiti.
+    
+    .. pedagojik_anlati::
+        Bu test matrisi, Âdâb-ı Bahs münazara kurallarının Kripke uzayında nasıl 
+        davrandığını doğrular. Tahrîr-i Niza', Men', Nakz ve Mu'aradah saldırılarının 
+        Z3 motorundaki ontolojik yansımaları (Counter-Model ve Stalemate) sınanır.
+        Ayrıca Faz 4.1 Bipartite DRT bağlam yalıtımı, FSM nöbet değişimleriyle entegre test edilir.
+    """
     def setUp(self):
         loader = OntologyLoader()
         self.ontology = loader.load(Path("data/base_ontology.json"))
@@ -35,21 +44,30 @@ class TestDialecticsFSM(unittest.TestCase):
         self.nahiv = NahivDependencyCompiler()
 
     def test_fsm_sequential_integrity_and_tahrir(self):
+        """
+        .. mantik_kurali:: Diyalektik Nöbet Değişimi
+        İddia, Tahrîr ve Delil adımları arasında Sâil ve Mucîb'in DRT yığıtlarındaki 
+        nöbet değişiminin (Agent Transition) katı kurallara uyması test edilir.
+        """
         with self.assertRaises(ValueError):
+            # Da'vâ (İddia) olmadan delil sunulamaz.
             self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
             
         claim_res = self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
         self.assertEqual(self.engine.current_state, "ISOLATING_CONTENTION")
+        self.assertEqual(self.engine.discourse.active_agent, "Sail", "İddia sonrası Tahrîr için nöbet Sâil'e geçmelidir.")
         
         with self.assertRaises(ValueError):
+            # Tahrîr-i Niza' (Kavramsal Senkronizasyon) yapılmadan delil sunulamaz.
             self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))"])
             
         tahrir_res = self.engine.tahrir_i_niza(musellemat=["S"], niza_terms=["P"])
         self.assertEqual(self.engine.current_state, "AWAITING_EVIDENCE")
+        self.assertEqual(self.engine.discourse.active_agent, "Mujib", "Tahrîr sonrası delil yükümlülüğü Mucîb'e aittir.")
         self.assertEqual(tahrir_res["status"], "CONTENTION_ISOLATED")
 
     def test_tahrir_complex_fol_injection(self):
-        """[Faz 5 Refaktör] Tahrîr-i Niza' aşamasında kompleks FOL müsellemâtının Z3'e mutlak aksiyom olarak zerk edilmesi."""
+        """[Faz 4.2] Tahrîr-i Niza' aşamasında kompleks FOL müsellemâtının Z3'e mutlak aksiyom olarak zerk edilmesi."""
         self.engine.submit_claim("Exists([x], Nami(x))")
         
         complex_musellemat = ["Forall([x], Implies(Cemad(x), Cism(x)))", "Cemad"]
@@ -59,6 +77,11 @@ class TestDialecticsFSM(unittest.TestCase):
         self.assertEqual(res["status"], "EVIDENCE_LOGGED", "[SENTAKS İHLALİ] Kompleks FOL müsellemât Z3 tarafından işlenemedi.")
 
     def test_curcani_nakz_counter_model_refutation(self):
+        """
+        .. felsefe_notu:: Nakz ve Fâsid İstidlâl
+        Mucîb'in öncülleri doğru kabul edilse bile, neticenin yanlış olabildiği bir 
+        Kripke Counter-Model (Karşı-Model) ispatlanarak Mülâzama'nın (Lüzum Bağı) çökertilmesi.
+        """
         self.engine.submit_claim("Forall([x], Implies(Cemad(x), Nami(x)))")
         self.engine.tahrir_i_niza(musellemat=["Cemad", "Cism"], niza_terms=["Nami"]) 
         
@@ -69,6 +92,7 @@ class TestDialecticsFSM(unittest.TestCase):
         
         ev_result = self.engine.submit_evidence(premises)
         self.assertEqual(ev_result["status"], "EVIDENCE_LOGGED")
+        self.assertEqual(self.engine.discourse.active_agent, "Sail", "Delil sunulduktan sonra saldırı nöbeti Sâil'e geçmelidir.")
         
         attack_result = self.engine.attack_evidence(attack_type="Nakz")
         
@@ -76,8 +100,23 @@ class TestDialecticsFSM(unittest.TestCase):
         self.assertEqual(self.engine.current_state, "RESOLVED")
         self.assertIn("counter_model_extract", attack_result)
 
+    def test_fsm_muaradah_stalemate_generation(self):
+        """
+        [Faz 4.3] Z3 Optimize ile Çapraz-Ekol Kilitlenmesi (Tevcîh) Testi.
+        Mu'aradah saldırısının Soft Constraints kullanarak bir Stalemate üretip üretemediği sınanır.
+        """
+        self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
+        self.engine.tahrir_i_niza(musellemat=["S"], niza_terms=["P"])
+        self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))", "Forall([x], Implies(M(x), P(x)))"])
+        
+        # Sâil Mu'aradah yapar: Kendi usûlünden esnek bir kısıt (Soft Constraint) getirir
+        result = self.engine.attack_evidence("Muaradah", target_premise="Forall([x], Implies(S(x), Not(P(x))))")
+        
+        self.assertIn(result["status"], ["STALEMATE", "MUARADAH_FAILED"])
+        self.assertEqual(self.engine.current_state, "RESOLVED")
+
     def test_cross_school_muaradah_dynamic_weight_optimization(self):
-        """[Faz 5 Refaktör] Mu'aradah çapraz-ekol çarpışmasında ontolojik derinliğe göre dinamik ağırlık cezası ölçümü."""
+        """[Faz 5] Orkestratör üzerinden Mu'aradah çapraz-ekol çarpışmasında ontolojik ağırlık cezası ölçümü."""
         self.lexicon.register_word("cevher", "Base", "Cevher")
         self.lexicon.register_word("cism", "Base", "Cism")
         self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
@@ -103,7 +142,7 @@ class TestDialecticsFSM(unittest.TestCase):
             self.assertIn("ontolojik ağırlık maliyetiyle", result["message"])
 
     def test_tahsil_i_hasil_rejection(self):
-        """[Faz 5] Tautoloji içeren (Z3'te kendi içinde ispatlı) aksiyomların reddi."""
+        """[Faz 4] Tautoloji içeren (Z3'te kendi içinde ispatlı) aksiyomların Da'vâ olarak reddi."""
         tautology_claim = "Forall([x_env], Or(Cism(x_env), Not(Cism(x_env))))"
         response = self.engine.submit_claim(tautology_claim)
         
@@ -111,13 +150,14 @@ class TestDialecticsFSM(unittest.TestCase):
         self.assertEqual(self.engine.current_state, "RESOLVED")
 
     def test_recursive_men_stack_operation(self):
-        """[Faz 5] Rekürsif 'Men' saldırısı ve yığıt (stack) yönetimi."""
-        # İddia: Her Cemad Nami'dir. (Ontolojide geçersiz olduğu için Tahsîl-i Hâsıl'a takılmaz)
+        """
+        [Faz 4] Rekürsif 'Men' saldırısı ve Kripke Scope (Yığıt) yönetimi.
+        Sâil'in hedef öncülü reddetmesi durumunda, o öncülün yeni bir Da'vâ'ya dönüşmesi süreci.
+        """
         main_claim = "Forall([x_env], Implies(Cemad(x_env), Nami(x_env)))"
         self.engine.submit_claim(main_claim)
         self.engine.tahrir_i_niza(["Cevher"], ["Cemad", "Nami"])
         
-        # Yanıltıcı delil
         p1 = "Forall([x_env], Implies(Cemad(x_env), Hayvan(x_env)))"
         p2 = "Forall([x_env], Implies(Hayvan(x_env), Nami(x_env)))"
         self.engine.submit_evidence([p1, p2])
@@ -126,23 +166,25 @@ class TestDialecticsFSM(unittest.TestCase):
         
         self.assertEqual(men_response["status"], "MEN_ON_PREMISE")
         self.assertEqual(len(self.engine.claim_stack), 1)
-        self.assertEqual(self.engine.active_claim, p1)
+        self.assertEqual(self.engine.active_claim, p1, "Men' edilen öncül yeni bir Da'vâ'ya dönüşmelidir.")
         self.assertEqual(self.engine.current_state, "ISOLATING_CONTENTION")
+        self.assertEqual(self.engine.discourse.active_agent, "Sail", "Yeni Da'vâ için Tahrîr nöbeti Sâil'e geçmelidir.")
         
         self.engine.tahrir_i_niza([], ["Cemad", "Hayvan"])
         sub_p1 = "Forall([x_env], Implies(Cemad(x_env), Insan(x_env)))"
         sub_p2 = "Forall([x_env], Implies(Insan(x_env), Hayvan(x_env)))"
         self.engine.submit_evidence([sub_p1, sub_p2])
         
+        # Sâil Nakz yapar, ancak Lüzum bağı sağlam olduğu için İlzam edilir (Mucîb kazanır).
         nakz_response = self.engine.attack_evidence("Nakz")
         
         self.assertEqual(nakz_response["status"], "SUB_CLAIM_PROVEN")
-        self.assertEqual(len(self.engine.claim_stack), 0)
-        self.assertEqual(self.engine.active_claim, main_claim)
+        self.assertEqual(len(self.engine.claim_stack), 0, "Alt iddia ispatlanınca yığıt temizlenmelidir.")
+        self.assertEqual(self.engine.active_claim, main_claim, "Orijinal Da'vâ'ya dönülmelidir.")
         self.assertEqual(self.engine.current_state, "AWAITING_ATTACK")
 
     def test_mukabere_self_contradiction(self):
-        """[Faz 5] Mucîb'in kendi öncüllerinin çelişmesi durumu (UNSAT öngörüsü)."""
+        """[Faz 4] Mucîb'in kendi sunduğu öncüllerin çelişmesi (UNSAT öngörüsü / Mukabere)."""
         claim = "Forall([x_env], Implies(Cemad(x_env), Hayvan(x_env)))"
         self.engine.submit_claim(claim)
         self.engine.tahrir_i_niza([], ["Cemad"])
