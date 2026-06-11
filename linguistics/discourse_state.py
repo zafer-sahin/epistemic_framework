@@ -19,9 +19,10 @@ class EntityMention(BaseModel):
     """
     .. felsefe_notu:: Lafzın Ontolojik Mühürlenmesi (Instantiation)
     Bir kelime (lafız), sadece dizgisel (string) bir değişken değil;
-    Sâil veya Mucîb tarafından belirli bir usûl uzayında (Namespace) iddia edilmiş bir varlık yansımasıdır (A'yân-ı Sâbite'nin 
-    cümledeki tezahürü).
-    Varlıkların HPSG (Cinsiyet ve Sayı) kısıtlarıyla mühürlenmesi, mantıksal argümantasyonda (Kıyas) oluşabilecek terim kaymalarını ve safsataları engeller.
+    Sâil veya Mucîb tarafından belirli bir usûl uzayında (Namespace) iddia edilmiş bir varlık yansımasıdır 
+    (A'yân-ı Sâbite'nin cümledeki tezahürü).
+    Varlıkların HPSG (Cinsiyet ve Sayı) kısıtlarıyla mühürlenmesi, mantıksal argümantasyonda (Kıyas) 
+    oluşabilecek terim kaymalarını ve safsataları engeller.
     """
     word: str
     ontologic_id: str
@@ -30,6 +31,7 @@ class EntityMention(BaseModel):
     sealed_namespace: str  
     gender: Optional[str] = None
     number: Optional[str] = None
+    is_virtual: bool = False  # [FAZ 1.4] DRT (Discourse Representation Theory) Varoluşsal Düğüm Bayrağı
 
 class DiscourseRegister:
     """
@@ -40,8 +42,9 @@ class DiscourseRegister:
     Sâil (İtiraz Eden) ve Mucîb (İddia Sahibi) aynı zihinsel sahneyi (Discourse) paylaşsalar da, 
     birbirlerinin ontolojik önkabullerini (Namespace) çalamazlar veya onlara dayanarak kendi 
     kıyaslarını kuramazlar.
-    Sistem, iki farklı zihnin aynı anda simüle edildiği, varlıkların "Ortak Kabul" (Müsellemât) veya "Hayalet" (Phantom) olarak etiketlendiği iki-kutuplu (Bipartite) 
-    bir Discourse Representation Theory (DRT) matrisidir.
+    Sistem, iki farklı zihnin aynı anda simüle edildiği, varlıkların "Ortak Kabul" (Müsellemât) 
+    veya "Hayalet" (Phantom) olarak etiketlendiği iki-kutuplu (Bipartite) bir Discourse 
+    Representation Theory (DRT) matrisidir.
     """
     def __init__(self):
         # Yığıt (Stack) mimarisi: index 0 her zaman Global (Kök) bağlamı, yani evrensel hakikatleri temsil eder.
@@ -121,7 +124,7 @@ class DiscourseRegister:
         else:
             raise RuntimeError(f"[BELLEK HATASI] Global söylem çerçevesi (Frame 0 - Müsellemât) imha edilemez. Stack underflow.")
 
-    def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None) -> None:
+    def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None, is_virtual: bool = False) -> None:
         """
         Aktif aktörün yığıtındaki (scope) en üst dünyaya (top of stack), kendi uzayının mührüyle (namespace) 
         yeni bir varlık (A'yân) zerk eder.
@@ -133,10 +136,39 @@ class DiscourseRegister:
             agent=self.active_agent,
             sealed_namespace=active_namespace,
             gender=gender,
-            number=number
+            number=number,
+            is_virtual=is_virtual
         )
         self.scopes[-1].append(mention)
         self.clock += 1
+
+    def mint_virtual_entity(self, pronoun: str, active_namespace: str) -> str:
+        """
+        .. pedagojik_anlati:: Müstatir Zamirin Ontolojik İnşası (DRT Existential Minting)
+        İlm-i Sarf tarafından tespit edilen fiil içi gizli (müstatir) zamirler, 
+        Discourse Representation Theory (DRT) bağlamında "failsiz eylem olmaz" aksiyomu gereği, 
+        yığıta varoluşsal bir değişken (z3.Exists) olarak zerk edilir. 
+        Böylece sonraki munfasıl (açık) zamirler, bu hayali faili meşru bir merci (Antecedent) olarak görebilir.
+        """
+        pronoun_lower = pronoun.lower()
+        if pronoun_lower not in self.pronouns:
+            raise ValueError(f"[DRT HATASI] Bilinmeyen müstatir zamir tipi: {pronoun}")
+            
+        target_gender = self.pronouns[pronoun_lower]["gender"]
+        target_number = self.pronouns[pronoun_lower]["number"]
+        
+        # Z3 için eşsiz (unique) varoluşsal kimlik üretimi
+        virtual_id = f"Virtual_{pronoun_lower.capitalize()}_{self.clock}"
+        
+        self.add_mention(
+            word=f"[{pronoun_lower}]", 
+            ontologic_id=virtual_id, 
+            active_namespace=active_namespace,
+            gender=target_gender,
+            number=target_number,
+            is_virtual=True
+        )
+        return virtual_id
 
     def _verify_context_sealing(self, pronoun: str, resolved_mention: EntityMention, enforcement_namespace: Optional[str]) -> Literal["VALID", "PHANTOM"]:
         """
@@ -180,7 +212,7 @@ class DiscourseRegister:
         .. mantik_kurali:: Yapısal Uyum ve Özdeşlik (Unification)
         Bir zamirin işaret ettiği asıl varlık (Antecedent) ile cinsiyet (Müzekker/Müennes) 
         ve sayı (Müfred/Cemi) bakımından ontolojik uyumu (Feature Unification) denetlenir. 
-        Uyum yoksa bir önceki düğüm noktasına geçilir.
+        Müstatir (sanal) zamirler de bu kontrolden eksiksiz geçer. Uyum yoksa bir önceki düğüm noktasına geçilir.
         """
         if target_gender and resolved_mention.gender and target_gender != resolved_mention.gender:
             return False  # Cinsiyet uyuşmazlığı
@@ -198,7 +230,8 @@ class DiscourseRegister:
         Bu metod, yığıt içerisinde sondan başa (LIFO - Last In First Out) ilerleyerek,
         önce HPSG yapısal doğrulaması yapar, ardından 'Hayalet' (Phantom) zırhı ile ontolojik 
         sızıntıyı (Context Poisoning) engeller.
-        Bulunan ilk meşru merci, Z3 SMT'ye gönderilecek kesin mantıksal değişken (EntitySort Variable) ataması olur.
+        Bulunan ilk meşru merci (gerçek veya müstatir), Z3 SMT'ye gönderilecek kesin mantıksal değişken 
+        (EntitySort Variable) ataması olur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:

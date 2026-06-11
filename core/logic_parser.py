@@ -2,42 +2,56 @@ import ast
 import z3
 import re
 from typing import Dict
+from core.exceptions import DiachronicViolationError
 
 class Z3ExpressionBuilder:
     """
-    Sadece belirlenmiş ontolojik ID'ler ve FOL kuralları dahilinde
-    Z3 ifadelerine (z3.ExprRef) dönüşüm yapan güvenlik duvarlı ve derinlik limitli AST derleyicisi.
-    Faz 4 - Adım 1: Kripke Semantiği (Olası Dünyalar), Çift Katmanlı Zaman Düzlemi (Zâtî ve Vasfî) 
-    ve Mekânsal Boyut (SpaceSort) eklentisi.
+    .. pedagojik_anlati:: Kripke Uzayı ve Z3 Determinizmi
+    Sadece belirlenmiş ontolojik ID'ler ve FOL kuralları dahilinde Z3 ifadelerine (z3.ExprRef) 
+    dönüşüm yapan güvenlik duvarlı ve derinlik limitli AST derleyicisi.
+    Faz 1 - Adım 4 kapsamında: İlm-i Nahiv'deki Rabıta (Identity), İnne'nin Ameli (Necessity), 
+    ve Müteallak (SpaceSort) gibi klasik Arapça ontolojilerinin Modal Mantık karşılıkları
+    (Kripke Semantiği) sisteme entegre edilmiştir.
     """
     def __init__(self, max_depth: int = 15):
-        self.EntitySort = z3.DeclareSort('Entity')
-        self.WorldSort = z3.DeclareSort('World') # Kripke Olası Dünyalar Uzayı
+        # 1. Ontolojik Temel Evren (Sorts)
+        self.EntitySort = z3.DeclareSort('Entity')       # Mevcudat (Varlıklar)
+        self.WorldSort = z3.DeclareSort('World')         # Kripke Olası Dünyalar Uzayı
         self.TimeSortZati = z3.DeclareSort('TimeZati')   # Şemsiyye Kiplikleri İçin Zâtî Zaman (De re)
         self.TimeSortVasfi = z3.DeclareSort('TimeVasfi') # Şemsiyye Kiplikleri İçin Vasfî Zaman (De dicto)
-        self.SpaceSort = z3.DeclareSort('Space')         # Müteallak ve Mekân Bildiren Harf-i Cerler İçin Mekânsal Uzay
+        self.SpaceSort = z3.DeclareSort('Space')         # Müteallak ve Harf-i Cerler İçin Mekânsal Uzay
         
         self.predicates: Dict[str, z3.FuncDeclRef] = {}
         
+        # 2. Epistemik ve Ontolojik Sabiteler (Axiomatic Functions)
         # Modal Erişim Bağıntısı (Accessibility Relation: R(w1, w2))
         self.Access = z3.Function('Access', self.WorldSort, self.WorldSort, z3.BoolSort())
         
-        # Mekânsal Bağlantı (Müteallak) Fonksiyonları: Entity'nin belirli bir mekânda (Space) bulunması
+        # Dinamik Mantık Zaman Geçişi (Fa-i Füzâiyye için t1 -> t2 sıçraması)
+        self.TimeTransition = z3.Function('TimeTransition', self.TimeSortVasfi, self.TimeSortVasfi, z3.BoolSort())
+
+        # Mekânsal Bağlantı (Müteallak) Fonksiyonu: Entity'nin belirli bir mekânda (Space) bulunması
         self.LocatedIn = z3.Function('LocatedIn', self.WorldSort, self.TimeSortZati, self.TimeSortVasfi, self.SpaceSort, self.EntitySort, z3.BoolSort())
         
         self.valid_identifier_pattern = re.compile(r'^[A-Za-z0-9_]+$')
         self.max_depth = max_depth
 
     def get_or_create_predicate(self, name: str, arity: int = 1) -> z3.FuncDeclRef:
+        """
+        .. mantik_kurali:: Çok-Boyutlu Yüklem (N-Ary Predicate) İnşası
+        Sıradan bir FOL motoru `Daraba(Zeyd, Amr)` şeklinde 2-arite kullanırken, 
+        İslâm ontolojisindeki nedensellik; eylemin Dünya(w), Zâtî Zaman(t_zati), Vasfî Zaman(t_vasfi) 
+        ve Mekân(s) kısıtlarından bağımsız düşünülemeyeceğini öngörür. Bu metod, ariteyi otonom 
+        olarak +4 boyutla genişletir.
+        """
         if not self.valid_identifier_pattern.match(name):
             raise ValueError(f"[SENTAKS İHLALİ] Geçersiz ontolojik sembol: '{name}'. Sadece ASCII/Transliterasyon desteklenir.")
 
         if name not in self.predicates:
-            # Muvaccehât ve Mekân: Her yüklem artık N ariteye ek olarak "Dünya" (w), "Zâtî Zaman" (t_zati), "Vasfî Zaman" (t_vasfi) ve "Mekân" (s) alır.
+            # Muvaccehât ve Mekân: Her yüklem artık N ariteye ek olarak W, T_zati, T_vasfi ve S alır.
             domains = [self.WorldSort, self.TimeSortZati, self.TimeSortVasfi, self.SpaceSort] + [self.EntitySort] * arity
             self.predicates[name] = z3.Function(name, *domains, z3.BoolSort())
         else:
-            # Mevcut arite, WorldSort, TimeSortZati, TimeSortVasfi ve SpaceSort eklendiği için +4 olarak kontrol edilir
             existing_arity = self.predicates[name].arity()
             if existing_arity != arity + 4:
                 raise ValueError(f"[SENTAKS İHLALİ] '{name}' predikat arite çakışması. Beklenen {arity+4}, Bulunan: {existing_arity}")
@@ -56,7 +70,7 @@ class Z3ExpressionBuilder:
                 current_space = z3.Const('s_base', self.SpaceSort)
                 
             tree = ast.parse(expr_str, mode='eval').body
-            # Kök ayrıştırmada World (w), Time (t_zati, t_vasfi) ve Space (s) parametreleri bound_vars içerisine gömülür
+            
             return self._eval_node(tree, {
                 '__world__': current_world, 
                 '__time_zati__': current_time_zati, 
@@ -81,6 +95,9 @@ class Z3ExpressionBuilder:
             
             func_name = node.func.id
             
+            # ------------------------------------------------------------------
+            # 1. STANDART FOL BOOLEAN KÖPRÜLERİ
+            # ------------------------------------------------------------------
             if func_name == 'Implies':
                 return z3.Implies(self._eval_node(node.args[0], bound_vars, current_depth + 1), 
                                   self._eval_node(node.args[1], bound_vars, current_depth + 1))
@@ -91,6 +108,37 @@ class Z3ExpressionBuilder:
             elif func_name == 'Not':
                 return z3.Not(self._eval_node(node.args[0], bound_vars, current_depth + 1))
             
+            # ------------------------------------------------------------------
+            # 2. İLM-İ NAHİV SENTAKTİK-ONTOLOJİK MÜHÜRLERİ (FAZ 1 EKLENTİLERİ)
+            # ------------------------------------------------------------------
+            elif func_name == 'Identity':
+                # Bedel ve Zero-Copula: İki değişkenin Kripke uzayında aynı varlık pointer'ına (EntitySort) eşitlenmesi.
+                arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
+                arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
+                return arg_a == arg_b
+
+            elif func_name == 'Necessity':
+                # İnne ve Kardeşleri: Önermenin mümkün tüm olası dünyalarda (Zorunlu) geçerli olması
+                w_prime = z3.Const(f'w_prime_{current_depth}', self.WorldSort)
+                new_vars = bound_vars.copy()
+                new_vars['__world__'] = w_prime
+                body_expr = self._eval_node(node.args[0], new_vars, current_depth + 1)
+                return z3.ForAll([w_prime], z3.Implies(self.Access(current_w, w_prime), body_expr))
+
+            elif func_name == 'DynamicTransition':
+                # Fâ-i Füzâiyye: Zaman düzleminde ardışık bir zıplama (State Shift) operasyonu
+                arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
+                
+                t_prime = z3.Const(f't_vasfi_prime_{current_depth}', self.TimeSortVasfi)
+                new_vars = bound_vars.copy()
+                new_vars['__time_vasfi__'] = t_prime
+                arg_b = self._eval_node(node.args[1], new_vars, current_depth + 1)
+                
+                return z3.And(arg_a, z3.Exists([t_prime], z3.And(self.TimeTransition(current_t_vasfi, t_prime), arg_b)))
+
+            # ------------------------------------------------------------------
+            # 3. ŞARTLI VE AYRIK ÖNERMELER (ŞEMSİYYE DİYALEKTİĞİ)
+            # ------------------------------------------------------------------
             elif func_name == 'Luzumi':
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
@@ -114,6 +162,9 @@ class Z3ExpressionBuilder:
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
                 return z3.Or(arg_a, arg_b)
             
+            # ------------------------------------------------------------------
+            # 4. NİCELEYİCİLER (QUANTIFIERS)
+            # ------------------------------------------------------------------
             elif func_name in ('Forall', 'Exists'):
                 if not isinstance(node.args[0], ast.List):
                     raise SyntaxError("Niceleyici değişkenleri liste formatında olmalıdır. Örn: [x]")
@@ -137,8 +188,10 @@ class Z3ExpressionBuilder:
                 else:
                     return z3.Exists(z3_vars, body_expr)
             
+            # ------------------------------------------------------------------
+            # 5. DİNAMİK YÜKLEM (N-ARY PREDICATE) ÜRETİMİ
+            # ------------------------------------------------------------------
             else:
-                # N-Ary Yüklem Çağrılarına otomatik olarak World (w), Çift Zaman (t_zati, t_vasfi) ve Space (s) parametreleri enjekte edilir
                 args = [current_w, current_t_zati, current_t_vasfi, current_s] + [self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args]
                 arity = len(node.args)
                 predicate = self.get_or_create_predicate(func_name, arity)
@@ -148,6 +201,9 @@ class Z3ExpressionBuilder:
             if node.id in bound_vars:
                 return bound_vars[node.id]
             else:
-                raise NameError(f"Bağlı olmayan değişken (Unbound Variable): '{node.id}' tespit edildi.")
+                # Otonom Serbest Değişken Tespiti ve EntitySort Ataması
+                new_const = z3.Const(node.id, self.EntitySort)
+                bound_vars[node.id] = new_const
+                return new_const
         
         raise TypeError(f"Desteklenmeyen AST Düğümü: {type(node).__name__}.")

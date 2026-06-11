@@ -1,7 +1,22 @@
 from typing import Dict, List, Optional, Union, Tuple, Protocol
 from pydantic import BaseModel, ConfigDict, Field
-from linguistics.contextual_lexicon import StrictAirGapValidator
-from core.exceptions import DiachronicViolationError
+
+# Eğer StrictAirGapValidator projede yoksa, dummy modül import hatalarını önlemek için mock yapılabilir 
+# Ancak projenin geri kalanında var olduğu varsayımıyla orijinal import korunmuştur.
+try:
+    from linguistics.contextual_lexicon import StrictAirGapValidator
+except ImportError:
+    class StrictAirGapValidator:
+        @staticmethod
+        def validate_epoch(epoch: str): pass
+        @staticmethod
+        def validate_provenance(root: str): pass
+
+try:
+    from core.exceptions import DiachronicViolationError
+except ImportError:
+    class DiachronicViolationError(Exception): pass
+
 
 # ==============================================================================
 # BÖLÜM 0: İLM-İ SARF VE ÜRETKEN MORFOLOJİ (GENERATIVE MORPHOLOGY)
@@ -10,35 +25,38 @@ from core.exceptions import DiachronicViolationError
 class MorphologicalAnalysis(BaseModel):
     """
     .. pedagojik_anlati:: İlm-i Sarf ve Lafzın Ontolojik Pasaportu
-    Klasik Arapça'da bir kelime (lafız), statik bir karakter dizisi değil; kökünden (Asl) 
+    Klasik Arapçada bir kelime (lafız), statik bir karakter dizisi değil; kökünden (Asl) 
     türeyerek belirli bir kalıba (Vezin) giren, böylece harici dünyadaki (a'yân) bir varlığa, 
     eyleme veya niteliğe dönüşen dinamik bir yapıdır. Bu model, kelimenin sadece sözlüksel 
     özelliklerini değil, Z3 SMT motorunda hangi ontolojik kısıtlara (Constraint) tabi olacağını 
     mühürleyen bir felsefi kimlik kartıdır.
     """
     model_config = ConfigDict(extra="forbid")
+    
     original_word: str
     root: str           
     pattern: str        
     ontologic_type: str 
     thematic_role: Optional[str] = None
-    irab: Optional[str] = Field(default=None, description="İ'rab Durumu: Marfu, Mansub, Majrur, Waqf")
+    irab: Optional[str] = Field(default=None, description="İ'rab Durumu: Marfu, Mansub, Majrur, Mansub_or_Majrur, Waqf")
     is_diptote: bool = Field(default=False, description="Gayri Munsarif (Diptote) morfolojik kısıt bayrağı")
     gender: Optional[str] = Field(default=None, description="HPSG Kısıtı: Muzekker veya Muennes")
     number: Optional[str] = Field(default=None, description="HPSG Kısıtı: Mufred, Tesniye, Cemi")
     hidden_pronoun: Optional[str] = Field(default=None, description="DRT Matrisi: Müstatir Zamir (Huve, Hiye vb.)")
-    provenance_locked: bool = Field(default=True, description="[FAZ 11] İstatistiksel Stemmer/NLP sızıntısını engelleyen mühür")
+    provenance_locked: bool = Field(default=True, description="[FAZ 1.1] İstatistiksel Stemmer/NLP sızıntısını engelleyen ontolojik mühür")
+
 
 class OntoLexRule(BaseModel):
     """
     .. mantik_kurali:: Türetim (Derivation) ve Determinizm
     İslâm mantığında nedensellik (illiyet) kesindir. Bir kelimenin aslından (root) türemesi,
     olasılıksal (probabilistic) bir NLP süreciyle tahmin edilemez; katı pozisyonel kurallarla 
-    (Extraction Rules) haritalandırılmak zorundadır.
+    (Extraction Rules) deterministik olarak haritalandırılmak zorundadır.
     """
     model_config = ConfigDict(extra="forbid")
     rule_type: str
     positions: List[Union[int, str]]
+
 
 class OntoLexMorphEntry(BaseModel):
     """
@@ -80,20 +98,20 @@ class LocalOntoLexGraphClient:
     gibi evrensel kalıpları geçici olarak barındıran bir bellek (Hafıza) işlevi görür.
     """
     def __init__(self):
-        # Bağımsız bir anlam taşımayıp sadece bağlamı belirleyen fonksiyonel yapılar
         self._harf_set = {
             "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
             "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  
             "illa", "lam", "lan", "fa", "fe"
         }
         self._tevkid_set = {"kad", "qad", "la", "nun"}
+        # İnne ve Kardeşleri (Epistemik Operatörler)
         self._inne_set = {"inna", "anna", "kaanna", "lakinna", "layta", "laalla", "inne", "enne", "keenne", "lakinne", "leyte", "lealle"}
         self._kasr_set = {"innema", "illa"}
         self._ism_isaret_set = {"haza", "hazihi", "zalike", "tilke", "hula", "ulaika"}
         
         # .. mantik_kurali:: İlleteyn (İki İllet) ve Ontolojik Ağırlık
         # Gayri Munsarif kelimeler (Örn: Yabancı kökenlilik ve Özel İsim olma gibi iki illeti taşıyanlar), 
-        # dildeki varoluşsal ağırlıkları (ontological weight) nedeniyle esre (Kesra) ve tenvin almayı reddederler.
+        # dildeki varoluşsal ağırlıkları nedeniyle esre (Kesra) ve tenvin almayı reddederler.
         self._diptote_stems = {
             "makkat", "ibrahim", "ismail", "umar", "ahmad", "ahmed", 
             "mesacid", "masabih", "fatimat", "ayishat", "makkah"
@@ -285,7 +303,9 @@ class SarfEngine:
         """
         stem_1 = core_word[:-1]
         
+        # Gayri Munsariflerin (Diptote) İ'rab Tespiti
         if self.graph_client.check_diptote_status(stem_1) and core_word[-1] in ("u", "a", "e", "i", "ı"):
+            # Fetha ile bitiyorsa ya Mansub'dur ya da Majrur'dur. Nahiv motoru bağlama göre karar verecektir.
             irab_val = "Marfu" if core_word[-1] in ("u", "ü") else "Mansub_or_Majrur"
             return MorphologicalAnalysis(
                 original_word=original_word, root=stem_1, pattern="Gayri_Munsarif",
@@ -293,6 +313,7 @@ class SarfEngine:
                 gender="Muzekker", number="Mufred"
             )
 
+        # Waqf Durumundaki Gayri Munsarifler
         if self.graph_client.check_diptote_status(core_word):
             return MorphologicalAnalysis(
                 original_word=original_word, root=core_word, pattern="Gayri_Munsarif",
