@@ -8,8 +8,11 @@ class DenialLevel(IntEnum):
     .. mantik_kurali:: Muktazâ el-Hâl ve Muhatabın Epistemik Halleri
     İlm-i Ma'ânî'ye göre sözün kıymeti, kelimelerin sözlük anlamında değil, muhatabın (Sâil'in) 
     hakikate karşı takındığı psikolojik ve epistemik tavra (Muktazâ el-Hâl) uygunluğundadır.
+    
     Bu ontolojik hiyerarşi, deterministik SMT motorunun Kripke uzayındaki hesaplamalarına 
     geçmeden önce uygulayacağı retorik filtrelerin (Tevkîd katsayısı) eşik değerlerini belirler.
+    Eğer zihin boşsa (Khali_al_Zihn), 'İnne' gibi zorunluluk operatörlerinin ($\square P$) 
+    kullanılması mantıksal bir hatadır.
     """
     KHALI_AL_ZIHN = 0  # Zihin boş, nötr durum. Tevkîd (pekiştirme) israftır ve retorik olarak yasaktır.
     MUTAREDDIT = 1     # Şüphe durumu (Men' saldırısı). Muhatabın şüphesini gidermek için Tevkîd kullanımı caiz/önerilendir (Hasan).
@@ -21,8 +24,9 @@ class EntityMention(BaseModel):
     Bir kelime (lafız), sadece dizgisel (string) bir değişken değil;
     Sâil veya Mucîb tarafından belirli bir usûl uzayında (Namespace) iddia edilmiş bir varlık yansımasıdır 
     (A'yân-ı Sâbite'nin cümledeki tezahürü).
-    Varlıkların HPSG (Cinsiyet ve Sayı) kısıtlarıyla mühürlenmesi, mantıksal argümantasyonda (Kıyas) 
-    oluşabilecek terim kaymalarını ve safsataları engeller.
+    
+    Varlıkların HPSG (Head-driven Phrase Structure Grammar) çerçevesinde Cinsiyet ve Sayı kısıtlarıyla 
+    mühürlenmesi, mantıksal argümantasyonda (Kıyas) oluşabilecek terim kaymalarını ve safsataları engeller.
     """
     word: str
     ontologic_id: str
@@ -37,15 +41,17 @@ class DiscourseRegister:
     """
     .. pedagojik_anlati:: Âdâb-ı Bahs, Kuvve-i Hâfıza ve Diyalektik Matris
     Bu sınıf, bir yazılım "Stack" (Yığıt) veri yapısı olmanın çok ötesinde, İbn Sînâcı 
-    'Kuvve-i Hâfıza'nın ve Seyyid Şerif el-Cürcânî'nin 'Tahrîr-i Niza' (Tartışma Noktasının Yalıtımı) 
-    prensibinin koda dökülmüş halidir.
+    'Kuvve-i Hâfıza'nın ve Seyyid Şerif el-Cürcânî'nin 'Tahrîr-i Mahall-i Niza' (Tartışma 
+    Noktasının Yalıtımı) prensibinin koda dökülmüş halidir.
+    
     Sâil (İtiraz Eden) ve Mucîb (İddia Sahibi) aynı zihinsel sahneyi (Discourse) paylaşsalar da, 
     birbirlerinin ontolojik önkabullerini (Namespace) çalamazlar veya onlara dayanarak kendi 
     kıyaslarını kuramazlar.
-    [FAZ 4.1 GÜNCELLEMESİ]: Sistem, tekil LIFO yığıtından arındırılarak iki farklı zihnin izole 
-    edildiği (Sâil ve Mucîb matrisleri), varlıkların "Ortak Kabul" (Müsellemât/Base) seviyesinde 
-    senkronize edildiği fiziksel olarak bölünmüş (Bipartite) bir Discourse Representation Theory 
-    (DRT) matrisine yükseltilmiştir.
+    
+    [FAZ 4.1 GÜNCELLEMESİ - AIR-GAPPED DRT]: Sistem, tekil LIFO yığıtından arındırılarak 
+    iki farklı zihnin izole edildiği (Sâil ve Mucîb matrisleri), varlıkların yalnızca 
+    "Ortak Kabul" (Müsellemât/Base) seviyesinde senkronize edildiği fiziksel olarak bölünmüş 
+    (Bipartite) bir Discourse Representation Theory (DRT) matrisine yükseltilmiştir.
     """
     def __init__(self):
         # Yığıt (Stack) mimarisi: Kripke uzayında aktör izolasyonu
@@ -58,7 +64,8 @@ class DiscourseRegister:
         
         # .. felsefe_notu:: Arazların Cevhere Tabi Olması (HPSG Matrisi)
         # Zamirler kendi başlarına var olamazlar; ancak işaret ettikleri cevherin 
-        # cinsiyet (Müzekker/Müennes) ve sayı (Müfred/Cemi/Tesniye) kısıtlarına uyarak varlık kazanırlar.
+        # cinsiyet (Müzekker/Müennes) ve sayı (Müfred/Cemi/Tesniye) kısıtlarına uyarak 
+        # Kripke uzayında varlık kazanırlar. Z3 bunu eşdeğerlik (Identity) matrisine dönüştürür.
         self.pronouns = {
             "huve": {"gender": "Muzekker", "number": "Mufred"},
             "hiye": {"gender": "Muennes", "number": "Mufred"},
@@ -115,7 +122,7 @@ class DiscourseRegister:
         .. felsefe_notu:: Kripke Uzayında Varsayımsal Dünyalar (Possible Worlds)
         Z3.push() tetiklendiğinde veya yeni bir diyalektik argüman açıldığında (Kadiyye-i Şartiyye), 
         mutlak gerçeklikten (Frame 0) yalıtılmış yeni bir varsayımsal alt-dünya yaratılır.
-        Bu yaratım sadece aktif aktörün yığıtında gerçekleşir.
+        Bu yaratım sadece aktif aktörün fiziksel yığıtında gerçekleşir.
         """
         self.scopes[self.active_agent].append([])
 
@@ -132,7 +139,8 @@ class DiscourseRegister:
 
     def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None, is_virtual: bool = False) -> None:
         """
-        Müsellemât uzayındaki kavramları her iki aktörün de kök zihnine atar; 
+        .. mantik_kurali:: Ortak Kabul ve Hususi İddia
+        Müsellemât uzayındaki (Base) kavramları her iki aktörün de kök zihnine atar; 
         hususi iddiaları ise yalnızca iddia sahibinin yığıtına mühürler.
         """
         mention_agent: Literal["Mujib", "Sail", "Base"] = "Base" if active_namespace == "Base" else self.active_agent
@@ -164,7 +172,9 @@ class DiscourseRegister:
         İlm-i Sarf tarafından tespit edilen fiil içi gizli (müstatir) zamirler, 
         Discourse Representation Theory (DRT) bağlamında "failsiz eylem olmaz" aksiyomu gereği, 
         yığıta varoluşsal bir değişken (z3.Exists) olarak zerk edilir. 
-        Böylece sonraki munfasıl (açık) zamirler, bu hayali faili meşru bir merci (Antecedent) olarak görebilir.
+        
+        Böylece sonraki munfasıl (açık) zamirler, bu hayali faili meşru bir merci (Antecedent) 
+        olarak görebilir ve nedensellik zinciri kırılmaz.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
@@ -228,10 +238,11 @@ class DiscourseRegister:
         .. pedagojik_anlati:: İrcâ-ı Zamir (Zamirin Merciine Döndürülmesi)
         Klasik felsefi metinlerdeki en büyük kriz, zamirin (Huve, Hiye) kime/neye döndüğünün (Merci) 
         belirsizliğidir.
+        
         Bu metod, *yalnızca aktif aktörün fiziksel yığıtı* içerisinde sondan başa (LIFO - Last In First Out) ilerleyerek,
         önce HPSG yapısal doğrulaması yapar, ardından Context Sealing kontrolü uygular.
         Bulunan ilk meşru merci (gerçek veya müstatir), Z3 SMT'ye gönderilecek kesin mantıksal değişken 
-        (EntitySort Variable) ataması olur.
+        (EntitySort Variable) eşdeğerliği (Pointer Aliasing) olur.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:

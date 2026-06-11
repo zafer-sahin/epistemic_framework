@@ -7,12 +7,29 @@ from linguistics.discourse_state import DiscourseRegister
 from linguistics.sarf_parser import MorphologicalAnalysis
 from core.exceptions import DiachronicViolationError
 
+"""
+.. felsefe_notu:: İlm-i Vaz' ve Dilin Anlamsal Kodlanması (The Science of Positing)
+    XIV. yüzyılda 'Adudüddin el-İcî'nin er-Risâletü'l-Vaz'iyye eseriyle sistematize 
+    edilen İlm-i Vaz', kelimelerin ve kalıpların anlamla nasıl eşleştirildiğini (Atama) 
+    inceler. Modern NLP sistemlerindeki 'Word Embedding' veya 'Tokenization' süreçlerinin 
+    aksine, Klasik İslâm epistemolojisinde Vaz' işlemi, rastgele istatistiksel 
+    vektörler değil, katı ontolojik mühürlemelerdir (Ontological Positing).
+
+    Bu modül, `nahiv_ast.py` tarafından üretilen sentaktik ilişkileri alır, 
+    bunları İlm-i Vaz' kurallarına göre felsefi köklerine (Entity IDs) ve 
+    yapısal rollerine (Vaz' Nev'î) çevirir ve en nihayetinde Z3 SMT motorunda 
+    işlenecek olan 'Saf Anlamsal Ara Temsil'e (SemanticStatementIR) dönüştürür.
+"""
+
 class NestedPredicate(BaseModel):
     """
     .. mantik_kurali:: Kapsüllenmiş Önermeler (Higher-Order Modalities)
     İslâm mantığında bazı edatlar (Örn: Kasr, İnne, Şart), Kadiyye'nin (önermenin) bir 
     parçası değil, Kadiyye'nin tamamına hükmeden üst-kapsüllerdir (Modal/Deontik operatörler).
     Bu model, Z3'te iç içe geçmiş AST düğümlerinin öz-yinelemeli (recursive) inşasını sağlar.
+    
+    Matematiksel Karşılığı: $\square (A \implies (B \land C))$ formundaki bir Modal 
+    önermede, $\square$ (Zorunluluk) operatörünün tüm alt denklemi 'args' listesinde taşımasıdır.
     """
     model_config = ConfigDict(extra="forbid")
     operator: str
@@ -22,12 +39,15 @@ NestedPredicate.model_rebuild()
 
 class SemanticStatementIR(BaseModel):
     """
-    .. felsefe_notu:: Ontolojik Mühür (The Seal of Provenance) ve Levh-i Mahfuz Matrisi
+    .. felsefe_notu:: Ontolojik Mühür (The Seal of Provenance) ve Yalıtılmış Bellek
     Bu sınıf basit bir Veri Transfer Nesnesi (DTO) değildir. İlm-i Nahiv, Sarf ve Ma'ânî 
     tarafından işlenen ve tüm felsefi/psikolojik (Muktazâ el-Hâl) testleri geçen cümlenin, 
     Z3 SMT motorunda hesaplanabilir bir 'Hakikat İddiası' (Truth Claim) olarak mühürlenmiş halidir.
-    Aktörün (Sâil/Mucîb) ve Uzayın (Namespace) kilitlerini donanımsal olarak üzerinde taşır; 
-    böylece Kripke ispatlarında 'Bağlam Zehirlenmesi'ne (Context Poisoning) geçit vermez.
+    
+    [FAZ 5: AIR-GAPPED ONTOLOGY]: Aktörün (Sâil/Mucîb) ve Uzayın (Namespace) kilitlerini 
+    donanımsal olarak üzerinde taşır (`active_namespace`, `active_agent`). Böylece Kripke 
+    ispatlarında tarafların birbirlerinin kabullerine (Müsellemât) sızması (Context Poisoning) 
+    matematiksel düzeyde engellenir.
     """
     model_config = ConfigDict(extra="forbid")
     active_namespace: str
@@ -39,24 +59,26 @@ class SemanticStatementIR(BaseModel):
 class StructuralPositingEngine:
     """
     .. pedagojik_anlati:: Tematik Roller ve Vaz' Nev'î (Kalıpsal Atama)
-    Bir varlığın (Cevher) cümlede Fail (Agent) veya Meful (Patient) olması, onun ontolojik 
-    kimliğini değiştirmez, sadece Kripke uzayındaki eylemsel pozisyonunu (Araz) belirler. 
+    Bir varlığın cümlede Fail (Agent) veya Meful (Patient) olması, onun ontolojik 
+    kimliğini (Cevher) değiştirmez, sadece Kripke uzayındaki eylemsel pozisyonunu (Araz) belirler. 
     Bu motor, kelimenin sadece kökünden (Vaz' Şahsî) değil, doğrudan girdiği vezinden (Vaz' Nev'î)
-    gelen yapısal anlamları FOL uzayında katı kısıtlara çevirir. 'Adudüddin el-İcî'nin
-    Risâletü'l-Vaz'iyye'sine göre, kalıbın (hey'et) kendisi ontolojik bir yüklemdir.
+    gelen yapısal anlamları First-Order Logic (FOL) uzayında katı kısıtlara çevirir. 
+    
+    Örneğin; 'D-r-b' kökü vurmayı temsil ederken (Vaz' Şahsî), 'Dârib' (Fâ'il kalıbı), 
+    o kök üzerinden "eylemi yapan aktör" (Role_Agent) kısıtını otomatik olarak doğurur (Vaz' Nev'î).
     """
     def __init__(self):
-        # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] - Klasik Arapça Vezinlerinin Ontolojik Rol Karşılıkları
+        # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] - Klasik Arapça Vezinlerinin Z3 SMT Rol Karşılıkları
         self.vaz_nevi_matrix = {
-            "Fa'il": "Role_Agent",                 # İsm-i Fail (Örn: Dârib)
-            "Maf'ul": "Role_Patient",              # İsm-i Meful (Örn: Madrûb)
-            "Fa'aal": "Role_IntensiveAgent",       # Mübalağa (Örn: Kazzâb)
+            "Fa'il": "Role_Agent",                 # İsm-i Fail (Örn: Dârib) - Eyleyici
+            "Maf'ul": "Role_Patient",              # İsm-i Meful (Örn: Madrûb) - Etkilenen
+            "Fa'aal": "Role_IntensiveAgent",       # Mübalağa İsm-i Fail (Örn: Kazzâb) - Katı zorunluluk
             "Mufa'il": "Role_Agent",               # İf'al / Tef'il Faili
             "Mufa'al": "Role_Patient",             # İf'al / Tef'il Mefulu
-            "Taf'eel": "Role_Causative",           # Mutaaddî (Ettirgenlik)
-            "Infi'al": "Role_Reflexive",           # Mutava'at (Dönüşlülük)
+            "Taf'eel": "Role_Causative",           # Mutaaddî (Ettirgenlik) - Dinamik geçiş tetikleyicisi
+            "Infi'al": "Role_Reflexive",           # Mutava'at (Dönüşlülük) - Kendi kendine eylem
             "Ifti'al": "Role_Reflexive",
-            "Istif'al": "Role_Seeker"              # Talep (Örn: İstiğfar)
+            "Istif'al": "Role_Seeker"              # Talep (Örn: İstiğfar) - Deontik yönelim
         }
 
     def extract_structural_roles(self, word: str, ontologic_id: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, int]]:
@@ -66,13 +88,13 @@ class StructuralPositingEngine:
         if not morph_data:
             return predicates
             
-        # 1. Vaz' Nev'î: Morfolojik vezin (kalıp) üzerinden yapısal atama
+        # 1. Vaz' Nev'î: Morfolojik vezin (hey'et) üzerinden otonom yapısal (Structural) atama
         vezin = getattr(morph_data, 'pattern', None)
         if vezin and vezin in self.vaz_nevi_matrix:
             role_predicate = self.vaz_nevi_matrix[vezin]
             predicates.append((role_predicate, ontologic_id, 1))
             
-        # 2. Geri çekilme (Fallback): Eğer vezin bulunamaz ancak jenerik bir rol atanmışsa
+        # 2. Geri çekilme (Fallback): Eğer klasik vezin bulunamaz ancak leksikonda statik bir rol atanmışsa
         elif getattr(morph_data, 'thematic_role', None):
             role_predicate = f"Role_{morph_data.thematic_role}"
             predicates.append((role_predicate, ontologic_id, 1))
@@ -86,8 +108,8 @@ class IlmWadAdapter:
     matrisi deterministiktir. Bu sınıf, İlm-i Vaz' adaptörü olarak çalışır ve kelimelerin 
     sentaktik bağımlılıklarını katı felsefi denklemlere dönüştürür.
     
-    [FAZ 2 ENTEGRASYONU]: Şemsiyye Kiplikleri (Lüzumî, İnadî, Zarûriyye) SMT motoruna 
-    katı Modal Operatörler olarak (NestedPredicate üzerinden) paketlenmiştir.
+    [FAZ 2 ENTEGRASYONU]: Necmeddin el-Kâtibî'nin Şemsiyye Kiplikleri (Lüzumî, İnadî, Zarûriyye) 
+    SMT motoruna katı Modal Operatörler olarak (`NestedPredicate` hiyerarşisiyle) paketlenmektedir.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -95,20 +117,24 @@ class IlmWadAdapter:
         self.pragmatics = MaaniSpeechActAnalyzer(self.discourse)
         self.positing_engine = StructuralPositingEngine() 
         
-        # .. mantik_kurali:: Kadiyye-i Şartiyye'nin Kısıt Sınırları
-        self.luzumi_particles = {"in", "iza", "law", "amma"}
-        self.inadi_particles = {"imma", "aw", "ya", "am"} 
-        self.mani_cem_particles = {"mani_cem", "la_yectemian"} 
-        self.mani_huluv_particles = {"mani_huluv", "la_yahtaliyan"} 
+        # .. mantik_kurali:: Kadiyye-i Şartiyye'nin (Hipotetik Önermelerin) Kısıt Sınırları
+        self.luzumi_particles = {"in", "iza", "law", "amma"}         # Modus Ponens kilitleri
+        self.inadi_particles = {"imma", "aw", "ya", "am"}            # Katı Ayrıklık (XOR)
+        self.mani_cem_particles = {"mani_cem", "la_yectemian"}       # Mâniatü'l-Cem' (NAND)
+        self.mani_huluv_particles = {"mani_huluv", "la_yahtaliyan"}  # Mâniatü'l-Hulüvv (OR)
         
         self.current_tevil_targets: List[str] = []
 
     def _resolve_inne_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
         """
         .. pedagojik_anlati:: İnne'nin Ontolojik Baskısı (Epistemic Operator)
-        'Amel_Inne' ilişkileri sadece bir ismin nasb/ref yapılması değil, önermenin 
-        (Kadiyye-i Hamliyye) Kripke dünyalarındaki varoluşsal statüsünün sarsılmaz bir 
-        Tahkik (Zorunluluk: $\square (Ism \implies Haber)$) makamına yükseltilmesidir.
+        'Amel_Inne' ilişkileri sadece ismin nasb edilmesi değil, Kadiyye-i Hamliyye'nin 
+        Kripke dünyalarındaki varoluşsal statüsünün sarsılmaz bir Tahkik (Zorunluluk) makamına 
+        yükseltilmesidir. 
+        
+        Matematiksel Karşılığı: $\square (\text{İsim} = \text{Haber})$ veya 
+        $\square (\text{İsim} \in \text{Haber})$. 
+        Z3 evreninde bu blok, `z3.ForAll` ile Modal Mantık uzayına gömülür.
         """
         inne_relations = {}
         for amil, mamul, rel_type, irab in dependencies:
@@ -124,6 +150,7 @@ class IlmWadAdapter:
                 ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                 haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
                 
+                # İnne matrisinde İsmin Haber'e ontolojik olarak raptedilmesi (Predication)
                 atomic_predicates.append(("Rel_Rabita_Predication", f"{haber_id}::{ism_id}", 2))
                 atomic_predicates.append((ism_id, ism_id, 1))
                 atomic_predicates.append((haber_id, haber_id, 1))
@@ -132,7 +159,9 @@ class IlmWadAdapter:
         """
         .. felsefe_notu:: Rabıta (Gizli Yüklem) ve Dinamik Geçişler (Dynamic Logic)
         İsim cümlelerindeki görünmez bağlayıcı (Rabıta), iki varlık arasında ya katı bir 
-        eşdeğerlik ($x = y$) ya da özellik aidiyeti ($x \in Y$) kurar. 
+        eşdeğerlik (Identity: $x \equiv y$) ya da özellik aidiyeti (Predication: $x \in Y$) kurar. 
+        Ayrıca Fâ-i Füzâiyye gibi atıf harfleri, zaman okunda anlık bir Kripke dünyası sıçramasını 
+        (Dynamic State Transition: $W_t \implies W_{t+1}$) tetikler.
         """
         if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
             return True
@@ -182,7 +211,9 @@ class IlmWadAdapter:
         """
         .. mantik_kurali:: Mekânın Kısıtlayıcılığı (SpaceSort Mutaallak)
         Bir varlığın veya eylemin "fi" (içinde) veya "ala" (üzerinde) gibi harf-i cerlerle 
-        konumlandırılması, onun ontolojik olarak sınırlandırılmasıdır.
+        konumlandırılması, salt bir zarf değil, varoluşsal bir kısıttır.
+        
+        FOL Denklemi: $\text{LocatedIn}(\text{Amil}, \text{Mecrur}, \text{WorldSort})$
         """
         if rel_type in ['Muteallak_Mekan', 'Muteallak_Harf']:
             harf_node = mamul
@@ -210,6 +241,9 @@ class IlmWadAdapter:
     def _wrap_with_pragmatic_modalities(self, ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], pragmatics_res: Dict[str, Any]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
         """
         .. pedagojik_anlati:: Modal Kapsüller ve İlm-i Ma'ânî İzdüşümü
+        Dilin edimbilimsel (Pragmatic) arazları; örneğin İnşâî bir soru cümlesinin aslında 
+        bir reddiye (İstifham-ı İnkârî - z3.Not) olması durumu, Abdülkâhir el-Cürcânî'nin 
+        Nazm teorisi uyarınca SMT motoruna deterministik kapsüller olarak giydirilir.
         """
         if pragmatics_res.get("type") == "Deontic":
             op = "Wajib_Fiqh" if pragmatics_res.get("operator") == "Emir" else "Haram_Fiqh"
@@ -232,6 +266,9 @@ class IlmWadAdapter:
     def _process_atomic_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
         """
         .. matematiksel_model:: FOL Atomizasyonu
+        Tüm sentaktik yüzey ağacını (AST), $P(x)$, $R(x, y)$ formundaki mantıksal 
+        atomlara (Monads) indirger. Önermenin iskeleti bu sayede felsefi çelişkilerin 
+        (UNSAT) denetlenmesi için Z3 motoruna pürüzsüzce sunulur.
         """
         processed_roles = set()
         for amil, mamul, rel_type, irab in dependencies:
@@ -282,9 +319,9 @@ class IlmWadAdapter:
     def _apply_propositional_capsules(self, has_mani_cem: bool, has_mani_huluv: bool, has_inadi: bool, has_luzumi: bool, atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
         """
         .. mantik_kurali:: Kadiyye-i Şartiyye Sarmalaması
-        Önerme parçacıkları toplandıktan sonra, cümlenin bütününde lüzumiyet veya inadiyet 
-        tespit edilmişse, tüm atomik matrisler ilgili mantıksal fonksiyonun 
-        argümanları olarak sarmalanır.
+        Önerme parçacıkları (FOL Atomları) toplandıktan sonra, cümlenin bütününde lüzumiyet 
+        (Gerektirme) veya inadiyet (Çelişik Ayrıklık) tespit edilmişse, tüm atomik matrisler 
+        ilgili mantıksal fonksiyonun argümanları olarak sarmalanır.
         """
         ir_predicates = []
         if has_mani_cem:
@@ -304,6 +341,10 @@ class IlmWadAdapter:
         .. pedagojik_anlati:: Orkestrasyon ve SMT'ye Teslimiyet
         Dilin tüm yüzey arazlarından (Sarf/Nahiv/Ma'ânî) arındırılarak saf matematiksel/felsefi 
         (IR) haline getirildiği ana döngüdür.
+        
+        [FAZ 5: AIR-GAPPED ONTOLOGY GÜVENLİK DUVARI]: İngilizce veya Modern Standart Arapça (MSA) 
+        gibi seküler kökenli kavramların (Double Conversion) Z3 ontolojisine sızmasını önlemek için 
+        `StrictAirGapValidator` çağrıları ile izole edilmiş zaman damgası (Epoch) denetlenir.
         """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
@@ -373,7 +414,14 @@ class IlmWadAdapter:
         
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str) -> str:
         """
-        .. felsefe_notu:: Tahrîr-i Niza' (Yalıtım Sınırı) ve Ontolojik Atama
+        .. felsefe_notu:: Tahrîr-i Mahall-i Niza' (Kavramsal Senkronizasyon) ve Bila-Kayf
+        Münazara adabında Sâil ve Mucîb'in kavramları aynı ontolojik uzaydan çektiğinden emin 
+        olunmalıdır. Aksi takdirde lafzî (verbal) hatalar, aklî (logical) hatalara dönüşür.
+        
+        [Otonom Düğüm Taşınması (Node Relocation)]: İbn Teymiyye'nin semantiğine (Selefî usûlü)
+        uygun olarak, eğer sistem `allow_tevil=False` nedeniyle bir İlâhî Sıfat çelişkisi 
+        (UNSAT/Nakz) yaşarsa; kelime literal uzayından koparılır ve `Metaphor_Fallback` üzerinden 
+        bağımsız 'Bila-Kayf' (Mahiyeti Meçhul) düğümüne otonom olarak taşınır.
         """
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
@@ -394,6 +442,7 @@ class IlmWadAdapter:
 
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch)
         
+        # Otonom Düğüm Taşınması (Bila-Kayf Relocation Logic)
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
                 ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch)
@@ -404,6 +453,7 @@ class IlmWadAdapter:
         
         StrictAirGapValidator.validate_provenance(ontologic_id)
 
+        # DRT (Discourse Representation Theory) Kaydı
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
             gender = getattr(morph_data, 'gender', None) if morph_data else None
             number = getattr(morph_data, 'number', None) if morph_data else None

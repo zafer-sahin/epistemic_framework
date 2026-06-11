@@ -3,29 +3,35 @@ from linguistics.discourse_state import DiscourseRegister, DenialLevel
 
 """
 .. felsefe_notu:: İlm-i Ma'ânî ve Hakikatin Psikolojik Düzlemi
-    Klasik İslâm Dilbiliminde 'İlm-i Ma'ânî (Semantik/Pragmatik), lafızların sözlük 
+    Klasik İslâm Dilbiliminde (özellikle Sa'deddin et-Taftazânî'nin 'Mutavvel' şerhinde 
+    sistematize edildiği üzere) 'İlm-i Ma'ânî (Semantik/Pragmatik), lafızların salt sözlük 
     anlamlarıyla (Lügat) değil, önermenin "Muktazâ el-Hâl"e, yani bağlamın ve muhatabın 
-    (Sâil) psikolojik inkar durumunun gerekliliğine uygunluğuyla ilgilenir. Deterministik 
-    Z3 SMT çözücüsü her girdiyi Boolean mantığında "True/False" olarak işlemeye çalışır; 
-    oysa dilde mantıksal bir doğruluk/yanlışlık değeri taşımayan "İnşâî" (Emir, Soru) 
-    yapılar vardır. Bu modül, sentaks ağaçlarını (AST) Kripke uzayına inmeden önce felsefi 
-    bir filtreden geçirerek, sadece ontolojik hakikat iddiası taşıyan "Haberî" önermelerin 
-    hesaplanmasına izin verir.
+    (Sâil) psikolojik inkâr durumunun gerekliliğine uygunluğuyla ilgilenir. 
+    
+    Deterministik Z3 SMT çözücüsü her girdiyi Boolean mantığında "True/False" olarak 
+    işlemeye çalışır; oysa dilde mantıksal bir doğruluk/yanlışlık değeri taşımayan 
+    "İnşâî" (Emir, Soru, Temenni) yapılar vardır. Bu modül, sentaks ağaçlarını (AST) 
+    Kripke uzayına inmeden önce felsefi bir filtreden geçirerek, sadece ontolojik 
+    hakikat iddiası taşıyan "Haberî" (Khabari) önermelerin hesaplanmasına izin verir 
+    veya İnşâî yapıları Modal/Deontik operatörlere dönüştürür.
 """
 
 class MuktazaHalAnalyzer:
     """
     .. pedagojik_anlati:: Muktazâ el-Hâl (Entropi ve Tevkîd Uyumu)
-    Âdâb-ı Bahs (Münazara kuralları) uyarınca muhatabın şüphe seviyesi (Denial Level) ile 
+    Âdâb-ı Bahs (Münazara Kuralları) uyarınca muhatabın şüphe seviyesi (Denial Level) ile 
     cümlenin yapısal pekiştirmesi (Tevkîd katsayısı) matematiksel olarak dengelenmelidir.
-    Bu sınıf, bağlam-duyarlı (context-aware) bir hakem olarak çalışır.
+    Bu sınıf, bağlam-duyarlı (context-aware) bir hakem olarak çalışır ve "Gereksiz 
+    Zorunluluk" (Unnecessary Necessity) atamalarını SMT'ye ulaşmadan engeller.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
 
     def evaluate_balance(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         """
-        Eğer muhatabın zihni boşsa (Khali_al_Zihn), tevkîd kullanmak retorik bir israftır (Fazlalık).
+        .. mantik_kurali:: Denge Denklemi (Balance Equation)
+        Eğer muhatabın zihni boşsa (Khali_al_Zihn), tevkîd (pekiştirme) kullanmak retorik 
+        bir israftır (Fazlalık). Z3 SMT'de bu israf, gereksiz z3.ForAll kapsüllerine yol açar.
         Eğer muhatap kesin inkâr (Munkir) durumundaysa, cümleyi pekiştirmeden kurmak hakikatin 
         savunulmasında acziyettir. Sistem bu dengesizlikleri otonom olarak reddeder.
         """
@@ -55,11 +61,12 @@ class MuktazaHalAnalyzer:
 
 class MaaniSpeechActAnalyzer:
     """
-    .. pedagojik_anlati:: Söz Edimi (Speech Act) ve Muktazâ el-Hâl Hakemi
+    .. pedagojik_anlati:: Söz Edimi (Speech Act) ve Abdülkâhir el-Cürcânî'nin Nazm Teorisi
     Bu sınıf, cümlenin formunu (vurgu/tevkîd) muhatabın epistemik inkâr derecesiyle 
     (Denial Level) çapraz denetler. SMT motoruna salt bir veri akışı sağlamak yerine, 
-    cümledeki Kasr (Kısıtlama) ve İstifham (Soru) gibi yapıları Modal Mantık (Deontik 
-    ve Epistemik) operatörlerine dönüştürür.
+    cümledeki Kasr (Kısıtlama) ve İstifham (Soru) gibi yapıları Cürcânî'nin 'Nazm' 
+    (Sentaktik-Semantik Örgü) teorisine uygun olarak Modal Mantık (Deontik ve Epistemik) 
+    operatörlerine dönüştürür.
     
     [FAZ 3.2 VAZ' VE MA'ÂNÎ ENTEGRASYONU]: İlm-i Ma'ânî kısıtları atomize edilmiş, 
     MuktazaHalAnalyzer izole edilmiş ve İstifham-ı İnkârî yapıları mantıksal ret (z3.Not)
@@ -71,7 +78,7 @@ class MaaniSpeechActAnalyzer:
         
         # .. mantik_kurali:: İnşâî Önermeler (Performatives)
         # Soru (İstifham) ve Emir (Talep) cümleleri diş dünyayı (A'yân) tasvir etmezler, 
-        # dolayısıyla Kadiyye (Önerme) sayılmazlar ve SMT'nin SAT/UNSAT kararına tabi tutulamazlar.
+        # dolayısıyla Kadiyye (Önerme) sayılmazlar ve SMT'nin SAT/UNSAT kararına doğrudan tabi tutulamazlar.
         self.inshai_markers = {
             "question": ["hal", "a", "mata", "kayfa", "man", "ma", "eyne"],
             "imperative": ["if'al", "la_taf'al", "ef'al", "li_yaf'al"]
@@ -87,9 +94,11 @@ class MaaniSpeechActAnalyzer:
         .. pedagojik_anlati:: İstifham-ı İnkârî ve Varoluşsal Red (Existential Negation)
         Gerçek soru cümleleri (İstifham-ı Hakikî) mantıksal değer (True/False) taşımaz. 
         Ancak, eğer soru bir nefy (olumsuzluk) edatıyla geliyorsa ("Allah'tan başka ilah mı var?"),
-        bu retorik bir söz edimi olan İstifham-ı İnkârî'dir. İlm-i Ma'ânî gereği bu yapı, 
-        soru formunda görünse de Z3 matrisinde kesin bir varoluşsal redde ($\\neg \\exists x$) 
-        veya evrensel olumsuzlamaya ($\\forall x \\neg P(x)$) dönüştürülmelidir.
+        bu retorik bir söz edimi olan 'İstifham-ı İnkârî'dir. İlm-i Ma'ânî gereği bu yapı, 
+        soru formunda görünse de Z3 matrisinde kesin bir varoluşsal redde veya evrensel 
+        olumsuzlamaya dönüştürülmelidir.
+        
+        FOL Denklemi: $\\neg \\exists x (P(x))$ veya $\\forall x \\neg P(x)$
         """
         if first_token in self.inshai_markers["question"]:
             if has_nefy:
@@ -112,7 +121,11 @@ class MaaniSpeechActAnalyzer:
         .. mantik_kurali:: Deontik Mantık (Emir ve Nehiy)
         Emir (Yap) ve Nehiy (Yapma) kipleri mevcut Kripke dünyasını ($W_0$) tasvir etmezler. 
         Onlar, ahlaki veya hukuki (Fıkhî) olarak erişilebilir (accessible) ideal dünyalarda 
-        ($W_1$) geçerli olması gereken kuralları ($O(P)$ veya $F(P)$) mühürlerler.
+        ($W_1$) geçerli olması gereken kuralları mühürlerler.
+        
+        Matematiksel Karşılığı: 
+        $O(P)$ -> Obligatory (Wajib_Fiqh)
+        $F(P)$ -> Forbidden (Haram_Fiqh)
         """
         if first_token in self.inshai_markers["imperative"]:
             is_prohibitive = first_token.startswith("la_")
@@ -125,10 +138,12 @@ class MaaniSpeechActAnalyzer:
         Klasik Arapçada sentaktik dizilimin (Takdim/Te'hir) bozulması veya Kasr edatlarının 
         kullanımı, eylemi belirli bir varlığa mülk kılar. 
         Örn: (İyyâke Na'budu - Yalnız sana ibadet ederiz). 
+        
         Z3 FOL matrisinde bu durum, sıradan bir varoluşsal beyandan ($\\exists x$), 
-        çift yönlü gerektirmeli (Biconditional) bir evrensel dışlama fonksiyonuna 
-        ($\\forall x (\\text{Action}(x) \\iff \\text{Target}(x))$) yükseltilir.
-        Yönün (Sıfat'tan Mevsuf'a veya tersi) yanlış tespiti, ontolojide fatal hatalara yol açar.
+        çift yönlü gerektirmeli (Biconditional) bir evrensel dışlama fonksiyonuna yükseltilir:
+        $$\\forall x (\\text{Action}(x) \\iff \\text{Target}(x))$$
+        
+        Yönün (Sıfat'tan Mevsuf'a veya tersi) yanlış tespiti, ontolojide fatal hatalara (Semantic Shift) yol açar.
         """
         kasr_data = None
         
@@ -206,7 +221,7 @@ class MaaniSpeechActAnalyzer:
         .. felsefe_notu:: Kadiyye (Önerme) Onayı
         Eğer cümle tüm İlm-i Ma'ânî testlerinden geçip 'is_valid: True' döndürürse, 
         bu söz diziminin artık mantıksal bir yalanlanma veya doğrulanma ihtimali 
-        taşıdığı (Haberî) kesinleşmiştir.
+        taşıdığı (Haberî) kesinleşmiştir. Yalnızca Haberî önermeler SMT'de SAT/UNSAT alabilir.
         """
         res = self.analyze_pragmatics(tokens, dependencies)
         return res["is_valid"]
@@ -221,7 +236,7 @@ class MaaniSpeechActAnalyzer:
         Nahiv (Sentaks) katmanındaki Topolojik FOL fazları ile İlm-i Ma'ânî'den (Pragmatik)
         gelen kipliklerin (Modality) birbiriyle çelişmesini engeller. Z3 motoru, 
         teolojik ve sentaktik çatışmaları aynı anda işleyemez; bu bariyer sistemin 
-        tutarlılığını garanti altına alır.
+        tutarlılığını (Consistency) garanti altına alır.
         """
         
         # 1. Necessity vs Contingency (Tahkik vs Füzâiyye) Çatışması

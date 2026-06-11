@@ -33,7 +33,14 @@ def execute_healthcheck():
     
     # 1. BAŞLATMA (BOOTSTRAP)
     loader = OntologyLoader()
-    ontology = loader.load(Path("data/base_ontology.json"))
+    # Path yolunu sistemin çalıştığı dizine uygun kurguluyoruz
+    ontology_path = Path("data/base_ontology.json")
+    if not ontology_path.exists():
+        print(f"[UYARI] {ontology_path} bulunamadı. Lütfen dizin yapısını kontrol edin. Mock Ontoloji ile devam ediliyor...")
+        ontology = []
+    else:
+        ontology = loader.load(ontology_path)
+        
     solver = AristotelianSolver(ontology)
     
     tokenizer = EpistemicTokenizer()
@@ -69,7 +76,10 @@ def execute_healthcheck():
         print(f"[BAŞARILI] Güvenlik Duvarı Kaydı Reddetti: {e}")
         
     # Senaryo 3'ün Orkestratör düzeyinde reddedilmesini test etmek için tensöre arkadan zerk edilir
-    lexicon._tensor["demokras"] = {"Modern": {"Base": {"Kadiyye-i_Hamliyye": {"default": "Sekuler_Otorite", "context_triggers": {}}}}}
+    # ContextualLexicon._tensor boyutu: _tensor[word_lower][epoch][namespace][proposition_type]
+    if "demokras" not in lexicon._tensor:
+        lexicon._tensor["demokras"] = {}
+    lexicon._tensor["demokras"]["Modern"] = {"Base": {"Kadiyye-i_Hamliyye": {"default": "Sekuler_Otorite", "context_triggers": {}}}}
 
     adapter = IlmWadAdapter(lexicon, discourse)
     l1 = Layer1HeuristicGraph(ontology)
@@ -89,13 +99,13 @@ def execute_healthcheck():
     print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
     discourse.clear_memory()
     res_salafi = orchestrator.process_statement(tokens_1, ast_1, SalafiUsul(), morph_1)
-    print(f"Sonuç: [{res_salafi['status']}] -> {res_salafi.get('message')}\n")
+    print(f"Sonuç: [{res_salafi.get('status', 'BİLİNMİYOR')}] -> {res_salafi.get('message')}\n")
 
     print("--- SENARYO 2: EŞ'ARÎ USÛLÜ (FAZ 3 - İLM-İ BEYÂN MA'NÂ EL-MA'NÂ İSPATI) ---")
     print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
     discourse.clear_memory()
     res_ashari = orchestrator.process_statement(tokens_1, ast_1, AshariUsul(), morph_1)
-    print(f"Sonuç: [{res_ashari['status']}] -> {res_ashari.get('message')}")
+    print(f"Sonuç: [{res_ashari.get('status', 'BİLİNMİYOR')}] -> {res_ashari.get('message')}")
     print(f"L2 Kararı: {res_ashari.get('l2_context')}\n")
 
     print("--- SENARYO 3: [FAZ 1 - AIR-GAP / DIACHRONIC İHLALİ] SEKÜLER MSA SIZINTISI KONTROLÜ ---")
@@ -106,7 +116,7 @@ def execute_healthcheck():
     print(f"Girdi: '{sentence_secular}' | Epoch: 'Modern' (MSA Sızıntı Testi)")
     discourse.clear_memory()
     res_secular = orchestrator.process_statement(tokens_sec, ast_sec, AshariUsul(), morph_sec)
-    print(f"Sistem Tepkisi: [{res_secular['status']}] -> {res_secular.get('message')}\n")
+    print(f"Sistem Tepkisi: [{res_secular.get('status', 'BİLİNMİYOR')}] -> {res_secular.get('message')}\n")
 
     sentence_2 = "tekvinu allahi"
     tokens_2 = tokenizer.tokenize(sentence_2)
@@ -117,7 +127,7 @@ def execute_healthcheck():
     print(f"Girdi: '{sentence_2}' | AST: {ast_2}")
     discourse.clear_memory()
     res_maturidi = orchestrator.process_statement(tokens_2, ast_2, MaturidiUsul(), morph_2)
-    print(f"Sonuç: [{res_maturidi['status']}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
+    print(f"Sonuç: [{res_maturidi.get('status', 'BİLİNMİYOR')}] -> {res_maturidi.get('reason', res_maturidi.get('message'))}\n")
 
     print("--- SENARYO 5: CÜRCÂN MU'ARADAH KİLİTLENMESİ (ÇAPRAZ USÛL DİYALEKTİĞİ) ---")
     discourse.clear_memory()
@@ -135,7 +145,7 @@ def execute_healthcheck():
         ir_mujib, AshariUsul(), sail_tokens, sail_ast, SalafiUsul(), sail_morph
     )
     print(f"Mucîb (Ashari): Cemad | Sâil (Salafi): Nami")
-    print(f"Sonuç: [{res_muaradah['status']}] -> {res_muaradah.get('message')}\n")
+    print(f"Sonuç: [{res_muaradah.get('status', 'BİLİNMİYOR')}] -> {res_muaradah.get('message')}\n")
 
     print("--- SENARYO 6: İLM-İ VAZ' NEV'Î (YAPISAL LÜZUMİYET VE TEMATİK ROL) ---")
     sentence_5 = "zeydun daribun"
@@ -145,12 +155,15 @@ def execute_healthcheck():
     
     discourse.clear_memory()
     res_vaz = orchestrator.process_statement(tokens_5, ast_5, AshariUsul(), morph_5)
-    print(f"Girdi: '{sentence_5}' | Morfolojik Kalıp (Vezin): {morph_5['daribun'].pattern}")
-    print(f"Çıkarılan Tematik Rol (Thematic Role): {morph_5['daribun'].thematic_role}")
+    print(f"Girdi: '{sentence_5}'")
+    # Dictionary fallback for morph_5 output safety
+    if 'daribun' in morph_5:
+        print(f"Morfolojik Kalıp (Vezin): {morph_5['daribun'].pattern}")
+        print(f"Çıkarılan Tematik Rol (Thematic Role): {morph_5['daribun'].thematic_role}")
     print(f"Sonuç: [{res_vaz.get('status', 'BİLİNMİYOR')}] -> {res_vaz.get('message', 'Role_Agent tespiti otonom Role_Action yarattı')}\n")
 
     print("--- SENARYO 7: İLM-İ MA'ÂNÎ (MUKTAZÂ EL-HÂL VE İSTİFHAM-I İNKÂRÎ) ---")
-    sentence_6a = "inna zeydun daribun"
+    sentence_6a = "inna zeyden daribun"
     tokens_6a = tokenizer.tokenize(sentence_6a)
     morph_6a = sarf.derive_lexicon(tokens_6a)
     ast_6a = nahiv.suggest_dependencies(tokens_6a, morph_6a)
@@ -159,7 +172,7 @@ def execute_healthcheck():
     discourse.epistemic_state["Sail"] = DenialLevel.KHALI_AL_ZIHN
     res_maani_1 = orchestrator.process_statement(tokens_6a, ast_6a, AshariUsul(), morph_6a)
     print(f"Girdi (Tevkîd): '{sentence_6a}' | Sâil Zihni: KHALI_AL_ZIHN")
-    print(f"Sonuç: [{res_maani_1['status']}] -> {res_maani_1.get('message')}\n")
+    print(f"Sonuç: [{res_maani_1.get('status', 'BİLİNMİYOR')}] -> {res_maani_1.get('message')}\n")
 
     print("--- SENARYO 8: ÂDÂB-I BAHS (FAZ 4/5 - TAHRÎR-İ NİZA', MÜLÂZAMA VE REKÜRSİF MEN') ---")
     clean_solver = AristotelianSolver(ontology)
@@ -167,16 +180,16 @@ def execute_healthcheck():
     fsm_engine.reset_session()
     
     res_dava = fsm_engine.submit_claim("Forall([x], Implies(Cemad(x), Nami(x)))")
-    print(f"Da'vâ (İddia) Durumu: {res_dava['message']}")
+    print(f"Da'vâ (İddia) Durumu: {res_dava.get('message')}")
     
     res_tahrir = fsm_engine.tahrir_i_niza(musellemat=["Cemad"], niza_terms=["Nami"])
-    print(f"Tahrîr-i Niza': {res_tahrir['message']}")
+    print(f"Tahrîr-i Niza': {res_tahrir.get('message')}")
     
     res_delil = fsm_engine.submit_evidence(["Forall([x], Implies(Cemad(x), Nami(x)))"])
-    print(f"Delil Sunumu: {res_delil['message']}")
+    print(f"Delil Sunumu: {res_delil.get('message')}")
     
     res_nakz = fsm_engine.attack_evidence("Nakz")
-    print(f"Nakz (Çürütme) Sonucu: [{res_nakz['status']}] -> {res_nakz['message']}")
+    print(f"Nakz (Çürütme) Sonucu: [{res_nakz.get('status', 'BİLİNMİYOR')}] -> {res_nakz.get('message')}")
     
     # Rekürsif Men' Saldırısı (Nöbet Değişimi Simülasyonu)
     fsm_engine.reset_session()
@@ -184,7 +197,7 @@ def execute_healthcheck():
     fsm_engine.tahrir_i_niza(["Cevher"], ["Cemad", "Nami"])
     fsm_engine.submit_evidence(["Forall([x], Implies(Cemad(x), Hayvan(x)))", "Forall([x], Implies(Hayvan(x), Nami(x)))"])
     res_men = fsm_engine.attack_evidence("Men", target_premise="Forall([x], Implies(Cemad(x), Hayvan(x)))")
-    print(f"Men' (Rekürsif Da'vâ) Sonucu: [{res_men['status']}] -> Aktif Ajan: {fsm_engine.discourse.active_agent} | {res_men['message']}\n")
+    print(f"Men' (Rekürsif Da'vâ) Sonucu: [{res_men.get('status', 'BİLİNMİYOR')}] -> Aktif Ajan: {fsm_engine.discourse.active_agent} | {res_men.get('message')}\n")
 
     print("--- SENARYO 9: KÂTİBÎ ŞEMSİYYE KİPLİKLERİ (FAZ 4 - ZÂT/VASIF AYRIMI) ---")
     sentence_8 = "zeydun daribun masiyan"
@@ -260,11 +273,11 @@ def execute_healthcheck():
     discourse.clear_memory()
     res_12 = orchestrator.process_statement(tokens_12, ast_12, AshariUsul(), morph_12)
     print(f"Girdi: '{sentence_12}' | AST: {ast_12}")
-    has_bedel = any(rel == 'Rel_Bedel' for _, _, rel, _ in ast_12)
+    has_bedel = any(rel == 'Bedel_Identity' for _, _, rel, _ in ast_12)
     print(f"Sonuç: [{res_12.get('status', 'BİLİNMİYOR')}] -> İsm-i İşaret Bedel-i Küll bağı kurdu mu? {has_bedel}. İleti: {res_12.get('message')}\n")
 
     print("--- SENARYO 13: FAZ 7 - ZERO-COPULA VE FÂ-İ SEBEBİYYE (DİNAMİK MANTIK) ---")
-    sentence_13 = "inne zeyden fi el_dar fa daraba"
+    sentence_13 = "inna zeyden fi el_dar fa daraba"
     tokens_13 = tokenizer.tokenize(sentence_13)
     morph_13 = sarf.derive_lexicon(tokens_13)
     ast_13 = nahiv.suggest_dependencies(tokens_13, morph_13)
@@ -277,7 +290,7 @@ def execute_healthcheck():
         has_dynamic = any(rel == 'Rel_Fa_Fuzaiyye' or rel == 'Rel_Fa_Sebebiyye' for _, _, rel, _ in ast_13)
         print(f"Sonuç: [{res_13.get('status', 'BİLİNMİYOR')}] -> Dinamik Zaman Sıçraması (Fa) Kuruldu mu? {has_dynamic}. İleti: {res_13.get('message')}\n")
     except Exception as e:
-        print(f"Sonuç: [BEKLENEN_HATA] -> L3 SMT Dinamik Mantık (Faz 7) henüz FOL Haritasına eklenmediği için beklenen çöküş gerçekleşti. İleti: {e}\n")
+        print(f"Sonuç: [BEKLENEN_HATA] -> L3 SMT Dinamik Mantık (Faz 7) henüz tam FOL Haritasına eklenmediği takdirde beklenen istisna. İleti: {e}\n")
 
     print("--- SENARYO 14: FAZ 4.1 - BİPARTİTE DRT FİZİKSEL YALITIMI VE BAĞLAM ZEHİRLENMESİ KORUMASI ---")
     discourse.clear_memory()
@@ -293,7 +306,8 @@ def execute_healthcheck():
         discourse.resolve_pronoun("huve", enforcement_namespace="Ashari")
         print("[HATA] Zırh delindi, bağlam zehirlendi!")
     except ValueError as e:
-        print(f"[BAŞARILI] Fiziksel İzolasyon Kalkanı Devrede: Sâil'in yığıtında rakibin varlığı fiziksel olarak hiç bulunmadığı için doğrudan reddedildi: {e}\n")
+        # ContextPoisoningError veya ValueError fırlatılır.
+        print(f"[BAŞARILI] Fiziksel İzolasyon Kalkanı Devrede: Sâil'in yığıtında rakibin varlığı fiziksel olarak bulunmadığından doğrudan reddedildi: {e}\n")
 
     print("--- SENARYO 15: FAZ 9 - LITERATE CHUNKING VE BİLİŞSEL YÜK YÖNETİMİ ---")
     sentence_15 = "inna zeyden fi el_dar fa daraba"

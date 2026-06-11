@@ -1,18 +1,33 @@
-from typing import Dict, Optional, Any, List, Tuple, Protocol
+from typing import Dict, List, Optional, Union, Tuple, Protocol, Any
+from pydantic import BaseModel, ConfigDict, Field
+
+# [ONARIM]: DiscourseRegister ve ContextPoisoningError dışa bağımlılıkları eklendi.
+# Kendini çağıran döngüsel (recursive) StrictAirGapValidator importu temizlendi, 
+# sınıf zaten bu dosyanın içinde tanımlı olduğu için doğrudan kullanılacak.
 from linguistics.discourse_state import DiscourseRegister
-from core.exceptions import DiachronicViolationError, ContextPoisoningError
+
+try:
+    from core.exceptions import DiachronicViolationError, ContextPoisoningError
+except ImportError:
+    class DiachronicViolationError(Exception): pass
+    class ContextPoisoningError(Exception): pass
+
 
 class StrictAirGapValidator:
     """
     .. pedagojik_anlati:: 'İlm-i Vaz' ve Ontolojik Yalıtım (Air-Gap)
     Klasik İslâm dilbiliminde (İlm-i Vaz'), lafzın ma'nâya (anlama) delaleti seküler veya 
-    istatistiksel bir sözlük eşleşmesi değildir. Kelimeler, ilahî veya felsefi bir hakikate 
-    (Vâzı') bağlanırlar. Sistem dışarıdan WordNet, NLTK veya SpaCy gibi modern NLP kütüphanelerine 
-    bağlanırsa, İbn Sînâ'nın veya Cürcânî'nin ontolojisi Batılı evrimsel biyoloji veya 
-    istatistiksel semantik ağlara kurban edilmiş olur. 
-    Bu sınıf (Validator), bu sızıntıyı donanımsal olarak engeller ve "Çifte Dönüşüm" 
-    (Double Conversion) riskini sıfıra indirir. SMT matrisine sadece "Classical" (Klasik) 
-    döneme ait mühürlü ontolojiler girebilir.
+    istatistiksel bir sözlük eşleşmesi değildir. Kelimeler, felsefi bir hakikate (Vâzı') bağlanırlar. 
+    Sistem dışarıdan WordNet, NLTK veya SpaCy gibi modern NLP kütüphanelerine bağlanırsa, 
+    İbn Sînâ'nın veya Cürcânî'nin ontolojisi Batılı evrimsel biyoloji veya istatistiksel 
+    semantik ağlara kurban edilmiş olur. 
+    
+    Bu sınıf (Validator), bu sızıntıyı donanımsal olarak engeller ve NLP literatüründeki 
+    "Çifte Dönüşüm" (Double Conversion) riskini sıfıra indirir. SMT matrisine sadece 
+    "Classical" (Klasik) döneme ait mühürlü ontolojiler girebilir.
+    
+    Matematiksel İzolasyon Kuralı:
+    $$\\forall e \\in E_{z3}: \\text{Provenance}(e) \\notin \\{\\text{WordNet}, \\text{MSA}, \\text{SecularNLP}\\}$$
     """
     # Sistemin kirlenmesini önleyecek yasaklı seküler ontoloji uzayları
     SECULAR_NAMESPACES = {"wordnet", "nltk", "spacy", "msa", "modern", "english", "secular_nlp", "babelnet"}
@@ -87,6 +102,8 @@ class ManaElManaGraph:
     def infer_metaphorical_bridge(self, literal_id: str, conflicting_node_id: str) -> Optional[str]:
         """
         .. matematiksel_model:: Ardışık Nedensellik Zinciri (Metaphorical Inference)
+        Z3'teki UNSAT durumunu (Çelişki) Porphyrian Ağacında yeni bir hakikate dönüştürür.
+        $$ \\text{UNSAT}(x, y) \\implies \\exists z: (\\text{Propria}(x, z) \\land \\text{Alaka}(z, y)) $$
         """
         literal_attributes = self.semantic_client.get_concept_attributes(literal_id)
         
@@ -117,7 +134,7 @@ class LocalOntoLexSemanticClient:
     Gerçek bir devasa Triple-Store (Graf Veritabanı) bağlanana kadar, sistem RAM üzerinde 
     temel varlık hiyerarşisini (Porphyrios Ağacı) simüle eder. Böylece her kelime için 
     'register_word' yapma zorunluluğu (Cognitive Load) kalkar, kelimeler otonom olarak 
-    Cevher (Cism) veya Araz'lara bağlanır.
+    Cevher (Cism) veya Araz'lara (Accidents) bağlanır.
     """
     def __init__(self):
         self._base_ontology_map = {
@@ -158,12 +175,12 @@ class ContextualLexicon:
     """
     .. pedagojik_anlati:: Çok Boyutlu İlm-i Vaz' Tensörü
     Leksikon, iki boyutlu basit bir sözlük (Key-Value) değildir. Kelimenin anlamı, 
-    içinde bulunduğu döneme (Epoch), kelam okuluna (Namespace: Ashari/Salafi vb.), 
+    içinde bulunduğu döneme (Epoch), kelâm okuluna (Namespace: Ashari/Salafi vb.), 
     önermenin felsefi türüne (PropositionType) ve cümle içindeki sentaktik 
     bağımlılığına (Sibak/Context Trigger) göre farklılaşan N-Boyutlu bir Tensörde 
     çözümlenir.
     
-    [FAZ 8 LITERATE CHUNKING]: Bellek yükünü yönetmek için Tensör tarama ve Siyak-Sibak 
+    [FAZ 5 LITERATE CHUNKING]: Bellek yükünü yönetmek için Tensör tarama ve Siyak-Sibak 
     bağımlılık ağacı kontrolleri izole özel fonksiyonlara (Private Methods) ayrılmıştır.
     """
     def __init__(self, semantic_client: Optional[IOntoLexSemanticClient] = None):
@@ -208,10 +225,13 @@ class ContextualLexicon:
         """
         .. mantik_kurali:: Siyak-Sibak ve Ontolojik İhtisas (Bağlam Avcısı)
         Bir kelimenin mecaz mı yoksa hakikat mi olduğu, cümledeki diğer kelimelerle olan rastgele 
-        yan yanalığından (proximity) değil, İlm-i Nahiv'deki kesin amil-mamul bağıntılarından 
-        (AST Dependencies) anlaşılır. Örneğin İbn Teymiyye'nin Hakikat felsefesine göre, "Allah'ın Eli" 
+        yan yanalığından (Proximity) değil, İlm-i Nahiv'deki kesin amil-mamul bağıntılarından 
+        (AST Dependencies) anlaşılır. 
+        
+        Örneğin İbn Teymiyye'nin Hakikat felsefesine (Selefî usûlüne) göre, "Allah'ın Eli" 
         (Yedullah) dendiğinde, 'Yed'in anlamı 'Allah' ile 'İzafet' (Mudaf_MudafIlayh) bağına girdiğinde 
-        Bila_Kayf (Nasılı bilinmeyen hakikat) uzayına sıçrar. Bu kural, Z3'e eksiksiz işlenir.
+        Bila_Kayf (Nasılı bilinmeyen hakikat) uzayına otonom olarak sıçrar. Bu kural, 
+        Z3 SMT motorunda ontolojik çöküşü engeller.
         """
         if not dependencies or not triggers:
             return None
@@ -267,7 +287,8 @@ class ContextualLexicon:
         arka kapıdan (backdoor) eşdeğerlik kuramaz. Ortak kabul (Base) dışındaki bu sızıntı 
         anında tespit edilip engellenir ve motor ContextPoisoningError fırlatarak durur.
         
-        [FAZ 4.1 Bipartite DRT UYUMU]: discourse.scopes yapısının sözlük olmasına uygun tarama yapar.
+        [FAZ 4.1 Bipartite DRT UYUMU]: discourse.scopes yapısının sözlük veya liste olmasına 
+        uygun olarak izole Sâil/Mucîb taraması yapar.
         """
         if not discourse or active_namespace == "Base":
             return

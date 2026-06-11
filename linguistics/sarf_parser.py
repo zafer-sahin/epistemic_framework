@@ -26,9 +26,12 @@ class MorphologicalAnalysis(BaseModel):
     """
     .. pedagojik_anlati:: İlm-i Sarf ve Lafzın Ontolojik Pasaportu
     Klasik Arapçada bir kelime (lafız), statik bir karakter dizisi değil; kökünden (Asl) 
-    türeyerek belirli bir kalıba (Vezin) giren, böylece harici dünyadaki (a'yân) bir varlığa, 
-    eyleme veya niteliğe dönüşen dinamik bir yapıdır. Bu model, kelimenin sadece sözlüksel 
-    özelliklerini değil, Z3 SMT motorunda hangi ontolojik kısıtlara (Constraint) tabi olacağını 
+    türeyerek belirli bir kalıba (Vezin) giren, böylece harici dünyadaki (A'yân) bir varlığa, 
+    eyleme veya niteliğe dönüşen dinamik bir yapıdır.
+    
+    Matematiksel olarak bu, bir varlığın ($x$) potansiyel (Kuvve) halinden aktüel (Fiil) 
+    haline geçişini belgeler. Bu model, kelimenin sadece sözlüksel özelliklerini değil, 
+    Z3 SMT motorunda hangi ontolojik kısıtlara ($\text{Constraint}$) tabi olacağını 
     mühürleyen bir felsefi kimlik kartıdır.
     """
     model_config = ConfigDict(extra="forbid")
@@ -49,9 +52,11 @@ class MorphologicalAnalysis(BaseModel):
 class OntoLexRule(BaseModel):
     """
     .. mantik_kurali:: Türetim (Derivation) ve Determinizm
-    İslâm mantığında nedensellik (illiyet) kesindir. Bir kelimenin aslından (root) türemesi,
+    İslâm mantığında nedensellik (İlliyet) kesindir. Bir kelimenin aslından (Root) türemesi,
     olasılıksal (probabilistic) bir NLP süreciyle tahmin edilemez; katı pozisyonel kurallarla 
     (Extraction Rules) deterministik olarak haritalandırılmak zorundadır.
+    
+    $\text{Derive}: \text{Root} \times \text{Pattern} \rightarrow \text{InstantiatedWord}$
     """
     model_config = ConfigDict(extra="forbid")
     rule_type: str
@@ -62,7 +67,7 @@ class OntoLexMorphEntry(BaseModel):
     """
     .. felsefe_notu:: A'yân-ı Sâbite ve Kelime Grafları
     Bu model, W3C OntoLex standardında kelimelerin ideal formlarını (Platonik İdealar / A'yân-ı Sâbite)
-    temsil eder. Fiziksel metindeki her kelime, bu soyut graf düğümlerinden birine refere (instantiation) eder.
+    temsil eder. Fiziksel metindeki her kelime, bu soyut graf düğümlerinden birine refere (Instantiation) eder.
     """
     model_config = ConfigDict(extra="forbid")
     pattern_id: str
@@ -93,7 +98,7 @@ class IOntoLexGraphClient(Protocol):
 class LocalOntoLexGraphClient:
     """
     .. felsefe_notu:: Kapalı Kümeler (Closed Sets) ve Monadlar
-    Harfler (Edatlar), İsm-i İşaretler ve Kasr Edatları üretken morfolojiye (iştikak) tabi olmayan, 
+    Harfler (Edatlar), İsm-i İşaretler ve Kasr Edatları üretken morfolojiye (İştikak) tabi olmayan, 
     kendi içlerine kapalı sâbitelerdir (Monadlar). Bu simülatör, bu mutlak sâbiteleri ve 'Fa'ala' 
     gibi evrensel kalıpları geçici olarak barındıran bir bellek (Hafıza) işlevi görür.
     """
@@ -119,7 +124,7 @@ class LocalOntoLexGraphClient:
 
         # .. pedagojik_anlati:: Emsile ve Bina'nın Matematiksel Matrisi
         # Klasik medrese müfredatındaki fiil çekim kalıplarının (Vezinler), cebirsel imzalara 
-        # (Structural Signatures - CaCaCa) dönüştürülmüş halleridir.
+        # (Structural Signatures - CaCaCa) dönüştürülmüş halleridir. Z3 bu imzalara göre kökleri türetir.
         self._pattern_graph: Dict[str, OntoLexMorphEntry] = {
             "CaCaCa": OntoLexMorphEntry(pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
             "CaCaCat": OntoLexMorphEntry(pattern_id="Fa'alat", ontologic_type="Fiil", thematic_role="Action", gender="Muennes", number="Mufred", hidden_pronoun="Hiye", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
@@ -243,8 +248,10 @@ class SarfEngine:
         """
         .. pedagojik_anlati:: Harf-i Ta'rif ve Belirlilik (Ma'rife)
         'Al-' takısı, ismin referans noktasını zihindeki herhangi potansiyel bir varlıktan (Nekra), 
-        harici dünyada belirlenmiş ve aktüelleşmiş spesifik bir varlığa (Ma'rife) taşır. Z3 matrisinde 
-        bu, varlıksal bir mühürlemedir.
+        harici dünyada belirlenmiş ve aktüelleşmiş spesifik bir varlığa (Ma'rife) taşır. 
+        Z3 matrisinde bu durum Skolemizasyon ile ifade edilir:
+        
+        $$\exists x \in W: P(x) \land \forall y (P(y) \implies x = y)$$
         """
         core_word = original_word
         if core_word.startswith("al_"):
@@ -270,10 +277,12 @@ class SarfEngine:
 
     def _evaluate_ontolex_graph(self, original_word: str, core_word: str) -> Optional[MorphologicalAnalysis]:
         """
-        .. felsefe_notu:: Müstatir Zamir (Hidden Pronoun) İnjeksiyonu
-        Her fiil kalıbı, içerisinde zımni (müstatir) bir zamir barındırır. "Her eylemin bir faili vardır" 
-        felsefi aksiyomu gereği, bu metod fiilin içine gömülü faili (Örn: Huve/Hiye) çıkararak, Z3 uzayının 
-        failsiz kalarak nedensellik bağını yitirmesini (Ex Falso Quodlibet) kesin olarak engeller.
+        .. felsefe_notu:: Müstatir Zamir (Hidden Pronoun) İnjeksiyonu ve DRT
+        Her fiil kalıbı, içerisinde zımnî (müstatir) bir zamir barındırır. "Her eylemin bir faili vardır" 
+        felsefi aksiyomu gereği, bu metod fiilin içine gömülü faili (Örn: Huve/Hiye) çıkararak, Z3 
+        uzayının failsiz kalarak nedensellik bağını yitirmesini (Ex Falso Quodlibet) kesin olarak engeller:
+        
+        $$\forall e \in \text{Actions} \implies \exists x \in \text{Entities}: \text{Agent}(x, e)$$
         """
         signature = self._generate_structural_signature(core_word)
         entry = self.graph_client.query_pattern_graph(signature)
@@ -297,9 +306,9 @@ class SarfEngine:
         """
         .. mantik_kurali:: Gayri Munsarif Zafiyetinin Giderilmesi ve İ'rab
         Bu aşama, amil-mamul atamalarındaki fatal hataları önler. Eğer bir isim Gayri Munsarif 
-        (Diptote) ise, cer (Majrur) durumunda bile fetha ('a') alır. Sistemin sondaki 'a' sesini 
+        (Diptote) ise, cer (Majrur) durumunda dahi fetha ('a') alır. Sistemin sondaki 'a' sesini 
         görüp kelimeyi yanlışlıkla Meful (Nesne) sanması, Z3 motorunda fail ile mefulün yer 
-        değiştirmesine ve cümlenin mantıksal predikatının (Semantic Shift) ters dönmesine yol açar.
+        değiştirmesine (Semantic Shift) ve cümlenin mantıksal predikatının ters dönmesine yol açar.
         """
         stem_1 = core_word[:-1]
         
