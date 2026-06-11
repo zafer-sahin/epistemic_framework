@@ -13,6 +13,46 @@ from linguistics.discourse_state import DiscourseRegister, DenialLevel
     hesaplanmasına izin verir.
 """
 
+class MuktazaHalAnalyzer:
+    """
+    .. pedagojik_anlati:: Muktazâ el-Hâl (Entropi ve Tevkîd Uyumu)
+    Âdâb-ı Bahs (Münazara kuralları) uyarınca muhatabın şüphe seviyesi (Denial Level) ile 
+    cümlenin yapısal pekiştirmesi (Tevkîd katsayısı) matematiksel olarak dengelenmelidir.
+    Bu sınıf, bağlam-duyarlı (context-aware) bir hakem olarak çalışır.
+    """
+    def __init__(self, discourse: DiscourseRegister):
+        self.discourse = discourse
+
+    def evaluate_balance(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
+        """
+        Eğer muhatabın zihni boşsa (Khali_al_Zihn), tevkîd kullanmak retorik bir israftır (Fazlalık).
+        Eğer muhatap kesin inkâr (Munkir) durumundaysa, cümleyi pekiştirmeden kurmak hakikatin 
+        savunulmasında acziyettir. Sistem bu dengesizlikleri otonom olarak reddeder.
+        """
+        tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier' or str(rel).startswith('Amel_Inne_'))
+        
+        try:
+            opponent_denial_level = self.discourse.get_opponent_epistemic_state()
+        except AttributeError:
+            opponent_denial_level = DenialLevel.KHALI_AL_ZIHN
+
+        if opponent_denial_level == DenialLevel.KHALI_AL_ZIHN and tevkid_count > 0:
+            return {
+                "is_valid": False,
+                "type": "MAANI_VIOLATION",
+                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatabın zihni boş (Khali_al_Zihn) iken tevkîd (pekiştirme) kullanılamaz. Z3 Kripke uzayına gereksiz Zorunluluk (Necessity) matrisi basmak Kombinatoryal Patlamaya yol açar."
+            }
+            
+        if opponent_denial_level == DenialLevel.MUNKIR and tevkid_count == 0:
+            return {
+                "is_valid": False,
+                "type": "MAANI_VIOLATION",
+                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez. Önerme, epistemik zorunluluk taşımadığı için geçersiz kılınmıştır."
+            }
+            
+        return {}
+
+
 class MaaniSpeechActAnalyzer:
     """
     .. pedagojik_anlati:: Söz Edimi (Speech Act) ve Muktazâ el-Hâl Hakemi
@@ -21,13 +61,13 @@ class MaaniSpeechActAnalyzer:
     cümledeki Kasr (Kısıtlama) ve İstifham (Soru) gibi yapıları Modal Mantık (Deontik 
     ve Epistemik) operatörlerine dönüştürür.
     
-    [FAZ 8 LITERATE PROGRAMMING]: Bilişsel yükü yönetmek adına (Chunking), devasa analiz 
-    matrisi İstifham, Deontik, Muktazâ el-Hâl ve Kasr gibi atomik İlm-i Ma'ânî kurallarına 
-    (Private Methods) bölünmüş ve tarihsel 'Faz' akışları korunarak her birinin matematiksel 
-    gerekçesi açıklanmıştır.
+    [FAZ 3.2 VAZ' VE MA'ÂNÎ ENTEGRASYONU]: İlm-i Ma'ânî kısıtları atomize edilmiş, 
+    MuktazaHalAnalyzer izole edilmiş ve İstifham-ı İnkârî yapıları mantıksal ret (z3.Not)
+    kapsüllerine dönüştürülecek şekilde yapılandırılmıştır.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
+        self.muktaza_analyzer = MuktazaHalAnalyzer(discourse)
         
         # .. mantik_kurali:: İnşâî Önermeler (Performatives)
         # Soru (İstifham) ve Emir (Talep) cümleleri diş dünyayı (A'yân) tasvir etmezler, 
@@ -56,7 +96,8 @@ class MaaniSpeechActAnalyzer:
                 return {
                     "is_valid": True, 
                     "type": "Istifham_i_Inkari", 
-                    "message": "İstifham-ı İnkârî tespit edildi. Evrensel/Varoluşsal ret mantığına dönüştürülecek."
+                    "z3_operator_hint": "Universal_Negation", 
+                    "message": "İstifham-ı İnkârî tespit edildi. Evrensel/Varoluşsal ret mantığına (z3.Not) dönüştürülecek."
                 }
             else:
                 return {
@@ -78,33 +119,6 @@ class MaaniSpeechActAnalyzer:
             return {"is_valid": True, "type": "Deontic", "operator": "Nehiy" if is_prohibitive else "Emir"}
         return {}
 
-    def _evaluate_muktaza_el_hal(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
-        """
-        .. matematiksel_model:: Muktazâ el-Hâl (Entropi ve Tevkîd Uyumu)
-        Âdâb-ı Bahs (Münazara kuralları) uyarınca muhatabın şüphe seviyesi (Denial Level) ile 
-        cümlenin yapısal pekiştirmesi (Tevkîd katsayısı) matematiksel olarak dengelenmelidir.
-        Eğer muhatabın zihni boşsa (Khali_al_Zihn), tevkîd kullanmak retorik bir israftır (Fazlalık).
-        Eğer muhatap kesin inkâr (Munkir) durumundaysa, cümleyi pekiştirmeden kurmak hakikatin 
-        savunulmasında acziyettir. Sistem bu dengesizlikleri otonom olarak reddeder.
-        """
-        tevkid_count = sum(1 for _, _, rel, _ in dependencies if rel == 'Tevkid_Modifier' or rel.startswith('Amel_Inne_'))
-        opponent_denial_level = self.discourse.get_opponent_epistemic_state()
-
-        if opponent_denial_level == DenialLevel.KHALI_AL_ZIHN and tevkid_count > 0:
-            return {
-                "is_valid": False,
-                "type": "MAANI_VIOLATION",
-                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatabın zihni boş (Khali_al_Zihn) iken tevkîd (pekiştirme) kullanılamaz. Z3 Kripke uzayına gereksiz Zorunluluk (Necessity) matrisi basmak Kombinatoryal Patlamaya yol açar."
-            }
-            
-        if opponent_denial_level == DenialLevel.MUNKIR and tevkid_count == 0:
-            return {
-                "is_valid": False,
-                "type": "MAANI_VIOLATION",
-                "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez. Önerme, epistemik zorunluluk taşımadığı için geçersiz kılınmıştır."
-            }
-        return {}
-
     def _extract_kasr_and_ihtisas(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         """
         .. felsefe_notu:: Kasr, İhtisas ve Evrensel Dışlama
@@ -118,7 +132,6 @@ class MaaniSpeechActAnalyzer:
         """
         kasr_data = None
         
-        # A. Takdim/Te'hir İhtisası (Mefulün Faile/Fiile Takdimi)
         ihtisas_deps = [dep for dep in dependencies if dep[2] == 'Rel_Ihtisas']
         if ihtisas_deps:
             amil = ihtisas_deps[0][0]
@@ -131,7 +144,6 @@ class MaaniSpeechActAnalyzer:
                 "message": f"Takdim (İhtisas) tespit edildi. Eylem ({amil}) sadece hedefe ({mamul}) kısıtlanacak."
             }
         
-        # B. Edatlı Kasr (İnnemâ / İllâ) - Yön (Direction) Tespiti
         if not kasr_data:
             kasr_deps = [dep for dep in dependencies if dep[2] == 'Kasr_Modifier']
             if kasr_deps:
@@ -167,7 +179,7 @@ class MaaniSpeechActAnalyzer:
         deontic_res = self._evaluate_deontic(first_token)
         if deontic_res: return deontic_res
             
-        muktaza_res = self._evaluate_muktaza_el_hal(dependencies)
+        muktaza_res = self.muktaza_analyzer.evaluate_balance(dependencies)
         if muktaza_res: return muktaza_res
 
         kasr_data = self._extract_kasr_and_ihtisas(dependencies)
@@ -175,10 +187,7 @@ class MaaniSpeechActAnalyzer:
         response = {"is_valid": True, "type": "Khabari"}
         
         # .. mantik_kurali:: Tahkik ve Epistemik Zorunluluk (Epistemic Necessity)
-        # İnne ve kardeşleri (Huruf-u Müşebbehe bil-Fiil) sadece gramerik bir amel yapmaz, 
-        # Modal Mantık'ta önermeyi $\\square P$ (Bütün Kripke dünyalarında geçerli zorunluluk) 
-        # derecesine (Tahkik/Yakîn) kilitler.
-        has_epistemic_necessity = any(rel.startswith('Amel_Inne_') for _, _, rel, _ in dependencies)
+        has_epistemic_necessity = any(str(rel).startswith('Amel_Inne_') for _, _, rel, _ in dependencies)
         if has_epistemic_necessity:
             response["epistemic_modality"] = "Epistemic_Necessity"
             response["message"] = "İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil) tespit edildi: Tahkik (Epistemic Necessity) uygulanacak."

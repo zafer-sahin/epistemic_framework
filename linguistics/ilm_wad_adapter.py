@@ -38,19 +38,45 @@ class SemanticStatementIR(BaseModel):
 
 class StructuralPositingEngine:
     """
-    .. pedagojik_anlati:: Tematik Roller ve Arazların Atanması
+    .. pedagojik_anlati:: Tematik Roller ve Vaz' Nev'î (Kalıpsal Atama)
     Bir varlığın (Cevher) cümlede Fail (Agent) veya Meful (Patient) olması, onun ontolojik 
     kimliğini değiştirmez, sadece Kripke uzayındaki eylemsel pozisyonunu (Araz) belirler. 
-    Bu motor, bu geçici arazları (Thematic Roles) FOL uzayında yapısal kısıtlara çevirir.
+    Bu motor, kelimenin sadece kökünden (Vaz' Şahsî) değil, doğrudan girdiği vezinden (Vaz' Nev'î)
+    gelen yapısal anlamları FOL uzayında katı kısıtlara çevirir. 'Adudüddin el-İcî'nin
+    Risâletü'l-Vaz'iyye'sine göre, kalıbın (hey'et) kendisi ontolojik bir yüklemdir.
     """
+    def __init__(self):
+        # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] - Klasik Arapça Vezinlerinin Ontolojik Rol Karşılıkları
+        self.vaz_nevi_matrix = {
+            "Fa'il": "Role_Agent",                 # İsm-i Fail (Örn: Dârib)
+            "Maf'ul": "Role_Patient",              # İsm-i Meful (Örn: Madrûb)
+            "Fa'aal": "Role_IntensiveAgent",       # Mübalağa (Örn: Kazzâb)
+            "Mufa'il": "Role_Agent",               # İf'al / Tef'il Faili
+            "Mufa'al": "Role_Patient",             # İf'al / Tef'il Mefulu
+            "Taf'eel": "Role_Causative",           # Mutaaddî (Ettirgenlik)
+            "Infi'al": "Role_Reflexive",           # Mutava'at (Dönüşlülük)
+            "Ifti'al": "Role_Reflexive",
+            "Istif'al": "Role_Seeker"              # Talep (Örn: İstiğfar)
+        }
+
     def extract_structural_roles(self, word: str, ontologic_id: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, int]]:
         predicates = []
         morph_data = auto_lexicon.get(word)
-        if morph_data and morph_data.thematic_role:
-            # [FAZ 3: VAZ' NEV'Î KÖPRÜSÜ] - Morfolojik veznin felsefi izdüşümü
-            role_predicate = f"Role_{morph_data.thematic_role}"
-            # Yapısal atama: Bu Varlık (Entity), bu role bürünmüştür.
+        
+        if not morph_data:
+            return predicates
+            
+        # 1. Vaz' Nev'î: Morfolojik vezin (kalıp) üzerinden yapısal atama
+        vezin = getattr(morph_data, 'pattern', None)
+        if vezin and vezin in self.vaz_nevi_matrix:
+            role_predicate = self.vaz_nevi_matrix[vezin]
             predicates.append((role_predicate, ontologic_id, 1))
+            
+        # 2. Geri çekilme (Fallback): Eğer vezin bulunamaz ancak jenerik bir rol atanmışsa
+        elif getattr(morph_data, 'thematic_role', None):
+            role_predicate = f"Role_{morph_data.thematic_role}"
+            predicates.append((role_predicate, ontologic_id, 1))
+            
         return predicates
 
 class IlmWadAdapter:
@@ -240,7 +266,7 @@ class IlmWadAdapter:
             atomic_predicates.append((amil_id, amil_id, 1))
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
-            # [FAZ 3: VAZ' NEV'Î] Rolleri IR matrisine katı aksiyomlar (1-Ary predicates) olarak ekle
+            # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] Rolleri IR matrisine katı aksiyomlar (1-Ary predicates) olarak ekle
             amil_roles = self.positing_engine.extract_structural_roles(amil, amil_id, auto_lexicon)
             for role in amil_roles:
                 if role not in processed_roles:
@@ -299,7 +325,6 @@ class IlmWadAdapter:
 
         atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         
-        # [FAZ 2 ENTEGRASYONU]: AST üzerinden gelen Katı Şartiyet Tespitleri
         has_luzumi = any(rel == 'Rel_Shart_Luzumi' for _, _, rel, _ in dependencies) or any(t.lower() in self.luzumi_particles for t in tokens)
         has_inadi = any(rel == 'Rel_Munfasila_Inadi' for _, _, rel, _ in dependencies) or any(t.lower() in self.inadi_particles for t in tokens)
         has_mani_cem = any(t.lower() in self.mani_cem_particles for t in tokens)
@@ -308,7 +333,7 @@ class IlmWadAdapter:
         self._resolve_inne_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
         self._process_atomic_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
         
-        # [FAZ 3: VAZ' NEV'Î KÖPRÜSÜ] Yalıtılmış varlıklar için ekstra tematik rol taraması
+        # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] Yalıtılmış varlıklar için ekstra tematik rol taraması
         processed_roles = set(pred for pred in atomic_predicates if isinstance(pred, tuple) and str(pred[0]).startswith("Role_"))
         for word in tokens:
              ontologic_id = self._resolve_entity(word, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
@@ -321,7 +346,6 @@ class IlmWadAdapter:
         ir_predicates = self._apply_propositional_capsules(has_mani_cem, has_mani_huluv, has_inadi, has_luzumi, atomic_predicates)
         ir_predicates = self._wrap_with_pragmatic_modalities(ir_predicates, pragmatics_res)
 
-        # [FAZ 2 ENTEGRASYONU]: Kâtibî Yüzey Zarflarının (Modalities) Kripke Uzayına Sarılması
         shamsiyye_modality = next((rel.replace('Modal_', '') for _, _, rel, _ in dependencies if str(rel).startswith('Modal_')), None)
         if shamsiyye_modality:
             modal_mapping = {
@@ -361,7 +385,6 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        # Gramatikal ve Mantıksal Edatların (Particles) Ontolojik Tensörden Yalıtılması Kalkanı
         if morph_data and str(morph_data.ontologic_type).startswith("Harf_"):
             return f"GrammarNode_{search_key.capitalize()}"
             

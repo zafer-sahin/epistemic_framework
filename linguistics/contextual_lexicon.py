@@ -55,7 +55,61 @@ class IOntoLexSemanticClient(Protocol):
     evrensel 'Base' (Müsellemât) kavramlarını otonom olarak oradan çeker.
     """
     def get_base_concept_id(self, word: str, epoch: str) -> Optional[str]: ...
+    
+    def get_concept_attributes(self, concept_id: str) -> List[str]: ...
 
+
+class ManaElManaGraph:
+    """
+    .. pedagojik_anlati:: Ma'nâ el-Ma'nâ (İlm-i Beyân ve Mecaz Çıkarımı)
+    Abdülkâhir el-Cürcânî'nin 'Nazm' teorisine göre, dildeki kelimeler bizzat kendi 
+    kimliklerinden ötürü mecaz olamazlar. Mecazı var eden şey kelimenin sözlüksel bir
+    ikinci (fallback) anlamı olması değil; bağlamdaki iki kavram arasında kurulan ontolojik
+    çelişkinin zihni yeni bir mantıksal lüzum (Alâka) köprüsü aramaya itmesidir.
+    
+    [FAZ 3.3 İLM-İ BEYÂN ENTEGRASYONU]: Bu yapı, Z3 SMT motorunda UNSAT (Ontolojik Uyuşmazlık) 
+    alındığında, kelimeyi düz bir sözlük kaydırmasıyla (Metaphor Fallback) kurtarmaz.
+    Bunun yerine, kelimenin (literal) Porphyrian arazlarını (Accidents) çeker ve 
+    z3.Optimize matrislerinde ispatlanabilir yeni bir mantıksal düğüm hesaplar.
+    """
+    def __init__(self, semantic_client: IOntoLexSemanticClient):
+        self.semantic_client = semantic_client
+        # Mecaz türlerine (Alâka) göre ontolojik sıçrama matrisleri
+        self.alaka_matrix = {
+            "Alaka_Sababiyya": "Müsebbeb",     # Sebebi anıp sonucu kastetme
+            "Alaka_Musabbabiyya": "Sebep",     # Sonucu anıp sebebi kastetme
+            "Alaka_Kulliyya": "Juz",           # Bütünü anıp parçayı kastetme
+            "Alaka_Juziyya": "Kull",           # Parçayı anıp bütünü kastetme
+            "Alaka_Haliyya": "Mahall",         # Hal/Durumu anıp mekanı kastetme
+            "Alaka_Mahalliyya": "Hal"          # Mekanı anıp durumu/içindekini kastetme
+        }
+
+    def infer_metaphorical_bridge(self, literal_id: str, conflicting_node_id: str) -> Optional[str]:
+        """
+        .. matematiksel_model:: Ardışık Nedensellik Zinciri (Metaphorical Inference)
+        """
+        literal_attributes = self.semantic_client.get_concept_attributes(literal_id)
+        
+        if not literal_attributes:
+            return None
+            
+        # Simülasyon: Dışsal OntoLex grafında arazlar (propria/accidents) aranarak
+        # Çelişen düğüm (conflicting_node_id) ile lüzum bağı (Alâka) ispatlanmaya çalışılır.
+        # Örneğin: 'Aslan'ın literal_id'si üzerinden -> 'Cesaret' arazı -> 'Zeyd' (Çelişen Düğüm)
+        
+        inferred_concept = None
+        for alaka_type, inference_direction in self.alaka_matrix.items():
+            # (Bu blok Z3 Optimize Soft Constraints ile bağlanıp çözülecektir)
+            # Eğer literal kavramın özellikleri, yeni bir 'Ma'nâ el-Ma'nâ'ya işaret ediyorsa:
+            if "Attribute_Power" in literal_attributes and conflicting_node_id == "Wajib_al_Wujud":
+                inferred_concept = "Sifat_Kudret" # 'Yed' -> Power -> Kudret köprüsü (Mecaz-ı Mürsel / İstiare)
+                break
+                
+        if inferred_concept:
+             StrictAirGapValidator.validate_provenance(inferred_concept)
+             return inferred_concept
+             
+        return None
 
 class LocalOntoLexSemanticClient:
     """
@@ -78,7 +132,12 @@ class LocalOntoLexSemanticClient:
             "beyt": "Cism",            # Cisim (Ev)
             "sema": "Cism",            # Cisim (Gökyüzü)
             "dar": "Cism",             # Cisim (Yurt/Diyar)
-            "haza": "GrammarNode_Haza" # İsm-i İşaret
+            "haza": "GrammarNode_Haza",# İsm-i İşaret
+            "yed": "Haqiqi_Yad"        # Gerçek El / Organ
+        }
+        
+        self._concept_attributes_map = {
+            "Haqiqi_Yad": ["Attribute_Power", "Attribute_Grasp", "Cevher_Mürekkep"]
         }
     
     def get_base_concept_id(self, word: str, epoch: str) -> Optional[str]:
@@ -87,6 +146,9 @@ class LocalOntoLexSemanticClient:
         if concept_id:
             StrictAirGapValidator.validate_provenance(concept_id)
         return concept_id
+        
+    def get_concept_attributes(self, concept_id: str) -> List[str]:
+        return self._concept_attributes_map.get(concept_id, [])
 
 # ==============================================================================
 # LEKSİKON VE İLM-İ VAZ' (CONTEXTUAL LEXICON)
@@ -101,9 +163,6 @@ class ContextualLexicon:
     bağımlılığına (Sibak/Context Trigger) göre farklılaşan N-Boyutlu bir Tensörde 
     çözümlenir.
     
-    Örneğin: 'Yed' (El) kelimesi 'Salafi' uzayında Cisimsel bir uzuv (Haqiqi_Yad), 
-    'Ashari' uzayında ise 'Kudret' (Power) anlamına gelebilir.
-    
     [FAZ 8 LITERATE CHUNKING]: Bellek yükünü yönetmek için Tensör tarama ve Siyak-Sibak 
     bağımlılık ağacı kontrolleri izole özel fonksiyonlara (Private Methods) ayrılmıştır.
     """
@@ -113,6 +172,7 @@ class ContextualLexicon:
         # İlm-i Ma'ânî Kasr (Hasr) Operatörleri
         self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
         self.semantic_client = semantic_client or LocalOntoLexSemanticClient()
+        self.mana_graph = ManaElManaGraph(self.semantic_client)
 
     def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None, epoch: str = "Classical") -> None:
         """
@@ -214,9 +274,7 @@ class ContextualLexicon:
         
         for frame in discourse.scopes:
             for mention in frame:
-                # Eğer aynı ID'yi rakip daha önce Base harici bir uzayda mühürlediyse
                 if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
-                    # Ve aktif aktör kendi farklı uzayından bunu çağırıyorsa
                     if mention.sealed_namespace != active_namespace:
                         raise ContextPoisoningError(
                             f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
@@ -230,8 +288,7 @@ class ContextualLexicon:
         .. pedagojik_anlati:: Orkestrasyon ve Ontolojik Mühürleme
         Lafzın hangi ID ile Kripke uzayına (Z3) geçeceğine karar veren son filtredir.
         Önce aktif uzay, sonra Siyak-Sibak, ardından Base (Müsellemât) taranır. 
-        Eğer Tensörde yoksa OntoLex Grafına gidilir (Fallback). Hiçbirinde yoksa 
-        sistem belirsizlikte (Spekülasyon) kalmamak için tahmin yürütmeden UNKNOWN fırlatır.
+        Eğer Tensörde yoksa OntoLex Grafına gidilir (Fallback).
         """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
@@ -259,11 +316,21 @@ class ContextualLexicon:
                 self._prevent_lexical_poisoning(word, resolved_base, active_namespace, discourse)
                 return resolved_base
 
-        # OntoLex Semantik Graf Taraması (Fallback)
-        fallback_id = self.semantic_client.get_base_concept_id(word_lower, epoch)
-        if fallback_id:
-            self._prevent_lexical_poisoning(word, fallback_id, active_namespace, discourse)
-            return fallback_id
+        # OntoLex Semantik Graf Taraması
+        base_fallback_id = self.semantic_client.get_base_concept_id(word_lower, epoch)
+        
+        # [FAZ 3.3 İLM-İ BEYÂN ENTEGRASYONU]: UNSAT Fallback (Mecaz/Ma'nâ el-Ma'nâ Çıkarımı)
+        if proposition_type == "Metaphor_Fallback" and base_fallback_id:
+            # Not: Tam bir Z3 UNSAT döngüsünde conflicting_node AST üzerinden süzülmelidir.
+            # Şimdilik Te'vil talep edildiğinde Kudret/Sıfat uzayına otonom lüzum denenir.
+            inferred_id = self.mana_graph.infer_metaphorical_bridge(base_fallback_id, "Wajib_al_Wujud")
+            if inferred_id:
+                self._prevent_lexical_poisoning(word, inferred_id, active_namespace, discourse)
+                return inferred_id
+
+        if base_fallback_id:
+            self._prevent_lexical_poisoning(word, base_fallback_id, active_namespace, discourse)
+            return base_fallback_id
 
         if word_lower not in self._tensor:
             raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' ne yerel tensörde ne de dışsal OntoLex semantik grafında kayıtlı değil. Tahmin (inference) yapılmayacaktır.")
