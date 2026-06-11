@@ -30,12 +30,25 @@ class NahivDependencyCompiler:
         self.dependency_graph = nx.DiGraph()
         
         # .. mantik_kurali:: Şemsiyye Kiplikleri (Modalities)
-        # Kâtibî'nin Şemsiyye mantığında, önermelerin zaman (Zaman) ve durum (Hal) 
-        # kısıtlarına bağlanmasını sağlayan tetikleyiciler.
-        self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart"]
+        self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart", "Rel_Shart_Luzumi"]
         
         # Kadiyye-i Şartiyye (Hipotetik Önerme) için Fasıl (Ayrılma) ve Vasıl (Birleşme) operatörleri
         self.atif_particles = ["wa", "fa", "aw", "summe", "am", "bal", "la", "lakin"]
+        
+        # [FAZ 2 ENTEGRASYONU]: Şemsiyye Mantığı Kısıt Edatları (Lüzumî ve İnadî Operatörler)
+        self.shart_luzumi = ["in", "iza", "law", "amma"] # Katı Zorunluluk / Modus Ponens
+        self.munfasila_inadi = ["imma", "aw"] # Katı Ayrıklık / XOR (Hakikiyye/Cem'/Hulüvv)
+        
+        # [FAZ 2 ENTEGRASYONU]: Şemsiyye Yüzey Kiplikleri (Surface Modalities)
+        self.modal_adverbs = {
+            "daima": "Daime_i_Mutlaka",
+            "qat'an": "Zaruriyye_i_Mutlaka",
+            "zaruretan": "Zaruriyye_i_Mutlaka",
+            "rubbema": "Mumkine_i_Amme",
+            "qad": "Mumkine_i_Amme", 
+            "abadan": "Daime_i_Mutlaka",
+            "muhalan": "Mustahil"
+        }
         
         # .. felsefe_notu:: Uzaysal/Bağıntısal Kısıtlar (SpaceSort Operators)
         # Harf-i cerler basit bağlaçlar değil, varlığın (Entity) Kripke dünyasında 
@@ -128,7 +141,7 @@ class NahivDependencyCompiler:
             if idx > 0:
                 t_prev = tokens[idx-1]
                 if t1.lower() == "fa":
-                    shart_exists = any(t.lower() in ["in", "iza", "law", "amma"] for t in tokens[:idx])
+                    shart_exists = any(t.lower() in self.shart_luzumi for t in tokens[:idx])
                     if shart_exists:
                         dependencies.append((t_prev, t2, 'Rel_Fa_Sebebiyye', 'Luzumi_Muttasila'))
                     else:
@@ -145,15 +158,12 @@ class NahivDependencyCompiler:
             veya zımnî bir mevcudiyetin (Kainun_Virtual) üzerine bir uzaysal boyut (SpaceSort) 
             olarak bağlanmak (Müteallak) zorundadırlar: 
             $\exists e. \text{LocatedIn}(e, \text{Space}, \text{World})$.
-            Eğer bir eylem (Amil) açıksa bu 'Zarf-ı Lağv', açık değilse ve zihnen varlık takdir 
-            ediliyorsa bu 'Zarf-ı Mustakar'dır.
         """
         if t1.lower() in self.harf_i_cerler:
             sem_type = self.harf_i_cerler[t1.lower()]
             rel_name = 'Muteallak_Mekan' if sem_type in ["Zarfiyye", "Isti_la"] else 'Muteallak_Harf'
 
             m2 = lexicon.get(t2)
-            # Gayri Munsarif kelimeler harf-i cer sonrası fetha alsa da ontolojik olarak Mecrurdur.
             if m2 and getattr(m2, 'is_diptote', False):
                 dependencies.append((t1, t2, 'Mecrur_Diptote_Override', 'Majrur'))
             else:
@@ -212,9 +222,6 @@ class NahivDependencyCompiler:
         .. pedagojik_anlati:: Bedel ve Mantıksal Kimlik Çözümlemesi (Pointer Aliasing)
             Bedel, kendisinden önce geçen ismin (Mübdelun Minh) ontolojik kimliğine 
             doğrudan işaret eden (Pointer Aliasing) bir amil-mamul yapısıdır.
-            Z3 uzayında bu durum Entity değişkenlerinin (EntitySort) eşitlenmesi 
-            (z3.And(x == y)) anlamına gelir. Çift yönlü kısıt döngülerini (Cycle) 
-            önlemek için yön sabittir: Bedel -> Mübdelun Minh.
         """
         if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
             if self._is_definite(t1) and self._is_definite(t2) and t1[-2:] == t2[-2:]:
@@ -225,14 +232,34 @@ class NahivDependencyCompiler:
                         return True
         return False
 
-    def _apply_conditional_logic(self, t1: str, t2: str, dependencies: List[Tuple[str, str, str, str]]) -> bool:
+    def _apply_conditional_and_disjunctive_logic(self, t1: str, t2: str, dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
-        .. mantik_kurali:: Kadiyye-i Şartiyye (Hipotetik Önerme)
-            Şart edatları (İn, İza vb.), SMT'deki mantıksal gerektirmeyi (Implication: $P \implies Q$) 
-            AST yapısına mühürler.
+        .. mantik_kurali:: Kadiyye-i Şartiyye ve Munfasıla (Hipotetik ve Ayrık Önermeler)
+            [FAZ 2 ENTEGRASYONU]: İbn Sînâcı 'İn', 'Lev' (Katı Zorunluluk/Modus Ponens) ve 
+            'İmmâ', 'Ev' (Katı Ayrıklık/XOR) yapılarının Z3 AST köprüsünü kurar. Sıradan 
+            bir z3.Implies veya z3.Or değil, erişilebilir tüm dünyaları kapsayan Modal kısıtlara dönüştürülür.
         """
-        if t1.lower() in ["in", "iza", "law", "amma"]:
-            dependencies.append((t1, t2, "Rel_Shart", "Majzum"))
+        if t1.lower() in self.shart_luzumi:
+            dependencies.append((t1, t2, "Rel_Shart_Luzumi", "Majzum"))
+            return True
+            
+        if t1.lower() in self.munfasila_inadi:
+            # İnadî Hakikiyye (Strict XOR: Mâniatü'l-Cem' ve'l-Hulüvv)
+            dependencies.append((t1, t2, "Rel_Munfasila_Inadi", "Tabi"))
+            return True
+            
+        return False
+
+    def _apply_shamsiyye_modalities(self, t1: str, t2: str, dependencies: List[Tuple[str, str, str, str]]) -> bool:
+        """
+        .. felsefe_notu:: Kâtibî'nin 13 Kipli Yüzey Zarfları (Surface Modalities)
+            [FAZ 2 ENTEGRASYONU]: 'Dâimâ', 'Kat'an', 'Muhâlan' gibi zarflar, cümlenin 
+            yüklemini (Amil) Zâtî ve Vasfî zaman kiplerine sokan ontolojik mühürlerdir.
+            AST tarafında doğrudan Z3 Modal Operator düğümlerine çevrilir.
+        """
+        if t1.lower() in self.modal_adverbs:
+            modality = self.modal_adverbs[t1.lower()]
+            dependencies.append((t1, t2, f'Modal_{modality}', 'Mansub'))
             return True
         return False
 
@@ -240,8 +267,6 @@ class NahivDependencyCompiler:
         """
         .. pedagojik_anlati:: Yanal Bağlam (Adjacent Context) İşleyicisi
         Doğrusal bağlamda yan yana gelen lafızların ontolojik kilitlerini oluşturur. 
-        Çalışma belleğini (Working Memory) aşırı yüklememek adına, Kripke uzayı kısıtlamaları 
-        hiyerarşik olarak izole edilmiştir.
         """
         for i in range(len(tokens) - 1):
             t1 = tokens[i]
@@ -255,15 +280,14 @@ class NahivDependencyCompiler:
             if self._apply_spatial_mutaallak(t1, t2, tokens, i, lexicon, dependencies): continue
             if self._apply_nominal_adjuncts(t1, t2, m1, m2, dependencies): continue
             if self._apply_bedel_apposition(t1, t2, m1, m2, dependencies): continue
-            if self._apply_conditional_logic(t1, t2, dependencies): continue
+            if self._apply_conditional_and_disjunctive_logic(t1, t2, dependencies): continue
+            if self._apply_shamsiyye_modalities(t1, t2, dependencies): continue
 
     def _resolve_inne_scope(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], inne_token: Optional[str], inne_index: int, amil_token: Optional[str], amil_index: int) -> None:
         """
         .. pedagojik_anlati:: İnne'nin Ameli ve Epistemik Zorunluluk (Epistemic Necessity)
             İnne'nin ismini nasb, haberini ref' yapması basit bir sentaktik kural değildir.
             Kripke uzayında bu işlem, önermeyi 'Zorunlu Hakikat' (Necessity) statüsüne kilitler. 
-            İ'rabın (Nasb/Ref) yanlış tespiti SMT motorunda Fail ile Meful'ü birbirine karıştırıp, 
-            "Ex Falso Quodlibet" (Çelişkiden her şey çıkar) mantıksal patlamasına yol açar.
         """
         if not inne_token:
             return
@@ -292,8 +316,7 @@ class NahivDependencyCompiler:
         """
         .. pedagojik_anlati:: Kadiyye-i Hamliyye ve Rabıta (Zero-Copula) Düğümü
             Arapça isim cümlelerinde (Kadiyye-i Hamliyye) 'dır/dir' bildirme eki genellikle 
-            görünmez. Zihin bu boşluğu otomatik doldursa da, deterministik SMT çözücüsü için 
-            bu durum ölümcüldür. Bu algoritma, soyut AST'de görünmez bir "Rabıta Düğümü" 
+            görünmez. Bu algoritma, soyut AST'de görünmez bir "Rabıta Düğümü" 
             (Zero-Copula Node) üreterek; mübteda ile haber arasına mantıksal eşdeğerlik 
             (Identity: $x = y$) veya aidiyet (Predication: $x \in Y$) bağını matematiksel 
             olarak enjekte eder.
@@ -316,11 +339,20 @@ class NahivDependencyCompiler:
                     break
             
             if not haber:
-                haber = ism_tokens[-1]
+                # [Anti-Cyclic Kural]: Eğer geriye kalan adaylar birer Mudaf Ilayh veya tabi ise
+                # onları zorla Haber yapmak ontolojik döngüye (Semantic Shift & Cycle) sebep olur.
+                # Bunun yerine sanal varoluş düğümünü (Kainun_Virtual) yüklem tayin ediyoruz.
+                haber = 'Kainun_Virtual'
             
             if mubteda != haber:
+                # [DAG Güvenlik Duvarı]: Mübteda'dan Haber'e halihazırda çekilmiş bir 
+                # Sifat_Mevsuf gibi yanal bağ varsa, bunu kopararak Haber statüsüne terfi ettiriyoruz.
+                edges_to_remove = [d for d in dependencies if d[0] == mubteda and d[1] == haber]
+                for d in edges_to_remove:
+                    dependencies.remove(d)
+
                 is_mubteda_marife = self._is_definite(mubteda)
-                is_haber_marife = self._is_definite(haber)
+                is_haber_marife = self._is_definite(haber) if haber != 'Kainun_Virtual' else False
                 
                 dependencies.append(('Rabita_Virtual', mubteda, 'Rabita_Subject', 'Marfu'))
                 dependencies.append(('Rabita_Virtual', haber, 'Rabita_Predicate', 'Marfu'))
@@ -329,16 +361,21 @@ class NahivDependencyCompiler:
                     dependencies.append((haber, mubteda, 'Rabita_Identity', 'Marfu'))
                 else:
                     dependencies.append((haber, mubteda, 'Rabita_Predication', 'Marfu'))
-        
+                    
+        elif len(ism_tokens) == 1:
+            mubteda = ism_tokens[0]
+            haber = 'Kainun_Virtual'
+            dependencies.append(('Rabita_Virtual', mubteda, 'Rabita_Subject', 'Marfu'))
+            dependencies.append(('Rabita_Virtual', haber, 'Rabita_Predicate', 'Marfu'))
+            dependencies.append((haber, mubteda, 'Rabita_Predication', 'Marfu'))
+            
         return dependencies
 
     def _resolve_verbal_arguments(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_token: str, amil_index: int) -> None:
         """
         .. pedagojik_anlati:: Amil-Mamul Ataması ve Müstatir (Gizli) Zamirler
             Eğer cümlede eylemi yapan açık bir Fail yoksa, "Her eylemin bir faili vardır" 
-            şeklindeki felsefi aksiyom gereği sistem çökmemelidir. Bu metod, İlm-i Sarf'ın 
-            kökten çıkardığı gizli zamiri (Müstatir Zamir) alarak Z3 uzayına varoluşsal 
-            bir değişken ($\exists x$) olarak zerk eder ve nedensellik krizini önler.
+            şeklindeki felsefi aksiyom gereği sistem çökmemelidir. Müstatir Zamir zerk edilir.
         """
         has_explicit_fail = False
         for idx, token in enumerate(tokens):
@@ -406,9 +443,9 @@ class NahivDependencyCompiler:
         """
         .. felsefe_notu:: Yönlü Grafik (Directed Graph) ve Determinizm
         Listeler halinde çıkarılan tüm mantıksal bağları NetworkX üzerinden Yönlü Bir Grafiğe 
-        (DiGraph) döker. [FAZ 1.2-1.5 MİMARİSİ]: Kripke uzayında oluşacak sızıntıları önlemek 
-        için her düğüme 'ast_node_class', her kenara ise SMT karşılığını bildiren 'z3_mapping' 
-        etiketleri işlenir. Bu graf artık saf bir epistemolojik matristir.
+        (DiGraph) döker. [FAZ 2 MİMARİSİ]: Kâtibî modaliteleri (Zaruriyye/Daime) ve Lüzumî/İnadî 
+        şartlar, `z3_mapping` etiketiyle SMT'ye Z3 Expression Builder üzerinden katı operatör 
+        olarak iletilir.
         """
         self.dependency_graph.clear()
          
@@ -416,9 +453,11 @@ class NahivDependencyCompiler:
             node_attrs = {"virtual": False, "ast_node_class": "StandardEntity"}
             if lexicon and token in lexicon:
                 m = lexicon[token]
-                if m.ontologic_type == "Harf_Inne":
+                if m.ontologic_type == "Harf_Inne" or token.lower() in self.shart_luzumi or token.lower() in self.munfasila_inadi:
                     node_attrs["ast_node_class"] = "EpistemicOperatorNode"
-                    node_attrs["operator_type"] = "Necessity"
+                    node_attrs["operator_type"] = "Necessity_or_Condition"
+                elif token.lower() in self.modal_adverbs:
+                    node_attrs["ast_node_class"] = "ModalOperatorNode"
                 elif m.ontologic_type == "Fiil":
                     node_attrs["ast_node_class"] = "ActionNode"
             self.dependency_graph.add_node(token, **node_attrs)
@@ -434,7 +473,7 @@ class NahivDependencyCompiler:
                 else:
                     self.dependency_graph.add_node(amil, virtual=True, ast_node_class="StandardEntity")
                 
-            # Z3 Kripke Uzayı (SpaceSort/ModalLogic) Eşleştirmeleri
+            # Z3 Kripke Uzayı ve Şemsiyye Mantığı (ModalLogic) Eşleştirmeleri
             edge_attrs = {"relation": rel, "irab": irab, "z3_mapping": "Standard"}
             
             if rel in ['Muteallak_Mekan', 'Zarf_Mustakar', 'Zarf_Lagv']:
@@ -447,6 +486,13 @@ class NahivDependencyCompiler:
                 edge_attrs["z3_mapping"] = "ModalNecessity"
             elif rel in ['Rel_Fa_Fuzaiyye', 'Rel_Fa_Sebebiyye']:
                 edge_attrs["z3_mapping"] = "DynamicStateTransition"
+            # [FAZ 2]: Kâtibî Modalite Köprüleri
+            elif rel == 'Rel_Shart_Luzumi':
+                edge_attrs["z3_mapping"] = "StrictImplication_Luzumi"
+            elif rel == 'Rel_Munfasila_Inadi':
+                edge_attrs["z3_mapping"] = "StrictDisjunction_Inadi"
+            elif str(rel).startswith('Modal_'):
+                edge_attrs["z3_mapping"] = rel # Örn: Modal_Zaruriyye_i_Mutlaka
                 
             self.dependency_graph.add_edge(amil, mamul, **edge_attrs)
             
@@ -474,17 +520,21 @@ class NahivDependencyCompiler:
         Z3 motoruna tek tiple aktarılan ilişkiler, İnne (Zorunluluk), Bedel (Kimlik) 
         ve Fâ (Dinamik Geçiş) gibi birbiriyle çelişen ontolojik düzlemlerde Combinatorial 
         Explosion yaratır. Bu metod, bağımlılıkları SMT derlenme fazlarına (Phases) ayırır.
+        Faz 2 kapsamında "PHASE_X_MODAL_LOGIC" bariyeri eklenmiştir.
         """
         isolated_phases = {
             "PHASE_1_STATIC_ONTOLOGY": [],   # Sabit kimlikler (Entity, Fail, Meful)
             "PHASE_2_IDENTITY_ALIAS": [],    # İşaretçi eşitleme (Bedel, Rabita)
             "PHASE_3_NECESSITY_SCOPE": [],   # Epistemik zorunluluk (İnne, Tevkid)
             "PHASE_4_SPATIAL_TEMPORAL": [],  # Müteallak (Mekân) ve Şartlar
-            "PHASE_5_DYNAMIC_TRANSITION": [] # Fâ-i Füzâiyye ve Dinamik Geçişler
+            "PHASE_5_DYNAMIC_TRANSITION": [],# Fâ-i Füzâiyye ve Dinamik Geçişler
+            "PHASE_6_MODAL_LOGIC": []        # Şemsiyye (Lüzumî, İnadî, Zarûriyye vb.)
         }
         
         for u, v, data in ast.edges(data=True):
             rel = data.get('relation', '')
+            z3_map = data.get('z3_mapping', '')
+            
             if rel in ['Bedel_Identity', 'Rabita_Identity', 'Rabita_Predication']:
                 isolated_phases["PHASE_2_IDENTITY_ALIAS"].append((u, v, data))
             elif rel in ['Amel_Inne_Ism', 'Amel_Inne_Haber', 'Tevkid_Modifier', 'Kasr_Modifier']:
@@ -493,6 +543,8 @@ class NahivDependencyCompiler:
                 isolated_phases["PHASE_4_SPATIAL_TEMPORAL"].append((u, v, data))
             elif rel in ['Rel_Fa_Fuzaiyye', 'Rel_Fa_Sebebiyye']:
                 isolated_phases["PHASE_5_DYNAMIC_TRANSITION"].append((u, v, data))
+            elif "Strict" in z3_map or "Modal_" in z3_map:
+                isolated_phases["PHASE_6_MODAL_LOGIC"].append((u, v, data))
             else:
                 isolated_phases["PHASE_1_STATIC_ONTOLOGY"].append((u, v, data))
                 

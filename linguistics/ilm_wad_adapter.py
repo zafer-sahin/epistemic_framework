@@ -47,7 +47,9 @@ class StructuralPositingEngine:
         predicates = []
         morph_data = auto_lexicon.get(word)
         if morph_data and morph_data.thematic_role:
+            # [FAZ 3: VAZ' NEV'Î KÖPRÜSÜ] - Morfolojik veznin felsefi izdüşümü
             role_predicate = f"Role_{morph_data.thematic_role}"
+            # Yapısal atama: Bu Varlık (Entity), bu role bürünmüştür.
             predicates.append((role_predicate, ontologic_id, 1))
         return predicates
 
@@ -58,11 +60,8 @@ class IlmWadAdapter:
     matrisi deterministiktir. Bu sınıf, İlm-i Vaz' adaptörü olarak çalışır ve kelimelerin 
     sentaktik bağımlılıklarını katı felsefi denklemlere dönüştürür.
     
-    [FAZ 9 & 12 LITERATE CHUNKING]: Bilişsel yükü asgariye indirmek için devasa AST ayrıştırma 
-    işlemi; 'İnne İşlemleri', 'Rabıta/Dinamik Mantık', 'Uzaysal Müteallak' ve 'Pragmatik Kiplikler' 
-    olmak üzere izole edilmiş ve felsefesiyle belgelenmiş alt modüllere (Private Methods) bölünmüştür.
-    Z3 IR (SemanticStatementIR) matrislerine aktarım yapılırken Sâil ve Mucîb'in mühürleri 
-    donanımsal olarak korunmuştur.
+    [FAZ 2 ENTEGRASYONU]: Şemsiyye Kiplikleri (Lüzumî, İnadî, Zarûriyye) SMT motoruna 
+    katı Modal Operatörler olarak (NestedPredicate üzerinden) paketlenmiştir.
     """
     def __init__(self, lexicon: ContextualLexicon, discourse: DiscourseRegister):
         self.lexicon = lexicon
@@ -71,9 +70,6 @@ class IlmWadAdapter:
         self.positing_engine = StructuralPositingEngine() 
         
         # .. mantik_kurali:: Kadiyye-i Şartiyye'nin Kısıt Sınırları
-        # 'Lüzumî' edatlar, sebep-sonuç bağının zorunlu olduğunu ($P \implies Q$) gösterirken; 
-        # 'İnadî' edatlar varlıkların aynı anda doğru (Mâniatü'l-Cem) veya yanlış (Mâniatü'l-Hulüv) 
-        # olamayacağı mantıksal dışlama (XOR, NAND vb.) durumlarını kodlar.
         self.luzumi_particles = {"in", "iza", "law", "amma"}
         self.inadi_particles = {"imma", "aw", "ya", "am"} 
         self.mani_cem_particles = {"mani_cem", "la_yectemian"} 
@@ -87,7 +83,6 @@ class IlmWadAdapter:
         'Amel_Inne' ilişkileri sadece bir ismin nasb/ref yapılması değil, önermenin 
         (Kadiyye-i Hamliyye) Kripke dünyalarındaki varoluşsal statüsünün sarsılmaz bir 
         Tahkik (Zorunluluk: $\square (Ism \implies Haber)$) makamına yükseltilmesidir.
-        Bu metod, İnne edatının ayırdığı özne ve yüklemi bularak aralarına Rabıta (Predication) kilitlerini vurur.
         """
         inne_relations = {}
         for amil, mamul, rel_type, irab in dependencies:
@@ -112,9 +107,6 @@ class IlmWadAdapter:
         .. felsefe_notu:: Rabıta (Gizli Yüklem) ve Dinamik Geçişler (Dynamic Logic)
         İsim cümlelerindeki görünmez bağlayıcı (Rabıta), iki varlık arasında ya katı bir 
         eşdeğerlik ($x = y$) ya da özellik aidiyeti ($x \in Y$) kurar. 
-        'Fâ-i Füzâiyye' ve 'Harf-i Atıf' ise, önermenin doğruluğunu zamansal ve nedensel 
-        olarak ardışık Kripke durumlarına ($W_t \implies W_{t+1}$) bölerek Dinamik Mantık 
-        operatörlerini tetikler.
         """
         if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
             return True
@@ -164,9 +156,7 @@ class IlmWadAdapter:
         """
         .. mantik_kurali:: Mekânın Kısıtlayıcılığı (SpaceSort Mutaallak)
         Bir varlığın veya eylemin "fi" (içinde) veya "ala" (üzerinde) gibi harf-i cerlerle 
-        konumlandırılması, onun ontolojik olarak sınırlandırılmasıdır. Bu metod, mekânsal 
-        veya bağıntısal kısıtları FOL uzayına $\exists x. \text{LocatedIn}(x, l, w, t)$ 
-        formatında enjekte eder.
+        konumlandırılması, onun ontolojik olarak sınırlandırılmasıdır.
         """
         if rel_type in ['Muteallak_Mekan', 'Muteallak_Harf']:
             harf_node = mamul
@@ -194,10 +184,6 @@ class IlmWadAdapter:
     def _wrap_with_pragmatic_modalities(self, ir_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], pragmatics_res: Dict[str, Any]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
         """
         .. pedagojik_anlati:: Modal Kapsüller ve İlm-i Ma'ânî İzdüşümü
-        Atomik seviyede çözümlenen FOL matrisleri, en son aşamada İlm-i Ma'ânî'den gelen 
-        üst-düzey felsefi kipliklere (Modalities) sarılır. 
-        Emirler/Nehiyler Deontik Kısıtlara ($O(P)$), İstifham-ı İnkâriler Varoluşsal Redde, 
-        Kasr Edatları ise Yönlü Evrensel Dışlamaya ($\forall x$) dönüştürülür.
         """
         if pragmatics_res.get("type") == "Deontic":
             op = "Wajib_Fiqh" if pragmatics_res.get("operator") == "Emir" else "Haram_Fiqh"
@@ -220,9 +206,6 @@ class IlmWadAdapter:
     def _process_atomic_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
         """
         .. matematiksel_model:: FOL Atomizasyonu
-        Yukarıdaki özel felsefi düğümlere takılmayan temel bağımlılıklar (Örn: Fail, Meful, Sıfat), 
-        Kripke uzayında değerlendirilmek üzere ikili ilişki fonksiyonları (Binary Relations: $R(x,y)$) 
-        ve birli varlık fonksiyonları (Unary Functions: $E(x)$) halinde düzleştirilir.
         """
         processed_roles = set()
         for amil, mamul, rel_type, irab in dependencies:
@@ -233,6 +216,10 @@ class IlmWadAdapter:
                 continue
 
             if rel_type == 'Harf_Mecrur':
+                continue
+
+            # [FAZ 2 ENTEGRASYONU]: İnadî ve Lüzumî şartların FOL cürufu üretmesini önleyen filtre
+            if rel_type in ['Rel_Shart_Luzumi', 'Rel_Munfasila_Inadi'] or str(rel_type).startswith('Modal_'):
                 continue
 
             if amil.lower() in self.luzumi_particles or mamul.lower() in self.luzumi_particles:
@@ -253,6 +240,7 @@ class IlmWadAdapter:
             atomic_predicates.append((amil_id, amil_id, 1))
             atomic_predicates.append((mamul_id, mamul_id, 1))
 
+            # [FAZ 3: VAZ' NEV'Î] Rolleri IR matrisine katı aksiyomlar (1-Ary predicates) olarak ekle
             amil_roles = self.positing_engine.extract_structural_roles(amil, amil_id, auto_lexicon)
             for role in amil_roles:
                 if role not in processed_roles:
@@ -269,7 +257,7 @@ class IlmWadAdapter:
         """
         .. mantik_kurali:: Kadiyye-i Şartiyye Sarmalaması
         Önerme parçacıkları toplandıktan sonra, cümlenin bütününde lüzumiyet veya inadiyet 
-        tespit edilmişse, tüm atomik matrisler ilgili mantıksal fonksiyonun (örneğin Mâniatü'l-Cem) 
+        tespit edilmişse, tüm atomik matrisler ilgili mantıksal fonksiyonun 
         argümanları olarak sarmalanır.
         """
         ir_predicates = []
@@ -289,8 +277,7 @@ class IlmWadAdapter:
         """
         .. pedagojik_anlati:: Orkestrasyon ve SMT'ye Teslimiyet
         Dilin tüm yüzey arazlarından (Sarf/Nahiv/Ma'ânî) arındırılarak saf matematiksel/felsefi 
-        (IR) haline getirildiği ana döngüdür. İşlem başarılı olursa Z3 çözücüsüne hazır, 
-        Provenance (Köken) mühürlü ve Aktör-yalıtımlı bir SemanticStatementIR matrisi döner.
+        (IR) haline getirildiği ana döngüdür.
         """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
@@ -312,16 +299,37 @@ class IlmWadAdapter:
 
         atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]] = []
         
-        has_luzumi = any(t.lower() in self.luzumi_particles for t in tokens)
-        has_inadi = any(t.lower() in self.inadi_particles for t in tokens)
+        # [FAZ 2 ENTEGRASYONU]: AST üzerinden gelen Katı Şartiyet Tespitleri
+        has_luzumi = any(rel == 'Rel_Shart_Luzumi' for _, _, rel, _ in dependencies) or any(t.lower() in self.luzumi_particles for t in tokens)
+        has_inadi = any(rel == 'Rel_Munfasila_Inadi' for _, _, rel, _ in dependencies) or any(t.lower() in self.inadi_particles for t in tokens)
         has_mani_cem = any(t.lower() in self.mani_cem_particles for t in tokens)
         has_mani_huluv = any(t.lower() in self.mani_huluv_particles for t in tokens)
         
         self._resolve_inne_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
         self._process_atomic_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
         
+        # [FAZ 3: VAZ' NEV'Î KÖPRÜSÜ] Yalıtılmış varlıklar için ekstra tematik rol taraması
+        processed_roles = set(pred for pred in atomic_predicates if isinstance(pred, tuple) and str(pred[0]).startswith("Role_"))
+        for word in tokens:
+             ontologic_id = self._resolve_entity(word, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+             roles = self.positing_engine.extract_structural_roles(word, ontologic_id, auto_lexicon)
+             for role in roles:
+                 if role not in processed_roles:
+                     atomic_predicates.append(role)
+                     processed_roles.add(role)
+
         ir_predicates = self._apply_propositional_capsules(has_mani_cem, has_mani_huluv, has_inadi, has_luzumi, atomic_predicates)
         ir_predicates = self._wrap_with_pragmatic_modalities(ir_predicates, pragmatics_res)
+
+        # [FAZ 2 ENTEGRASYONU]: Kâtibî Yüzey Zarflarının (Modalities) Kripke Uzayına Sarılması
+        shamsiyye_modality = next((rel.replace('Modal_', '') for _, _, rel, _ in dependencies if str(rel).startswith('Modal_')), None)
+        if shamsiyye_modality:
+            modal_mapping = {
+                "Zaruriyye_i_Mutlaka": "Zaruriyye",
+                "Daime_i_Mutlaka": "Daime"
+            }
+            op = modal_mapping.get(shamsiyye_modality, shamsiyye_modality)
+            ir_predicates = [NestedPredicate(operator=op, args=ir_predicates)]
 
         unique_predicates = []
         seen = set()
@@ -342,10 +350,6 @@ class IlmWadAdapter:
     def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str) -> str:
         """
         .. felsefe_notu:: Tahrîr-i Niza' (Yalıtım Sınırı) ve Ontolojik Atama
-        [FAZ 12] Mu'aradah (Çapraz İtiraz) esnasında, bir lafzın (word) hakiki kimliğini (Ontologic ID) bulur.
-        Eğer Sâil, Mucîb'in daha önce tanımladığı bir varlığa (zamir veya isim yoluyla) ulaşmaya çalışırsa, 
-        'DiscourseRegister' üzerinden 'Hayalet' (Phantom) kalkanına çarpar. 
-        Eğer eşleşme meşru ise ID Z3 matrisine mühürlenir. Mecaz ve Tevil kuralları (Fallback) bu aşamada işletilir.
         """
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
@@ -357,18 +361,16 @@ class IlmWadAdapter:
         if morph_data:
             search_key = morph_data.root
 
-        if morph_data and morph_data.ontologic_type == "Harf_Tevkid":
+        # Gramatikal ve Mantıksal Edatların (Particles) Ontolojik Tensörden Yalıtılması Kalkanı
+        if morph_data and str(morph_data.ontologic_type).startswith("Harf_"):
             return f"GrammarNode_{search_key.capitalize()}"
-
-        if morph_data and morph_data.ontologic_type == "Harf_Kasr":
-            return f"GrammarNode_{search_key.capitalize()}"
-
-        if morph_data and morph_data.ontologic_type == "Harf_Inne":
+            
+        known_particles = {"hal", "mata", "kayfa", "la", "ma", "wa", "fa", "aw", "am", "summe", "bal", "lakin", "in", "iza", "law", "amma", "imma", "inna", "anna"}
+        if search_key.lower() in known_particles:
             return f"GrammarNode_{search_key.capitalize()}"
 
         base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch)
         
-        # Tevil İhtiyacı: Kelime, Zahir (Hakiki) manasında çıkmaza giriyorsa Mecaz evrenine geçiş yapılır.
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
                 ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch)
@@ -380,7 +382,6 @@ class IlmWadAdapter:
         StrictAirGapValidator.validate_provenance(ontologic_id)
 
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
-            # Varlık Söylem Belleğine (Hâfıza) cinsiyet ve sayı kısıtlarıyla (HPSG) birlikte kaydedilir.
             gender = getattr(morph_data, 'gender', None) if morph_data else None
             number = getattr(morph_data, 'number', None) if morph_data else None
             self.discourse.add_mention(word, ontologic_id, active_namespace, gender=gender, number=number)
