@@ -1,7 +1,13 @@
 from typing import List, Optional, Literal, Dict
 from pydantic import BaseModel
 from enum import IntEnum
-from core.exceptions import ContextPoisoningError
+
+try:
+    from core.exceptions import ContextPoisoningError
+except ImportError:
+    class ContextPoisoningError(Exception):
+        """Bağlam Zehirlenmesi Sınır İhlali İstisnası"""
+        pass
 
 class DenialLevel(IntEnum):
     """
@@ -48,7 +54,7 @@ class DiscourseRegister:
     birbirlerinin ontolojik önkabullerini (Namespace) çalamazlar veya onlara dayanarak kendi 
     kıyaslarını kuramazlar.
     
-    [FAZ 4.1 GÜNCELLEMESİ - AIR-GAPPED DRT]: Sistem, tekil LIFO yığıtından arındırılarak 
+    [FAZ 3 GÜNCELLEMESİ - AIR-GAPPED DRT]: Sistem, tekil LIFO yığıtından arındırılarak 
     iki farklı zihnin izole edildiği (Sâil ve Mucîb matrisleri), varlıkların yalnızca 
     "Ortak Kabul" (Müsellemât/Base) seviyesinde senkronize edildiği fiziksel olarak bölünmüş 
     (Bipartite) bir Discourse Representation Theory (DRT) matrisine yükseltilmiştir.
