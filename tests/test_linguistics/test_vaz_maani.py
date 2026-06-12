@@ -7,13 +7,13 @@ from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR, Nest
 from linguistics.pragmatics import MaaniSpeechActAnalyzer, MuktazaHalAnalyzer
 from core.exceptions import DiachronicViolationError, ContextPoisoningError
 
-class TestEpic3VazAndMaani(unittest.TestCase):
+class TestFaz5VazAndMaani(unittest.TestCase):
     """
-    .. pedagojik_anlati:: Epik 3 Çapraz Katman Denetimleri
+    .. pedagojik_anlati:: Faz 5 Çapraz Katman Denetimleri ve Söylem İzolasyonu
     Bu test suiti, İlm-i Vaz' (Leksikal Atama) ve İlm-i Ma'ânî (Pragmatik) disiplinlerinin 
     matematiksel sınırlarını zorlar. Z3 SMT matrislerinin seküler ontolojilere 
-    (Air-Gap Violation), kombinatoryal patlamalara veya teolojik çelişkilere 
-    girip girmediğini otonom olarak doğrular.
+    (Air-Gap Violation), kombinatoryal patlamalara, teolojik çelişkilere veya Bipartite DRT
+    üzerinden Leksikal Zehirlenmeye (Context Poisoning) girip girmediğini otonom olarak doğrular.
     """
 
     def setUp(self):
@@ -22,21 +22,24 @@ class TestEpic3VazAndMaani(unittest.TestCase):
         self.discourse.active_agent = "Sail"
         self.discourse.get_opponent_epistemic_state.return_value = DenialLevel.MUNKIR
         self.discourse.resolve_pronoun.return_value = None
+        
+        # Bipartite DRT Çift Yığıtlı Bellek (Scopes) Mimarisi
+        self.discourse.scopes = {
+            "Sail": [[]],
+            "Mujib": [[]]
+        }
 
         self.semantic_client = LocalOntoLexSemanticClient()
         self.lexicon = ContextualLexicon(semantic_client=self.semantic_client)
         self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
-    def test_faz3_1_vaz_nevi_structural_roles(self):
+    def test_faz5_1_vaz_nevi_structural_roles(self):
         """
         .. mantik_kurali:: Vaz' Nev'î (Kalıpsal Atama) Doğrulaması
         'Dârib' gibi İsm-i Fail (Fa'il) veznindeki bir kelimenin, sadece kökünden değil 
         girdiği morfolojik kalıptan ötürü Z3 matrisine otonom 'Role_Agent' yüklemi fırlatıp 
         fırlatmadığını denetler.
         """
-        # [DÜZELTME]: Tevkîd (pekiştirme) olmayan yalın bir önermenin (Mubteda_Haber) 
-        # Muktazâ el-Hâl filtresinden geçebilmesi için muhatabın zihninin boş olması gerekir.
-        # Aksi halde sistem MUNKIR tespiti yapıp AST'yi Z3'e girmeden imha eder.
         self.discourse.get_opponent_epistemic_state.return_value = DenialLevel.KHALI_AL_ZIHN
         
         # Sarf motoru çıktısını simüle et
@@ -65,7 +68,7 @@ class TestEpic3VazAndMaani(unittest.TestCase):
         )
         self.assertTrue(has_agent_role, "Vaz' Nev'î: İsm-i Fail kalıbı Role_Agent üretemedi.")
 
-    def test_faz3_2_istifham_i_inkari_logical_negation(self):
+    def test_faz5_2_istifham_i_inkari_logical_negation(self):
         """
         .. mantik_kurali:: İstifham-ı İnkârî Kapsülü
         Soru edatı ve nefy (olumsuzluk) edatının yan yana gelmesinin sıradan bir soru değil, 
@@ -81,7 +84,7 @@ class TestEpic3VazAndMaani(unittest.TestCase):
         self.assertEqual(res["type"], "Istifham_i_Inkari")
         self.assertEqual(res.get("z3_operator_hint"), "Universal_Negation")
 
-    def test_faz3_2_muktaza_el_hal_balance(self):
+    def test_faz5_3_muktaza_el_hal_balance(self):
         """
         .. matematiksel_model:: Muktazâ el-Hâl Denge Denetimi
         Muhatabın şüphe düzeyi ile cümlenin tevkîd (pekiştirme) düzeyi uyuşmazsa, 
@@ -105,27 +108,72 @@ class TestEpic3VazAndMaani(unittest.TestCase):
         self.assertFalse(res2.get("is_valid", True))
         self.assertEqual(res2.get("type"), "MAANI_VIOLATION")
 
-    def test_faz3_3_mana_el_mana_metaphorical_bridge(self):
+    def test_faz5_4_mana_el_mana_metaphorical_bridge_tevil(self):
         """
         .. felsefe_notu:: Abdülkâhir el-Cürcânî Nazm Kuramı (Ma'nâ el-Ma'nâ)
         Literal anlam SMT motorunda UNSAT (Ontolojik Uyuşmazlık) ürettiğinde (Örn: Allah ve Yed),
         sistemin kara-kutu fallback yapmak yerine, arazlar (Attribute_Power) üzerinden 
         ispatlanabilir yeni bir ontolojik düğüm ('Sifat_Kudret') türettiğini test eder.
         """
-        # 'Yed' kelimesinin Base karşılığı 'Haqiqi_Yad' (Gerçek organ).
-        # Allah'a izafe edildiği an UNSAT varsayılarak Metaphor_Fallback talebi açılır.
-        
         inferred_id = self.lexicon.resolve_id(
             word="yed", 
             active_namespace="Base", 
             proposition_type="Metaphor_Fallback", 
             discourse=self.discourse, 
             dependencies=[], 
-            epoch="Classical"
+            epoch="Classical",
+            allow_tevil=True,
+            conflicting_node="Wajib_al_Wujud"
         )
         
         # Beklenti: 'Haqiqi_Yad' üzerinden 'Attribute_Power' arazı kullanılarak 'Sifat_Kudret'e sıçranmalı.
         self.assertEqual(inferred_id, "Sifat_Kudret", "Ma'nâ el-Ma'nâ köprüsü lüzum bağını (Alâka) kuramadı.")
+
+    def test_faz5_5_bila_kayf_node_relocation(self):
+        """
+        .. felsefe_notu:: İbn Teymiyye Semantiği (Node Relocation)
+        Te'vil kapalı olduğunda (allow_tevil=False), mecaz köprüsü (Alâka) aranmaksızın 
+        literal kelimenin otonom olarak 'Bila_Kayf' (Mahiyeti Meçhul) düğümüne taşındığını test eder.
+        """
+        inferred_id = self.lexicon.resolve_id(
+            word="yed", 
+            active_namespace="Base", 
+            proposition_type="Metaphor_Fallback", 
+            discourse=self.discourse, 
+            dependencies=[], 
+            epoch="Classical",
+            allow_tevil=False,
+            conflicting_node="Wajib_al_Wujud"
+        )
+        
+        self.assertEqual(inferred_id, "Bila_Kayf_Haqiqi_Yad", "İbn Teymiyye Node Relocation mekanizması başarısız oldu.")
+
+    def test_faz5_6_bipartite_drt_lexical_poisoning(self):
+        """
+        .. mantik_kurali:: Bipartite DRT Leksikal Zehirlenme Denetimi
+        Mu'aradah esnasında Sâil'in, Mucîb'in kendi usûlüne (Namespace) göre mühürlediği 
+        bir ontolojik düğümü okuyarak eşdeğerlik kurmaya çalışması durumunda 
+        ContextPoisoningError fırlatılmasını donanımsal olarak test eder.
+        """
+        # Mucîb'in DRT yığıtında mühürlenmiş bir referans (Mention) simülasyonu
+        mock_mention = MagicMock()
+        mock_mention.ontologic_id = "Onto_Zeyd_Ashari"
+        mock_mention.agent = "Mujib"
+        mock_mention.sealed_namespace = "Ashari"
+        
+        self.discourse.scopes["Mujib"][0].append(mock_mention)
+        self.discourse.active_agent = "Sail"
+        
+        # Leksikona Sâil'in 'Zeyd' kelimesini rakibin mühürlediği ID ile bağlamaya çalıştığını simüle et
+        self.lexicon.register_word("zeyd", "Salafi", "Onto_Zeyd_Ashari")
+        
+        with self.assertRaises(ContextPoisoningError, msg="Bipartite DRT İzolasyonu İhlal Edildi: Sâil rakibin mühürlü ontolojisine erişebildi."):
+            self.lexicon.resolve_id(
+                word="zeyd",
+                active_namespace="Salafi",
+                discourse=self.discourse,
+                epoch="Classical"
+            )
 
     def test_strict_air_gap_validator(self):
         """

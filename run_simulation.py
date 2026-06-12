@@ -67,6 +67,9 @@ def execute_healthcheck():
     
     # Sistematik Ontoloji Kayıtları (Air-Gap Uyumlu)
     lexicon.register_word("tekvin", "Maturidi", "Tekvin")
+    lexicon.register_word("ilah", "Base", "Wajib_al_Wujud")
+    lexicon.register_word("alim", "Base", "Sifat_Ilim")
+    lexicon.register_word("ilm", "Base", "Sifat_Ilim")
     
     # [FAZ 1] Sızıntı Testi için Seküler Kelime Kaydı Denemesi
     print("[LOG] Diachronic Koruma Testi: 'Modern' epoch kaydı deneniyor...")
@@ -133,7 +136,7 @@ def execute_healthcheck():
     discourse.clear_memory()
     ir_mujib = SemanticStatementIR(
         active_namespace="Ashari", 
-        active_agent="Mujib",  # [FAZ 12 YAMASI] Aktör mührü eklendi
+        active_agent="Mujib", 
         predicates=[("Cemad", "Cemad", 1), ("Insan", "Insan", 1), ("Rel_Mubteda_Haber", "Cemad::Insan", 2)], 
         is_valid_for_z3=True
     )
@@ -173,6 +176,49 @@ def execute_healthcheck():
     res_maani_1 = orchestrator.process_statement(tokens_6a, ast_6a, AshariUsul(), morph_6a)
     print(f"Girdi (Tevkîd): '{sentence_6a}' | Sâil Zihni: KHALI_AL_ZIHN")
     print(f"Sonuç: [{res_maani_1.get('status', 'BİLİNMİYOR')}] -> {res_maani_1.get('message')}\n")
+
+    print("--- SENARYO 7.1: İLM-İ MA'ÂNÎ (İSTİFHAM-I İNKÂRÎ VE EVRENSEL RET) ---")
+    # "Allah'tan başka ilah mı var?" -> Soru değil, kesin bir reddiyedir.
+    sentence_7a = "hal min ilahin illa allahu"
+    tokens_7a = tokenizer.tokenize(sentence_7a)
+    morph_7a = sarf.derive_lexicon(tokens_7a)
+    ast_7a = nahiv.suggest_dependencies(tokens_7a, morph_7a)
+    
+    discourse.clear_memory()
+    res_maani_2 = orchestrator.process_statement(tokens_7a, ast_7a, AshariUsul(), morph_7a)
+    print(f"Girdi: '{sentence_7a}'")
+    # Z3'e gidecek Modalite 'Universal_Negation' olarak kapsüllenmiş olmalıdır.
+    print(f"Sonuç: [{res_maani_2.get('status', 'BİLİNMİYOR')}] -> {res_maani_2.get('message')}\n")
+
+    print("--- SENARYO 7.2: FAZ 1 - MÜSTATİR ZAMİR (HIDDEN PRONOUN) ÜRETİMİ ---")
+    # Faili açıkça belirtilmeyen bir fiil, Z3'te "Çelişkiden her şey çıkar" boşluğuna düşmemelidir.
+    sentence_7b = "daraba" 
+    tokens_7b = tokenizer.tokenize(sentence_7b)
+    morph_7b = sarf.derive_lexicon(tokens_7b)
+    ast_7b = nahiv.suggest_dependencies(tokens_7b, morph_7b)
+    
+    discourse.clear_memory()
+    res_hidden_pronoun = orchestrator.process_statement(tokens_7b, ast_7b, AshariUsul(), morph_7b)
+    print(f"Girdi: '{sentence_7b}'")
+    # Sarf motoru fiil çekiminden 'huve' veya benzeri bir faili otonom AST'ye basmalıdır.
+    has_virtual_agent = any(rel == 'Fail' for _, _, rel, _ in ast_7b)
+    print(f"Otonom Fail (Müstatir Zamir) Yaratıldı mı?: {has_virtual_agent}")
+    print(f"Sonuç: [{res_hidden_pronoun.get('status', 'BİLİNMİYOR')}] -> {res_hidden_pronoun.get('message')}\n")
+
+    print("--- SENARYO 7.3: FAZ 2 - ZERO-COPULA (SANAL RABITA / KAINUN_VIRTUAL) İNŞASI ---")
+    # Kadiyye-i Hamliyye'de (isim cümlesinde) bağ-fiil boşluğunun matematiksel inşası
+    sentence_7c = "zeydun alimun"
+    tokens_7c = tokenizer.tokenize(sentence_7c)
+    morph_7c = sarf.derive_lexicon(tokens_7c)
+    ast_7c = nahiv.suggest_dependencies(tokens_7c, morph_7c)
+    
+    discourse.clear_memory()
+    res_zero_copula = orchestrator.process_statement(tokens_7c, ast_7c, AshariUsul(), morph_7c)
+    print(f"Girdi: '{sentence_7c}'")
+    # Sistem 'Kainun_Virtual' düğümünü otonom olarak AST'ye enjekte etmelidir.
+    has_kainun_virtual = any(amil == 'Kainun_Virtual' or mamul == 'Kainun_Virtual' for amil, mamul, _, _ in ast_7c)
+    print(f"Görünmez Rabıta (Kainun_Virtual) Tespiti: {has_kainun_virtual}")
+    print(f"Sonuç: [{res_zero_copula.get('status', 'BİLİNMİYOR')}] -> {res_zero_copula.get('message')}\n")
 
     print("--- SENARYO 8: ÂDÂB-I BAHS (FAZ 4/5 - TAHRÎR-İ NİZA', MÜLÂZAMA VE REKÜRSİF MEN') ---")
     clean_solver = AristotelianSolver(ontology)

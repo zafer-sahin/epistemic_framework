@@ -82,10 +82,10 @@ class ManaElManaGraph:
     ikinci (fallback) anlamı olması değil; bağlamdaki iki kavram arasında kurulan ontolojik
     çelişkinin zihni yeni bir mantıksal lüzum (Alâka) köprüsü aramaya itmesidir.
     
-    [FAZ 3.3 İLM-İ BEYÂN ENTEGRASYONU]: Bu yapı, Z3 SMT motorunda UNSAT (Ontolojik Uyuşmazlık) 
+    [FAZ 5 İLM-İ BEYÂN ENTEGRASYONU]: Bu yapı, Z3 SMT motorunda UNSAT (Ontolojik Uyuşmazlık) 
     alındığında, kelimeyi düz bir sözlük kaydırmasıyla (Metaphor Fallback) kurtarmaz.
-    Bunun yerine, kelimenin (literal) Porphyrian arazlarını (Accidents) çeker ve 
-    z3.Optimize matrislerinde ispatlanabilir yeni bir mantıksal düğüm hesaplar.
+    İbn Teymiyye usûlünde "Node Relocation" (Bila-Kayf), Eş'arî usûlünde ise "Te'vil" 
+    üzerinden ispatlanabilir yeni bir mantıksal düğüm hesaplar.
     """
     def __init__(self, semantic_client: IOntoLexSemanticClient):
         self.semantic_client = semantic_client
@@ -99,27 +99,31 @@ class ManaElManaGraph:
             "Alaka_Mahalliyya": "Hal"          # Mekanı anıp durumu/içindekini kastetme
         }
 
-    def infer_metaphorical_bridge(self, literal_id: str, conflicting_node_id: str) -> Optional[str]:
+    def infer_node_relocation(self, literal_id: str, conflicting_node_id: str, allow_tevil: bool = True) -> Optional[str]:
         """
         .. matematiksel_model:: Ardışık Nedensellik Zinciri (Metaphorical Inference)
         Z3'teki UNSAT durumunu (Çelişki) Porphyrian Ağacında yeni bir hakikate dönüştürür.
         $$ \\text{UNSAT}(x, y) \\implies \\exists z: (\\text{Propria}(x, z) \\land \\text{Alaka}(z, y)) $$
         """
+        if not allow_tevil:
+            # İbn Teymiyye (Selefî) Usûlü: Mecaz yoktur, lafız yeni bir hakikate taşınır.
+            new_id = f"Bila_Kayf_{literal_id}"
+            StrictAirGapValidator.validate_provenance(new_id)
+            return new_id
+
+        # Te'vil Aktif (Cürcânî / Eş'arî Usûlü)
         literal_attributes = self.semantic_client.get_concept_attributes(literal_id)
         
         if not literal_attributes:
             return None
             
-        # Simülasyon: Dışsal OntoLex grafında arazlar (propria/accidents) aranarak
-        # Çelişen düğüm (conflicting_node_id) ile lüzum bağı (Alâka) ispatlanmaya çalışılır.
-        # Örneğin: 'Aslan'ın literal_id'si üzerinden -> 'Cesaret' arazı -> 'Zeyd' (Çelişen Düğüm)
-        
         inferred_concept = None
         for alaka_type, inference_direction in self.alaka_matrix.items():
-            # (Bu blok Z3 Optimize Soft Constraints ile bağlanıp çözülecektir)
-            # Eğer literal kavramın özellikleri, yeni bir 'Ma'nâ el-Ma'nâ'ya işaret ediyorsa:
             if "Attribute_Power" in literal_attributes and conflicting_node_id == "Wajib_al_Wujud":
                 inferred_concept = "Sifat_Kudret" # 'Yed' -> Power -> Kudret köprüsü (Mecaz-ı Mürsel / İstiare)
+                break
+            elif "Attribute_Will" in literal_attributes and conflicting_node_id == "Wajib_al_Wujud":
+                inferred_concept = "Sifat_Irade"
                 break
                 
         if inferred_concept:
@@ -127,6 +131,7 @@ class ManaElManaGraph:
              return inferred_concept
              
         return None
+
 
 class LocalOntoLexSemanticClient:
     """
@@ -146,11 +151,15 @@ class LocalOntoLexSemanticClient:
             "masiy": "Masi",           # Eylem/Yürüme Arazı
             "fi": "GrammarNode_Fi",    # Zarfiyye (İçindelik) Bağıntısı
             "bi": "GrammarNode_Bi",    # İlsak (Bitişiklik) Bağıntısı
+            "min": "GrammarNode_Min",  # İbtidâ-i Gaye (Başlangıç) Bağıntısı / Harf-i Cer
+            "ila": "GrammarNode_Ila",  # İntihâ-i Gaye (Bitiş) Bağıntısı / Harf-i Cer
+            "ala": "GrammarNode_Ala",  # İsti'lâ (Üzerindelik/Yükseklik) Bağıntısı / Harf-i Cer
             "beyt": "Cism",            # Cisim (Ev)
             "sema": "Cism",            # Cisim (Gökyüzü)
             "dar": "Cism",             # Cisim (Yurt/Diyar)
             "haza": "GrammarNode_Haza",# İsm-i İşaret
-            "yed": "Haqiqi_Yad"        # Gerçek El / Organ
+            "yed": "Haqiqi_Yad",       # Gerçek El / Organ
+            "ilah": "Wajib_al_Wujud"   # Ma'bûd / Tanrı (İstifham-ı İnkârî Çözümlemesi İçin)
         }
         
         self._concept_attributes_map = {
@@ -166,6 +175,7 @@ class LocalOntoLexSemanticClient:
         
     def get_concept_attributes(self, concept_id: str) -> List[str]:
         return self._concept_attributes_map.get(concept_id, [])
+
 
 # ==============================================================================
 # LEKSİKON VE İLM-İ VAZ' (CONTEXTUAL LEXICON)
@@ -184,7 +194,7 @@ class ContextualLexicon:
     bağımlılık ağacı kontrolleri izole özel fonksiyonlara (Private Methods) ayrılmıştır.
     """
     def __init__(self, semantic_client: Optional[IOntoLexSemanticClient] = None):
-        # 4 Boyutlu Tensör Hiyerarşisi: Word -> Epoch -> Namespace -> PropositionType
+        # 5 Boyutlu Tensör Hiyerarşisi: Word -> Epoch -> Namespace -> PropositionType -> ContextTriggers/Default
         self._tensor: Dict[str, Dict[str, Dict[str, Dict[str, Dict[str, Any]]]]] = {}
         # İlm-i Ma'ânî Kasr (Hasr) Operatörleri
         self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
@@ -227,11 +237,6 @@ class ContextualLexicon:
         Bir kelimenin mecaz mı yoksa hakikat mi olduğu, cümledeki diğer kelimelerle olan rastgele 
         yan yanalığından (Proximity) değil, İlm-i Nahiv'deki kesin amil-mamul bağıntılarından 
         (AST Dependencies) anlaşılır. 
-        
-        Örneğin İbn Teymiyye'nin Hakikat felsefesine (Selefî usûlüne) göre, "Allah'ın Eli" 
-        (Yedullah) dendiğinde, 'Yed'in anlamı 'Allah' ile 'İzafet' (Mudaf_MudafIlayh) bağına girdiğinde 
-        Bila_Kayf (Nasılı bilinmeyen hakikat) uzayına otonom olarak sıçrar. Bu kural, 
-        Z3 SMT motorunda ontolojik çöküşü engeller.
         """
         if not dependencies or not triggers:
             return None
@@ -243,11 +248,13 @@ class ContextualLexicon:
             mamul_lower = mamul.lower()
             
             for trigger, ont_id in triggers.items():
-                valid_relations = ["Mudaf_MudafIlayh", "Mubteda_Haber", "Fail", "Meful", "Sifat_Mevsuf", "Rel_Ihtisas"]
+                trigger_lower = trigger.lower()
+                valid_relations = {"Mudaf_MudafIlayh", "Mubteda_Haber", "Fail", "Meful", "Sifat_Mevsuf", "Rel_Ihtisas"}
                 
                 if rel_type in valid_relations:
-                    if (target_lower in amil_lower and trigger in mamul_lower) or \
-                       (target_lower in mamul_lower and trigger in amil_lower):
+                    # [ONARIM]: 'in' operatörü ile morfolojik varyantları (yadu, allahi) yakalar.
+                    if (target_lower in amil_lower and trigger_lower in mamul_lower) or \
+                       (target_lower in mamul_lower and trigger_lower in amil_lower):
                         return ont_id
                         
         return None
@@ -281,52 +288,50 @@ class ContextualLexicon:
     def _prevent_lexical_poisoning(self, word: str, ontologic_id: str, active_namespace: str, discourse: Optional[DiscourseRegister]) -> None:
         """
         .. pedagojik_anlati:: Leksikal Zehirlenme (Lexical Poisoning) Zırhı
-        Mu'aradah (Çapraz İtiraz) esnasında, eğer Sâil leksikondan bir kelimeyi 
-        (Örn: 'Zeyd') çözümlerken dönen ontolojik ID, daha önce Mucîb tarafından kendi özel 
-        usûl uzayında (Namespace) mühürlenmişse, Sâil bu ID'yi çalarak SMT motorunda 
-        arka kapıdan (backdoor) eşdeğerlik kuramaz. Ortak kabul (Base) dışındaki bu sızıntı 
-        anında tespit edilip engellenir ve motor ContextPoisoningError fırlatarak durur.
-        
-        [FAZ 4.1 Bipartite DRT UYUMU]: discourse.scopes yapısının sözlük veya liste olmasına 
-        uygun olarak izole Sâil/Mucîb taraması yapar.
+        Mu'aradah (Çapraz İtiraz) esnasında, Sâil'in arka kapıdan eşdeğerlik kurmasını engeller.
         """
         if not discourse or active_namespace == "Base":
             return
             
-        current_agent = discourse.active_agent
+        current_agent = getattr(discourse, 'active_agent', None)
+        if not current_agent:
+            return
         
         # Bipartite DRT Dict iterasyonu
         if hasattr(discourse, 'scopes') and isinstance(discourse.scopes, dict):
             for agent_key, actor_scopes in discourse.scopes.items():
                 for frame in actor_scopes:
                     for mention in frame:
-                        if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
-                            if mention.sealed_namespace != active_namespace:
+                        m_ont_id = getattr(mention, 'ontologic_id', None)
+                        m_agent = getattr(mention, 'agent', None)
+                        m_namespace = getattr(mention, 'sealed_namespace', None)
+                        
+                        if m_ont_id == ontologic_id and m_agent != current_agent and m_namespace != "Base":
+                            if m_namespace != active_namespace:
                                 raise ContextPoisoningError(
                                     f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
                                     f"{current_agent}, '{word}' kelimesi üzerinden '{ontologic_id}' ID'sini leksikondan çekmeye çalışıyor. "
-                                    f"Ancak bu ontolojik ID, rakip ({mention.agent}) tarafından '{mention.sealed_namespace}' uzayında mühürlenmiştir. "
-                                    f"Mu'aradah çapraz izolasyonu ihlal edildi, arka kapı (backdoor) eşdeğerliği engellendi."
+                                    f"Ancak bu ontolojik ID, rakip ({m_agent}) tarafından '{m_namespace}' uzayında mühürlenmiştir."
                                 )
         # Fallback (Eski Liste tabanlı yapı)
         elif hasattr(discourse, 'scopes') and isinstance(discourse.scopes, list):
             for frame in discourse.scopes:
                 for mention in frame:
-                    if mention.ontologic_id == ontologic_id and mention.agent != current_agent and mention.sealed_namespace != "Base":
-                        if mention.sealed_namespace != active_namespace:
+                    m_ont_id = getattr(mention, 'ontologic_id', None)
+                    m_agent = getattr(mention, 'agent', None)
+                    m_namespace = getattr(mention, 'sealed_namespace', None)
+                    
+                    if m_ont_id == ontologic_id and m_agent != current_agent and m_namespace != "Base":
+                        if m_namespace != active_namespace:
                             raise ContextPoisoningError(
                                 f"LOGIC_FAILURE_PROBABILITY: HIGH - Lexical Poisoning (Leksikal Zehirlenme) Tespit Edildi! "
-                                f"{current_agent}, '{word}' kelimesi üzerinden '{ontologic_id}' ID'sini leksikondan çekmeye çalışıyor. "
-                                f"Ancak bu ontolojik ID, rakip ({mention.agent}) tarafından '{mention.sealed_namespace}' uzayında mühürlenmiştir. "
-                                f"Mu'aradah çapraz izolasyonu ihlal edildi, arka kapı (backdoor) eşdeğerliği engellendi."
+                                f"{current_agent}, '{word}' kelimesi üzerinden '{ontologic_id}' ID'sini leksikondan çekmeye çalışıyor."
                             )
 
-    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: DiscourseRegister = None, dependencies: List[Tuple[str, str, str, str]] = None, epoch: str = "Classical") -> str:
+    def resolve_id(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: Optional[DiscourseRegister] = None, dependencies: Optional[List[Tuple[str, str, str, str]]] = None, epoch: str = "Classical", allow_tevil: bool = True, conflicting_node: str = "Wajib_al_Wujud") -> str:
         """
         .. pedagojik_anlati:: Orkestrasyon ve Ontolojik Mühürleme
         Lafzın hangi ID ile Kripke uzayına (Z3) geçeceğine karar veren son filtredir.
-        Önce aktif uzay, sonra Siyak-Sibak, ardından Base (Müsellemât) taranır. 
-        Eğer Tensörde yoksa OntoLex Grafına gidilir (Fallback).
         """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
@@ -357,11 +362,9 @@ class ContextualLexicon:
         # OntoLex Semantik Graf Taraması
         base_fallback_id = self.semantic_client.get_base_concept_id(word_lower, epoch)
         
-        # [FAZ 3.3 İLM-İ BEYÂN ENTEGRASYONU]: UNSAT Fallback (Mecaz/Ma'nâ el-Ma'nâ Çıkarımı)
+        # [FAZ 5 İLM-İ BEYÂN ENTEGRASYONU]: UNSAT Fallback (Node Relocation / Te'vil)
         if proposition_type == "Metaphor_Fallback" and base_fallback_id:
-            # Not: Tam bir Z3 UNSAT döngüsünde conflicting_node AST üzerinden süzülmelidir.
-            # Şimdilik Te'vil talep edildiğinde Kudret/Sıfat uzayına otonom lüzum denenir.
-            inferred_id = self.mana_graph.infer_metaphorical_bridge(base_fallback_id, "Wajib_al_Wujud")
+            inferred_id = self.mana_graph.infer_node_relocation(base_fallback_id, conflicting_node, allow_tevil)
             if inferred_id:
                 self._prevent_lexical_poisoning(word, inferred_id, active_namespace, discourse)
                 return inferred_id
