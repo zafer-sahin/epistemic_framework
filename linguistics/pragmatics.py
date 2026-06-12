@@ -46,6 +46,7 @@ class MuktazaHalAnalyzer:
             return {
                 "is_valid": False,
                 "type": "MAANI_VIOLATION",
+                "violation_code": "EXCESSIVE_NECESSITY",
                 "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatabın zihni boş (Khali_al_Zihn) iken tevkîd (pekiştirme) kullanılamaz. Z3 Kripke uzayına gereksiz Zorunluluk (Necessity) matrisi basmak Kombinatoryal Patlamaya yol açar."
             }
             
@@ -53,6 +54,7 @@ class MuktazaHalAnalyzer:
             return {
                 "is_valid": False,
                 "type": "MAANI_VIOLATION",
+                "violation_code": "DEFICIENT_NECESSITY",
                 "message": "[ADAB_WARNING] Muktazâ el-Hâl İhlali: Muhatap kesin inkar (Munkir) makamında iken tevkîd (pekiştirme) terk edilemez. Önerme, epistemik zorunluluk taşımadığı için geçersiz kılınmıştır."
             }
             
@@ -67,83 +69,84 @@ class MaaniSpeechActAnalyzer:
     cümledeki Kasr (Kısıtlama) ve İstifham (Soru) gibi yapıları Cürcânî'nin 'Nazm' 
     (Sentaktik-Semantik Örgü) teorisine uygun olarak Modal Mantık (Deontik ve Epistemik) 
     operatörlerine dönüştürür.
-    
-    [FAZ 3.2 VAZ' VE MA'ÂNÎ ENTEGRASYONU]: İlm-i Ma'ânî kısıtları atomize edilmiş, 
-    MuktazaHalAnalyzer izole edilmiş ve İstifham-ı İnkârî yapıları mantıksal ret (z3.Not)
-    kapsüllerine dönüştürülecek şekilde yapılandırılmıştır.
     """
     def __init__(self, discourse: DiscourseRegister):
         self.discourse = discourse
         self.muktaza_analyzer = MuktazaHalAnalyzer(discourse)
         
         # .. mantik_kurali:: İnşâî Önermeler (Performatives)
-        # Soru (İstifham) ve Emir (Talep) cümleleri diş dünyayı (A'yân) tasvir etmezler, 
-        # dolayısıyla Kadiyye (Önerme) sayılmazlar ve SMT'nin SAT/UNSAT kararına doğrudan tabi tutulamazlar.
         self.inshai_markers = {
             "question": ["hal", "a", "mata", "kayfa", "man", "ma", "eyne"],
             "imperative": ["if'al", "la_taf'al", "ef'al", "li_yaf'al"]
         }
-        self.nefy_markers = {"illa", "la", "ma", "lam", "lan"}
+        self.nefy_markers = {"illa", "la", "ma", "lam", "lan", "laysa"}
         
         # .. mantik_kurali:: Hasr ve Monadlar
-        # Yüklemi özneye mutlak surette hapseden evrensel dışlama (Universal Exclusion) operatörleri.
         self.kasr_markers = {"innema", "illa"}
 
-    def _evaluate_istifham(self, first_token: str, has_nefy: bool) -> Dict[str, Any]:
+    def _evaluate_istifham(self, first_token: str, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         """
         .. pedagojik_anlati:: İstifham-ı İnkârî ve Varoluşsal Red (Existential Negation)
         Gerçek soru cümleleri (İstifham-ı Hakikî) mantıksal değer (True/False) taşımaz. 
-        Ancak, eğer soru bir nefy (olumsuzluk) edatıyla geliyorsa ("Allah'tan başka ilah mı var?"),
-        bu retorik bir söz edimi olan 'İstifham-ı İnkârî'dir. İlm-i Ma'ânî gereği bu yapı, 
-        soru formunda görünse de Z3 matrisinde kesin bir varoluşsal redde veya evrensel 
-        olumsuzlamaya dönüştürülmelidir.
+        Ancak, eğer soru sentaktik olarak veya cümlenin içinde bir nefy (olumsuzluk) edatına 
+        bağlanmışsa bu retorik bir söz edimi olan 'İstifham-ı İnkârî'dir. 
         
-        FOL Denklemi: $\\neg \\exists x (P(x))$ veya $\\forall x \\neg P(x)$
+        FOL Denklemi: $\\forall x \\neg P(x)$ veya $\\neg \\exists x P(x)$
         """
-        if first_token in self.inshai_markers["question"]:
-            if has_nefy:
-                return {
-                    "is_valid": True, 
-                    "type": "Istifham_i_Inkari", 
-                    "z3_operator_hint": "Universal_Negation", 
-                    "message": "İstifham-ı İnkârî tespit edildi. Evrensel/Varoluşsal ret mantığına (z3.Not) dönüştürülecek."
-                }
-            else:
-                return {
-                    "is_valid": False, 
-                    "type": "Istifham_Hakiki", 
-                    "message": "Gerçek soru cümleleri (İstifham-ı Hakikî) mantıksal değer taşımaz."
-                }
-        return {}
+        if first_token not in self.inshai_markers["question"]:
+            return {}
+            
+        is_inkari = False
+        
+        # 1. AST Düğüm Kontrolü (Nazm Teorisi)
+        for head, dependent, rel, _ in dependencies:
+            if rel in ["Rel_Nefy", "Nefy_Modifier"] and (head == first_token or dependent == first_token):
+                is_inkari = True
+                break
+                
+        # 2. Sentaktik Bitişiklik ve Bag-of-Words Kontrolü (Geriye Dönük Uyumluluk)
+        if not is_inkari:
+            if any(t.lower() in self.nefy_markers for t in tokens):
+                is_inkari = True
+
+        if is_inkari:
+            return {
+                "is_valid": True, 
+                "type": "Istifham_i_Inkari", 
+                "z3_operator_hint": "Universal_Negation", 
+                "logical_form": "∀x ¬P(x)",
+                "message": "İstifham-ı İnkârî tespit edildi. Evrensel/Varoluşsal ret mantığına (z3.Not) dönüştürülecek."
+            }
+        else:
+            return {
+                "is_valid": False, 
+                "type": "Istifham_Hakiki", 
+                "message": "Gerçek soru cümleleri (İstifham-ı Hakikî) mantıksal değer taşımaz."
+            }
 
     def _evaluate_deontic(self, first_token: str) -> Dict[str, Any]:
         """
         .. mantik_kurali:: Deontik Mantık (Emir ve Nehiy)
         Emir (Yap) ve Nehiy (Yapma) kipleri mevcut Kripke dünyasını ($W_0$) tasvir etmezler. 
-        Onlar, ahlaki veya hukuki (Fıkhî) olarak erişilebilir (accessible) ideal dünyalarda 
-        ($W_1$) geçerli olması gereken kuralları mühürlerler.
-        
-        Matematiksel Karşılığı: 
-        $O(P)$ -> Obligatory (Wajib_Fiqh)
-        $F(P)$ -> Forbidden (Haram_Fiqh)
+        Onlar, ahlaki veya hukuki (Fıkhî) olarak erişilebilir ideal dünyalarda ($W_{ideal}$) 
+        geçerli olması gereken kuralları mühürlerler.
         """
         if first_token in self.inshai_markers["imperative"]:
             is_prohibitive = first_token.startswith("la_")
-            return {"is_valid": True, "type": "Deontic", "operator": "Nehiy" if is_prohibitive else "Emir"}
+            return {
+                "is_valid": True, 
+                "type": "Inshai_Deontic", 
+                "operator": "Forbidden" if is_prohibitive else "Obligatory",
+                "modal_logic_hint": "F(P)" if is_prohibitive else "O(P)",
+                "message": f"[MAANI] {'Nehiy (F(P))' if is_prohibitive else 'Emir (O(P))'} kipi tespit edildi."
+            }
         return {}
 
     def _extract_kasr_and_ihtisas(self, dependencies: List[Tuple[str, str, str, str]]) -> Dict[str, Any]:
         """
         .. felsefe_notu:: Kasr, İhtisas ve Evrensel Dışlama
-        Klasik Arapçada sentaktik dizilimin (Takdim/Te'hir) bozulması veya Kasr edatlarının 
-        kullanımı, eylemi belirli bir varlığa mülk kılar. 
-        Örn: (İyyâke Na'budu - Yalnız sana ibadet ederiz). 
-        
         Z3 FOL matrisinde bu durum, sıradan bir varoluşsal beyandan ($\\exists x$), 
-        çift yönlü gerektirmeli (Biconditional) bir evrensel dışlama fonksiyonuna yükseltilir:
-        $$\\forall x (\\text{Action}(x) \\iff \\text{Target}(x))$$
-        
-        Yönün (Sıfat'tan Mevsuf'a veya tersi) yanlış tespiti, ontolojide fatal hatalara (Semantic Shift) yol açar.
+        çift yönlü gerektirmeli (Biconditional) bir evrensel dışlama fonksiyonuna yükseltilir.
         """
         kasr_data = None
         
@@ -156,7 +159,8 @@ class MaaniSpeechActAnalyzer:
                 "kasr_target": mamul,
                 "kasr_predicate": amil,
                 "kasr_direction": "Sifat_to_Mevsuf", 
-                "message": f"Takdim (İhtisas) tespit edildi. Eylem ({amil}) sadece hedefe ({mamul}) kısıtlanacak."
+                "logical_form": "Biconditional_Equivalence",
+                "message": f"Takdim (İhtisas) tespit edildi. Eylem ({amil}) hedefe ({mamul}) kısıtlanacak."
             }
         
         if not kasr_data:
@@ -170,7 +174,8 @@ class MaaniSpeechActAnalyzer:
                     "kasr_type": f"Kasr_{edat.capitalize()}",
                     "kasr_target": hedef_kelime,
                     "kasr_direction": kasr_yonu,
-                    "message": f"'{edat}' edatı ile yönlü Kasr ({kasr_yonu}) tespit edildi. Evrensel dışlama (Universal Exclusion) yönlü uygulanacak."
+                    "logical_form": "Universal_Exclusion",
+                    "message": f"'{edat}' edatı ile yönlü Kasr ({kasr_yonu}) tespit edildi."
                 }
         
         return kasr_data
@@ -186,9 +191,8 @@ class MaaniSpeechActAnalyzer:
             return {"is_valid": False, "type": "Empty"}
         
         first_token = tokens[0].lower()
-        has_nefy = any(t.lower() in self.nefy_markers for t in tokens)
         
-        istifham_res = self._evaluate_istifham(first_token, has_nefy)
+        istifham_res = self._evaluate_istifham(first_token, tokens, dependencies)
         if istifham_res: return istifham_res
             
         deontic_res = self._evaluate_deontic(first_token)
@@ -205,7 +209,7 @@ class MaaniSpeechActAnalyzer:
         has_epistemic_necessity = any(str(rel).startswith('Amel_Inne_') for _, _, rel, _ in dependencies)
         if has_epistemic_necessity:
             response["epistemic_modality"] = "Epistemic_Necessity"
-            response["message"] = "İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil) tespit edildi: Tahkik (Epistemic Necessity) uygulanacak."
+            response["message"] = "İnne ve Kardeşleri (Huruf-u Müşebbehe bil-Fiil) tespit edildi."
 
         if kasr_data:
             response["kasr_data"] = kasr_data
@@ -219,27 +223,16 @@ class MaaniSpeechActAnalyzer:
     def is_khabari(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
         .. felsefe_notu:: Kadiyye (Önerme) Onayı
-        Eğer cümle tüm İlm-i Ma'ânî testlerinden geçip 'is_valid: True' döndürürse, 
-        bu söz diziminin artık mantıksal bir yalanlanma veya doğrulanma ihtimali 
-        taşıdığı (Haberî) kesinleşmiştir. Yalnızca Haberî önermeler SMT'de SAT/UNSAT alabilir.
         """
         res = self.analyze_pragmatics(tokens, dependencies)
         return res["is_valid"]
-
-    # -------------------------------------------------------------------------
-    # FAZ 14 - PRAGMATİK VE NAHİV SAĞLIK BARİYERİ (CROSS-LAYER HEALTH BARRIER)
-    # -------------------------------------------------------------------------
 
     def enforce_pragmatic_syntax_consistency(self, pragmatics_meta: Dict[str, Any], isolated_phases: Dict[str, List[Any]]) -> None:
         """
         .. pedagojik_anlati:: Çapraz Katman Sağlık Taraması (Cross-Layer Verification)
         Nahiv (Sentaks) katmanındaki Topolojik FOL fazları ile İlm-i Ma'ânî'den (Pragmatik)
-        gelen kipliklerin (Modality) birbiriyle çelişmesini engeller. Z3 motoru, 
-        teolojik ve sentaktik çatışmaları aynı anda işleyemez; bu bariyer sistemin 
-        tutarlılığını (Consistency) garanti altına alır.
+        gelen kipliklerin (Modality) birbiriyle çelişmesini engeller.
         """
-        
-        # 1. Necessity vs Contingency (Tahkik vs Füzâiyye) Çatışması
         has_necessity = len(isolated_phases.get("PHASE_3_NECESSITY_SCOPE", [])) > 0
         has_dynamic_transition = len(isolated_phases.get("PHASE_5_DYNAMIC_TRANSITION", [])) > 0
         
@@ -251,14 +244,12 @@ class MaaniSpeechActAnalyzer:
                 "anlık durum geçişine tabi tutulamaz. Z3 SMT derlemesi durduruldu."
             )
             
-        # 2. İnkâr Derecesi ve Zorunluluk Uyuşmazlığı (Muktazâ el-Hâl Hard Fail)
         if pragmatics_meta.get("type") == "MAANI_VIOLATION":
             raise ValueError(
                 f"[LOGIC_FAILURE_PROBABILITY: HIGH] Bağlam Zehirlenmesi (Context Poisoning): "
                 f"{pragmatics_meta.get('message')} Veri akışı durduruldu."
             )
             
-        # 3. Kısıtlama (Kasr) ve İşaretçi Eşitleme (Bedel) Zafiyeti
         has_kasr = "kasr_data" in pragmatics_meta
         has_bedel = len(isolated_phases.get("PHASE_2_IDENTITY_ALIAS", [])) > 0
         

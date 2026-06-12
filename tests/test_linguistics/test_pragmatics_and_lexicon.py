@@ -97,15 +97,26 @@ class TestPragmaticsAndLexicon:
         
         res_israf = self.muktaza_analyzer.evaluate_balance(deps_israf)
         assert res_israf["is_valid"] is False
+        assert res_israf["violation_code"] == "EXCESSIVE_NECESSITY"
         assert "Khali_al_Zihn" in res_israf["message"]
+
+        # Durum 2: Muhatap Şüphe (MUTEREDDID) makamındayken Asimetrik Tevkîd (HATA)
+        self.discourse.set_opponent_epistemic_state(DenialLevel.MUTEREDDID)
+        deps_asimetrik = [("amil", "mamul1", "Tevkid_Modifier", "None"), ("amil", "mamul2", "Amel_Inne_Ism", "None")]
         
-        # Durum 2: Muhatap Munkir (İnkârcı) iken Tevkîd TERKİ (HATA)
+        res_asimetrik = self.muktaza_analyzer.evaluate_balance(deps_asimetrik)
+        assert res_asimetrik["is_valid"] is False
+        assert res_asimetrik["violation_code"] == "DISPROPORTIONATE_TEVKID"
+        assert "Mutereddid" in res_asimetrik["message"]
+        
+        # Durum 3: Muhatap Munkir (İnkârcı) iken Tevkîd TERKİ (HATA)
         self.discourse.set_opponent_epistemic_state(DenialLevel.MUNKIR)
         # Hiçbir pekiştirme içermeyen basit bir cümle bağımlılığı
         deps_zafiyet = [("zeyd", "kaimun", "Mubteda_Haber", "Marfu")]
         
         res_zafiyet = self.muktaza_analyzer.evaluate_balance(deps_zafiyet)
         assert res_zafiyet["is_valid"] is False
+        assert res_zafiyet["violation_code"] == "DEFICIENT_NECESSITY"
         assert "Munkir" in res_zafiyet["message"]
 
     def test_istifham_i_inkari_existential_negation(self):
@@ -117,12 +128,69 @@ class TestPragmaticsAndLexicon:
         Test, İlm-i Ma'ânî analizörünün bunu basit bir 'Soru' olarak çöpe atmayıp, Z3 motoru için 
         Evrensel/Varoluşsal ret (z3.Not / Universal_Negation) kapsülüne çevirdiğini ispatlar.
         """
-        tokens = ["hal", "min", "ilahin", "illa", "allah"]
-        # 'hal' (mı/mi) sorudur, 'illa' (başka/hariç) ise nefy/kasr içerir.
+        # Abdülkâhir el-Cürcânî'nin Nazm Teorisi'ne göre sentaktik bağ olmalıdır.
+        tokens = ["a", "laysa", "allahu", "bi", "ahkamil", "hakimin"]
         
-        res = self.maani_analyzer.analyze_pragmatics(tokens, [])
+        # 'a' (mı/mi) sorudur, 'laysa' ise nefy içerir. AST üzerinden Rel_Nefy bağı kurulur.
+        deps = [("a", "laysa", "Rel_Nefy", "None")]
+        
+        res = self.maani_analyzer.analyze_pragmatics(tokens, deps)
         
         # Gerçek soru (İstifham_Hakiki) olarak değerlendirilip silinmediği ispatlanmalıdır.
+        assert res["is_valid"] is True
         assert res["type"] == "Istifham_i_Inkari"
         assert res["z3_operator_hint"] == "Universal_Negation"
-        assert "z3.Not" in res["message"]
+        assert res["logical_form"] == "∀x ¬P(x)"
+
+    def test_inshai_deontic_modality(self):
+        """
+        .. mantik_kurali:: Fıkhî / Deontik Kiplerin Z3 Çözümlemesi
+        Emir ve Nehiy (İnşâî) kiplerinin statik ontoloji dünyasından çıkarılarak 
+        O(P) ve F(P) formunda Deontik W_ideal (Erişilebilir Mükemmel Dünya) matrisine dönüştürülmesi.
+        """
+        tokens_emir = ["if'al", "khayran"]
+        res_emir = self.maani_analyzer.analyze_pragmatics(tokens_emir, [])
+        assert res_emir["is_valid"] is True
+        assert res_emir["type"] == "Inshai_Deontic"
+        assert res_emir["operator"] == "Obligatory"
+        assert res_emir["modal_logic_hint"] == "O(P)"
+
+        tokens_nehiy = ["la_taf'al", "sharran"]
+        res_nehiy = self.maani_analyzer.analyze_pragmatics(tokens_nehiy, [])
+        assert res_nehiy["is_valid"] is True
+        assert res_nehiy["type"] == "Inshai_Deontic"
+        assert res_nehiy["operator"] == "Forbidden"
+        assert res_nehiy["modal_logic_hint"] == "F(P)"
+
+    def test_kasr_and_ihtisas_universal_exclusion(self):
+        """
+        .. mantik_kurali:: Kasr ve Evrensel Dışlama
+        'İnnema' veya Takdim/Te'hir durumlarının, Z3 FOL matrisi için bir dışlama (Biconditional)
+        çerçevesine haritalanması.
+        """
+        tokens = ["innema", "allah", "ilahun", "wahid"]
+        deps = [("ilahun", "innema", "Kasr_Modifier", "Sifat_to_Mevsuf")]
+        res = self.maani_analyzer.analyze_pragmatics(tokens, deps)
+        
+        assert res["is_valid"] is True
+        assert "kasr_data" in res
+        assert res["kasr_data"]["logical_form"] == "Universal_Exclusion"
+        assert res["kasr_data"]["kasr_direction"] == "Sifat_to_Mevsuf"
+
+    def test_pragmatic_syntax_consistency_barrier(self):
+        """
+        .. pedagojik_anlati:: Çapraz Katman Sağlık Taraması (Cross-Layer Verification)
+        Tahkik (Zorunluluk - İnne) ile Ani Geçiş (Füzâiyye - Dinamik) ontolojik olarak 
+        aynı Kripke düğümlerinde var olamaz. Bu kuralı ihlal eden AST derlemesinin durdurulduğunun testidir.
+        """
+        pragmatics_meta = {"is_valid": True, "type": "Khabari", "epistemic_modality": "Epistemic_Necessity"}
+        isolated_phases = {
+            "PHASE_3_NECESSITY_SCOPE": ["Inne_Node"],
+            "PHASE_5_DYNAMIC_TRANSITION": ["Fa_i_Fuzaiyye_Node"]
+        }
+        
+        with pytest.raises(ValueError) as exc_info:
+            self.maani_analyzer.enforce_pragmatic_syntax_consistency(pragmatics_meta, isolated_phases)
+            
+        assert "Ontolojik Çelişki (Epistemic Collapse)" in str(exc_info.value)
+        assert "Z3 SMT derlemesi durduruldu" in str(exc_info.value)
