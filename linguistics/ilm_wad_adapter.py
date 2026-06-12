@@ -125,7 +125,7 @@ class IlmWadAdapter:
         
         self.current_tevil_targets: List[str] = []
 
-    def _resolve_inne_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
+    def _resolve_inne_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> None:
         """
         .. pedagojik_anlati:: İnne'nin Ontolojik Baskısı (Epistemic Operator)
         'Amel_Inne' ilişkileri sadece ismin nasb edilmesi değil, Kadiyye-i Hamliyye'nin 
@@ -147,15 +147,15 @@ class IlmWadAdapter:
 
         for inne_token, rels in inne_relations.items():
             if 'ism' in rels and 'haber' in rels:
-                ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-                haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
                 
                 # İnne matrisinde İsmin Haber'e ontolojik olarak raptedilmesi (Predication)
                 atomic_predicates.append(("Rel_Rabita_Predication", f"{haber_id}::{ism_id}", 2))
                 atomic_predicates.append((ism_id, ism_id, 1))
                 atomic_predicates.append((haber_id, haber_id, 1))
 
-    def _resolve_rabita_and_dynamic_logic(self, amil: str, mamul: str, rel_type: str, irab: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> bool:
+    def _resolve_rabita_and_dynamic_logic(self, amil: str, mamul: str, rel_type: str, irab: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> bool:
         """
         .. felsefe_notu:: Rabıta (Gizli Yüklem) ve Dinamik Geçişler (Dynamic Logic)
         İsim cümlelerindeki görünmez bağlayıcı (Rabıta), iki varlık arasında ya katı bir 
@@ -170,8 +170,8 @@ class IlmWadAdapter:
             return True
 
         if rel_type in ['Rabita_Identity', 'Rabita_Predication', 'Mubteda_Haber']: 
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             
             if rel_type == 'Rabita_Identity':
                 atomic_predicates.append(("Rel_Rabita_Identity", f"{amil_id}::{mamul_id}", 2))
@@ -183,8 +183,8 @@ class IlmWadAdapter:
             return True
 
         if rel_type in ['Rel_Fa_Sebebiyye', 'Rel_Fa_Fuzaiyye']:
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             op = "Luzumi_Dynamic" if rel_type == 'Rel_Fa_Sebebiyye' else "Dynamic_Transition"
             atomic_predicates.append(NestedPredicate(operator=op, args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
             atomic_predicates.append((amil_id, amil_id, 1))
@@ -192,8 +192,8 @@ class IlmWadAdapter:
             return True
 
         if rel_type == 'Rel_Atif':
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             particle = irab.lower()
             
             if particle in self.inadi_particles:
@@ -207,7 +207,7 @@ class IlmWadAdapter:
             
         return False
 
-    def _resolve_mutaallak_spatial_logic(self, amil: str, mamul: str, rel_type: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> bool:
+    def _resolve_mutaallak_spatial_logic(self, amil: str, mamul: str, rel_type: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> bool:
         """
         .. mantik_kurali:: Mekânın Kısıtlayıcılığı (SpaceSort Mutaallak)
         Bir varlığın veya eylemin "fi" (içinde) veya "ala" (üzerinde) gibi harf-i cerlerle 
@@ -220,16 +220,16 @@ class IlmWadAdapter:
             mecrur_target = next((m for a, m, r, _ in dependencies if r == 'Harf_Mecrur' and a == harf_node), None)
             
             if mecrur_target:
-                mecrur_id = self._resolve_entity(mecrur_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                mecrur_id = self._resolve_entity(mecrur_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
                 
                 if amil == 'Kainun_Virtual':
                     mubteda_token = next((m for a, m, r, _ in dependencies if r in ['Mubteda_Haber', 'Rabita_Predication'] and a == 'Kainun_Virtual'), None)
                     if mubteda_token:
-                        amil_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                        amil_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
                     else:
                         amil_id = "Kainun_Virtual"
                 else:
-                    amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+                    amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
                 
                 if rel_type == 'Muteallak_Mekan':
                     atomic_predicates.append(("LocatedIn", f"{amil_id}::{mecrur_id}", 2))
@@ -263,7 +263,7 @@ class IlmWadAdapter:
             
         return ir_predicates
 
-    def _process_atomic_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str) -> None:
+    def _process_atomic_relations(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> None:
         """
         .. matematiksel_model:: FOL Atomizasyonu
         Tüm sentaktik yüzey ağacını (AST), $P(x)$, $R(x, y)$ formundaki mantıksal 
@@ -272,10 +272,10 @@ class IlmWadAdapter:
         """
         processed_roles = set()
         for amil, mamul, rel_type, irab in dependencies:
-            if self._resolve_rabita_and_dynamic_logic(amil, mamul, rel_type, irab, dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch):
+            if self._resolve_rabita_and_dynamic_logic(amil, mamul, rel_type, irab, dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch, allow_tevil, conflicting_node):
                 continue
                 
-            if self._resolve_mutaallak_spatial_logic(amil, mamul, rel_type, dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch):
+            if self._resolve_mutaallak_spatial_logic(amil, mamul, rel_type, dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch, allow_tevil, conflicting_node):
                 continue
 
             if rel_type == 'Harf_Mecrur':
@@ -294,8 +294,8 @@ class IlmWadAdapter:
             if amil.lower() in self.mani_huluv_particles or mamul.lower() in self.mani_huluv_particles:
                 continue
 
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             
             rel_id = f"Rel_{rel_type}"
             atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
@@ -336,7 +336,7 @@ class IlmWadAdapter:
             ir_predicates.extend(atomic_predicates)
         return ir_predicates
 
-    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical") -> SemanticStatementIR:
+    def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical", allow_tevil: bool = True, conflicting_node: str = "Wajib_al_Wujud") -> SemanticStatementIR:
         """
         .. pedagojik_anlati:: Orkestrasyon ve SMT'ye Teslimiyet
         Dilin tüm yüzey arazlarından (Sarf/Nahiv/Ma'ânî) arındırılarak saf matematiksel/felsefi 
@@ -371,13 +371,13 @@ class IlmWadAdapter:
         has_mani_cem = any(t.lower() in self.mani_cem_particles for t in tokens)
         has_mani_huluv = any(t.lower() in self.mani_huluv_particles for t in tokens)
         
-        self._resolve_inne_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
-        self._process_atomic_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch)
+        self._resolve_inne_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch, allow_tevil, conflicting_node)
+        self._process_atomic_relations(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch, allow_tevil, conflicting_node)
         
         # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] Yalıtılmış varlıklar için ekstra tematik rol taraması
         processed_roles = set(pred for pred in atomic_predicates if isinstance(pred, tuple) and str(pred[0]).startswith("Role_"))
         for word in tokens:
-             ontologic_id = self._resolve_entity(word, active_namespace, auto_lexicon, proposition_type, dependencies, epoch)
+             ontologic_id = self._resolve_entity(word, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
              roles = self.positing_engine.extract_structural_roles(word, ontologic_id, auto_lexicon)
              for role in roles:
                  if role not in processed_roles:
@@ -412,7 +412,7 @@ class IlmWadAdapter:
             provenance_locked=True
         )
         
-    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str) -> str:
+    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str, allow_tevil: bool, conflicting_node: str) -> str:
         """
         .. felsefe_notu:: Tahrîr-i Mahall-i Niza' (Kavramsal Senkronizasyon) ve Bila-Kayf
         Münazara adabında Sâil ve Mucîb'in kavramları aynı ontolojik uzaydan çektiğinden emin 
@@ -428,6 +428,13 @@ class IlmWadAdapter:
             StrictAirGapValidator.validate_provenance(pronoun_res)
             return pronoun_res
             
+        known_particles = {"hal", "mata", "kayfa", "la", "ma", "wa", "fa", "aw", "am", "summe", "bal", "lakin", "in", "iza", "law", "amma", "imma", "inna", "anna"}
+        
+        # LOGIC FIX: Sarf motorunun "imma" gibi edatları "imm" köküne indirgemesinden (truncation) 
+        # önce saf kelimenin edat olup olmadığını kontrol eder.
+        if word.lower() in known_particles:
+            return f"GrammarNode_{word.capitalize()}"
+            
         search_key = word
         morph_data = auto_lexicon.get(word)
         if morph_data:
@@ -436,16 +443,16 @@ class IlmWadAdapter:
         if morph_data and str(morph_data.ontologic_type).startswith("Harf_"):
             return f"GrammarNode_{search_key.capitalize()}"
             
-        known_particles = {"hal", "mata", "kayfa", "la", "ma", "wa", "fa", "aw", "am", "summe", "bal", "lakin", "in", "iza", "law", "amma", "imma", "inna", "anna"}
+        # Fallback for remaining mapped particles
         if search_key.lower() in known_particles:
             return f"GrammarNode_{search_key.capitalize()}"
 
-        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch)
+        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch, allow_tevil, conflicting_node)
         
         # Otonom Düğüm Taşınması (Bila-Kayf Relocation Logic)
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
-                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch)
+                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch, allow_tevil, conflicting_node)
             except (ValueError, DiachronicViolationError):
                 ontologic_id = base_ontologic_id
         else:

@@ -430,10 +430,6 @@ def execute_healthcheck():
     except ContextPoisoningError as e:
         print(f"[BAŞARILI] Faz 12 Leksikal Zehirlenme Koruması Devrede: {e}\n")
 
-    # -------------------------------------------------------------------------
-    # YENİ EKLENEN FAZ 2.5 (ŞEMSİYYE Z3 SMT ENTEGRASYONU) TEST SENARYOLARI
-    # -------------------------------------------------------------------------
-
     print("--- SENARYO 20: FAZ 2 - İNADÎ HAKİKİYYE (STRICT XOR / MÂNIATÜ'L-CEM' VE'L-HULÜVV) ---")
     sentence_20 = "imma zeydun daribun aw masiyan"
     tokens_20 = tokenizer.tokenize(sentence_20)
@@ -477,14 +473,81 @@ def execute_healthcheck():
     print("[BAŞARILI] Yüzey modalitesi AST'de işaretlendi ve Z3'e aktarılmak üzere yalıtıldı.\n")
 
     print("--- SENARYO 23: FAZ 2 - Z3 AST KISIT İZOLASYONU VE TOPOLOJİK SAĞLIK ---")
-    # Senaryo 20'deki kompleks İnadî ağacını (ast_20_graph) sağlık taramasından geçiriyoruz
     health_report = nahiv.run_e2e_health_check(ast_20_graph)
     print(f"Topolojik Sıra (DAG) Geçerli mi? {health_report['is_dag']}")
     modal_phase_constraints = health_report['isolated_phases'].get('PHASE_6_MODAL_LOGIC', [])
     print(f"PHASE_6_MODAL_LOGIC Bariyerine Atanan Kısıt Sayısı: {len(modal_phase_constraints)}")
     print("[BAŞARILI] SMT motoru kombinatoryal patlamadan korunarak Faz 6 Modalities uzayında güvenle yalıtıldı.\n")
 
-    print("[SİSTEM] Tüm Faz 1-12 ve Yeni Eklenen Faz 4.1 Bipartite DRT / FSM Healthcheck Testleri Tamamlandı. Sıfır Entropi Doğrulandı.")
+    # -------------------------------------------------------------------------
+    # EKLENEN FAZ 6 (İLM-İ VAZ' ADAPTÖRÜ) NESTED PREDICATE & NODE RELOCATION TESTLERİ
+    # -------------------------------------------------------------------------
+
+    print("--- SENARYO 24: FAZ 6 - İLM-İ VAZ' ADAPTÖRÜ LÜZUMÎ (MODUS PONENS) NESTED PREDICATE TESTİ ---")
+    sentence_24 = "in zeydun daribun"
+    tokens_24 = tokenizer.tokenize(sentence_24)
+    morph_24 = sarf.derive_lexicon(tokens_24)
+    ast_24 = nahiv.suggest_dependencies(tokens_24, morph_24)
+    
+    discourse.clear_memory()
+    ir_24 = adapter.generate_ir(tokens_24, ast_24, active_namespace="Ashari", auto_lexicon=morph_24)
+    has_luzumi_nested = any(hasattr(p, 'operator') and p.operator == 'Luzumi' for p in ir_24.predicates)
+    print(f"Girdi: '{sentence_24}'")
+    print(f"Lüzumî NestedPredicate Üretildi mi? {has_luzumi_nested}")
+    if has_luzumi_nested:
+        print("[BAŞARILI] Adaptör, Lüzumî şartını Kripke FOL uzayında özyinelemeli (Nested) kapsüle aldı.\n")
+    else:
+        print("[HATA] NestedPredicate kapsüllemesi başarısız.\n")
+
+    print("--- SENARYO 25: FAZ 6 - İLM-İ VAZ' ADAPTÖRÜ İNADÎ (XOR) NESTED PREDICATE TESTİ ---")
+    sentence_25 = "imma zeydun aw cemad"
+    tokens_25 = tokenizer.tokenize(sentence_25)
+    morph_25 = sarf.derive_lexicon(tokens_25)
+    ast_25 = nahiv.suggest_dependencies(tokens_25, morph_25)
+    
+    discourse.clear_memory()
+    ir_25 = adapter.generate_ir(tokens_25, ast_25, active_namespace="Ashari", auto_lexicon=morph_25)
+    has_inadi_nested = any(hasattr(p, 'operator') and p.operator == 'Inadi_Hakikiyye' for p in ir_25.predicates)
+    print(f"Girdi: '{sentence_25}'")
+    print(f"İnadî Hakikiyye NestedPredicate Üretildi mi? {has_inadi_nested}")
+    if has_inadi_nested:
+        print("[BAŞARILI] Adaptör, İnadî ayrıklığını (XOR) SMT motoru için kapsülledi.\n")
+    else:
+        print("[HATA] NestedPredicate İnadî kapsüllemesi başarısız.\n")
+
+    print("--- SENARYO 26: FAZ 6 - İLM-İ VAZ' ADAPTÖRÜ BİLÂ-KEYF (OTONOM DÜĞÜM TAŞINMASI) TESTİ ---")
+    sentence_26 = "yadu allahi"
+    tokens_26 = tokenizer.tokenize(sentence_26)
+    morph_26 = sarf.derive_lexicon(tokens_26)
+    ast_26 = nahiv.suggest_dependencies(tokens_26, morph_26)
+    
+    discourse.clear_memory()
+    # allow_tevil=False ile Salafi Usulü simüle edilir
+    ir_26 = adapter.generate_ir(
+        tokens=tokens_26, 
+        dependencies=ast_26, 
+        active_namespace="Salafi", 
+        auto_lexicon=morph_26, 
+        tevil_fallback_nodes=["Sifat_Yed_Literal"], 
+        allow_tevil=False, 
+        conflicting_node="Wajib_al_Wujud"
+    )
+    
+    bila_kayf_found = False
+    for p in ir_26.predicates:
+        if isinstance(p, tuple):
+            if any("Bila_Kayf" in str(item) for item in p):
+                bila_kayf_found = True
+                break
+                
+    print(f"Girdi: '{sentence_26}'")
+    print(f"Otonom Düğüm Taşınması (Node Relocation) Gerçekleşti mi? {bila_kayf_found}")
+    if bila_kayf_found:
+        print("[BAŞARILI] Adaptör, çelişen düğümü literal uzaydan koparıp 'Bila_Kayf' (Mahiyeti Meçhul) düğümüne taşıdı.\n")
+    else:
+        print("[HATA] Bila-Kayf düğüm taşınması başarısız.\n")
+
+    print("[SİSTEM] Tüm Faz 1-12 ve İlm-i Vaz' (Faz 6) Healthcheck Testleri Tamamlandı. Sıfır Entropi Doğrulandı.")
 
 if __name__ == "__main__":
     sys.setrecursionlimit(5000)
