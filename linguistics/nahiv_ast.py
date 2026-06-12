@@ -405,7 +405,7 @@ class NahivDependencyCompiler:
     def _resolve_verbal_arguments(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_token: str, amil_index: int) -> None:
         """
         .. pedagojik_anlati:: Amil-Mamul Ataması ve Müstatir (Gizli) Zamirler (DRT)
-            Eğer cümlede eylemi yapan açık bir Fail (Agent) yoksa, kelâm felsefesindeki 
+            Eğer cümlede eylemi yapan açık Fail (Agent) yoksa, kelâm felsefesindeki 
             "Her eylemin bir faili vardır" aksiyomu gereği sistem çökmeye zorlanamaz. 
             Bunun yerine Discourse Representation Theory (DRT) kuralları işletilerek 
             Müstatir Zamir (Hidden Pronoun) cümlenin mantıksal matrisine soyut 

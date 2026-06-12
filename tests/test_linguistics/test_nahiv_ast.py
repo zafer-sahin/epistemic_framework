@@ -33,7 +33,9 @@ class TestNahivASTAndOntology:
             "fa": MorphologicalAnalysis(original_word="fa", root="fa", pattern="Harf", ontologic_type="Harf"),
             "amrun": MorphologicalAnalysis(original_word="amrun", root="amr", pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Marfu", gender="Muzekker", number="Mufred"),
             "fi": MorphologicalAnalysis(original_word="fi", root="fi", pattern="Harf", ontologic_type="Harf"),
-            "beytin": MorphologicalAnalysis(original_word="beytin", root="beyt", pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Majrur", thematic_role="Entity")
+            "beytin": MorphologicalAnalysis(original_word="beytin", root="beyt", pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Majrur", thematic_role="Entity"),
+            "daima": MorphologicalAnalysis(original_word="daima", root="daim", pattern="Zarf", ontologic_type="Harf"),
+            "in": MorphologicalAnalysis(original_word="in", root="in", pattern="Harf_Shart", ontologic_type="Harf")
         }
 
     def test_epistemic_necessity_of_inne(self):
@@ -142,3 +144,28 @@ class TestNahivASTAndOntology:
         predication_edge = ast.edges["kaimun", "zeydan"]
         assert predication_edge["relation"] == "Rabita_Predication"
         assert predication_edge["z3_mapping"] == "SetInclusion"
+
+    def test_shamsiyye_modalities_and_luzumi_shart(self):
+        """
+        [FAZ 2 ENTEGRASYONU]: Şemsiyye Kiplikleri ve Lüzumî Şart İspatı
+        'Dâimâ' gibi kelimelerin Zâtî zorunluluğa, 'İn' gibi şartların Modus Ponens'e 
+        (Strict Implication) çevrilerek Kripke uzayına mühürlenmesi doğrulanır.
+        """
+        # 1. Daime-i Mutlaka Modalitesi
+        tokens_modal = ["daima", "zeydan", "kaimun"]
+        deps_modal = self.compiler.suggest_dependencies(tokens_modal, self.mock_lexicon)
+        ast_modal = self.compiler.build_ast(tokens_modal, deps_modal, self.mock_lexicon)
+        
+        assert "ModalOperatorNode" == ast_modal.nodes["daima"]["ast_node_class"]
+        assert ast_modal.edges["daima", "zeydan"]["z3_mapping"] == "Modal_Daime_i_Mutlaka"
+
+        # 2. Şart-ı Lüzumî (Katı Nedensellik / Modus Ponens)
+        tokens_shart = ["in", "daraba", "zeydan", "fa", "amrun"]
+        deps_shart = self.compiler.suggest_dependencies(tokens_shart, self.mock_lexicon)
+        ast_shart = self.compiler.build_ast(tokens_shart, deps_shart, self.mock_lexicon)
+        
+        assert "EpistemicOperatorNode" == ast_shart.nodes["in"]["ast_node_class"]
+        assert ast_shart.edges["in", "daraba"]["z3_mapping"] == "StrictImplication_Luzumi"
+        
+        # Şart cümlesinde gelen 'fa' artık Füzâiyye değil, Sebebiyye'dir (A -> B Lüzum bağı)
+        assert ast_shart.edges["daraba", "amrun"]["z3_mapping"] == "DynamicStateTransition" # Rel_Fa_Sebebiyye (Modus Ponens Chain)
