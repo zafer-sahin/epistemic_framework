@@ -309,28 +309,39 @@ class SarfEngine:
         (Diptote) ise, cer (Majrur) durumunda dahi fetha ('a') alır. Sistemin sondaki 'a' sesini 
         görüp kelimeyi yanlışlıkla Meful (Nesne) sanması, Z3 motorunda fail ile mefulün yer 
         değiştirmesine (Semantic Shift) ve cümlenin mantıksal predikatının ters dönmesine yol açar.
+        
+        [FAZ 1.3 - BAĞLAMSAL KISIT]: Eğer Gayri Munsarif kelime Harf-i Ta'rif ('al-') alırsa 
+        munsarifleşir ve esre (Kesra) kabul eder hale gelir. Bu ontolojik restorasyon mekanizması, 
+        düşük seviyeli Z3 hata sızıntılarını donanımsal düzeyde keser.
         """
         stem_1 = core_word[:-1]
+        is_stem_diptote = self.graph_client.check_diptote_status(stem_1)
         
-        # Gayri Munsariflerin (Diptote) İ'rab Tespiti
-        if self.graph_client.check_diptote_status(stem_1) and core_word[-1] in ("u", "a", "e", "i", "ı"):
-            # Fetha ile bitiyorsa ya Mansub'dur ya da Majrur'dur. Nahiv motoru bağlama göre karar verecektir.
-            irab_val = "Marfu" if core_word[-1] in ("u", "ü") else "Mansub_or_Majrur"
+        # 1. Saf Gayri Munsarif İ'rabı (al- takısı almamış)
+        if is_stem_diptote and not has_al_prefix and core_word[-1] in ("u", "a", "e", "i", "ı"):
+            if core_word[-1] in ("u", "ü"):
+                irab_val = "Marfu"
+            elif core_word[-1] in ("a", "e"):
+                irab_val = "Mansub_or_Majrur"
+            else:
+                # Gayri Munsarif esre (i/ı) alamaz. Almışsa Waqf durumunda bir deformasyon olarak mühürlenir.
+                irab_val = "Waqf"
+                
             return MorphologicalAnalysis(
                 original_word=original_word, root=stem_1, pattern="Gayri_Munsarif",
                 ontologic_type="Ism", thematic_role=None, irab=irab_val, is_diptote=True,
                 gender="Muzekker", number="Mufred"
             )
 
-        # Waqf Durumundaki Gayri Munsarifler
-        if self.graph_client.check_diptote_status(core_word):
+        # 2. Waqf Durumundaki Gayri Munsarifler
+        if self.graph_client.check_diptote_status(core_word) and not has_al_prefix:
             return MorphologicalAnalysis(
                 original_word=original_word, root=core_word, pattern="Gayri_Munsarif",
                 ontologic_type="Ism", thematic_role=None, irab="Waqf", is_diptote=True,
                 gender="Muzekker", number="Mufred"
             )
 
-        # Münevven (Tenvinli) İsimler
+        # 3. Münevven (Tenvinli) İsimler
         if core_word.endswith(("un", "ün")):
             return MorphologicalAnalysis(original_word=original_word, root=core_word[:-2], pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Marfu", gender="Muzekker", number="Mufred")
         elif core_word.endswith(("an", "en")):
@@ -338,7 +349,7 @@ class SarfEngine:
         elif core_word.endswith(("in", "ın")):
             return MorphologicalAnalysis(original_word=original_word, root=core_word[:-2], pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Majrur", gender="Muzekker", number="Mufred")
             
-        # Mudaf (Tenvinsiz) İsimler
+        # 4. Mudaf veya Harf-i Ta'rifli (Tenvinsiz) İsimler (al- almış Gayri Munsarifler de buraya düşer)
         elif core_word.endswith(("u", "ü")):
             return MorphologicalAnalysis(original_word=original_word, root=core_word[:-1], pattern="Alem/Camid_Mudaf", ontologic_type="Ism", irab="Marfu", gender="Muzekker", number="Mufred")
         elif core_word.endswith(("a", "e")):

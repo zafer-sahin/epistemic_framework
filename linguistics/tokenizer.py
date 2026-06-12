@@ -60,6 +60,41 @@ class EpistemicTokenizer:
         if current_token:
             tokens.append("".join(current_token))
         return tokens
+
+    def _apply_monadic_clitic_splitting(self, token: str) -> List[str]:
+        """
+        .. mantik_kurali:: Cebirsel Monad Ayrıştırması ve Özyineli Araz Yalıtımı
+        Arapçada 'Huruf-u Meâni' (Arazlar/Edatlar) birbirleri üzerine binebilir (Örn: wa-la-innema).
+        Bu metod, kelimenin önündeki arazları cebirsel bir özyineleme (recursion) ile soyarken, 
+        Kasr edatları gibi korunması gereken monadların (Cevher) bütünlüğünü garanti altına alır.
+        
+        Birinci seviye tokenizasyonda Kripke uzayına (SMT) gidecek mantıksal operatörlerin 
+        (Universal Exclusion) bozulmaması kritik bir zorunluluktur.
+        """
+        # 1. Monadik Bütünlük Koruması: Token zaten bir monad ise parçalamayı derhal durdur
+        if token in self.protected_particles:
+            return [token]
+            
+        # 2. Öncelikli Araz (Clitic) Taraması ve Hiyerarşik Ayrıştırma
+        for prefix in self.clitic_prefixes:
+            # Tire (-) ile ayrılmış transliterasyon yapıları için temizlik (Örn: wa-innema)
+            target_prefix = prefix + "-" if token.startswith(prefix + "-") else prefix
+            
+            if token.startswith(target_prefix):
+                remainder = token[len(target_prefix):]
+                
+                # a) Kalan kısım korumalı bir monad ise (Örn: wa-innema -> wa, innema)
+                if remainder in self.protected_particles:
+                    return [prefix, remainder]
+                
+                # b) Kalan kısım asgari kök (Cevher) olabilecek potansiyeldeyse (en az 3 harf/Sülâsî)
+                if len(remainder) >= 3:
+                    # Yığılmış arazları (Örn: fa-li-yakul) çözmek için derinlemesine özyineleme (recursion)
+                    recursive_split = self._apply_monadic_clitic_splitting(remainder)
+                    return [prefix] + recursive_split
+                    
+        # 3. Hiçbir araz bağıntısı bulunamadıysa lafzı (Cevher) bütünüyle döndür
+        return [token]
         
     def tokenize(self, sentence: str, epoch: str = "Classical") -> List[str]:
         """
@@ -81,35 +116,8 @@ class EpistemicTokenizer:
         
         normalized_tokens = []
         for token in raw_tokens:
-            # İstisna kuralı: Kasr ve Hasr edatlarının monadik (bölünemez) bütünlüğünün korunması
-            if token in self.protected_particles:
-                normalized_tokens.append(token)
-                continue
-                
-            split_occurred = False
-            
-            # .. mantik_kurali:: Araz'ın Cevher'den Ayrıştırılması (Clitic Extraction)
-            # Döngü, bitişik nizamdaki mantıksal operatörleri (Harf) asıl kelimeden (İsim/Fiil) 
-            # ayırarak, Z3 SMT çözücüsünde kullanılacak soyut sözdizim ağacının (AST) temel 
-            # yapraklarını (Leaf Nodes) izole eder.
-            for prefix in self.clitic_prefixes:
-                if token.startswith(prefix) and len(token) > len(prefix) + 2:
-                    remainder = token[len(prefix):]
-                    
-                    # Eğer ayrışma sonucu kalan kısım kendi başına bir monad ise (Örn: wa+innema)
-                    if remainder in self.protected_particles:
-                        normalized_tokens.append(prefix)
-                        normalized_tokens.append(remainder)
-                        split_occurred = True
-                        break
-                    else:
-                        normalized_tokens.append(prefix)
-                        normalized_tokens.append(remainder)
-                        split_occurred = True
-                        break
-            
-            # Herhangi bir Araz (ek) taşımayan saf Cevher (kök kelime)
-            if not split_occurred:
-                normalized_tokens.append(token)
+            # Edat yığılmalarını (Clitic stacking) ve monadları cebirsel matrise göre ayrıştır
+            split_result = self._apply_monadic_clitic_splitting(token)
+            normalized_tokens.extend(split_result)
                 
         return normalized_tokens
