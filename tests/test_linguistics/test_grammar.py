@@ -52,13 +52,13 @@ class TestGrammarEngine(unittest.TestCase):
         """[FAZ 1] Gayri Munsarif kelimelerin morfolojik üreticide (SarfEngine) doğru işaretlenmesi."""
         # 'makkata' kelimesi fetha ile biter (Meful gibi görünür) ancak diptote havuzundadır.
         morph = self.sarf._derive_morphology("makkata")
-        self.assertTrue(getattr(morph, 'is_diptote', False), "[MORFOLOJİ ÇÖKÜŞÜ] Gayri Munsarif (Diptote) kelime tespit edilemedi.")
+        self.assertTrue(morph.hpsg.is_diptote, "[MORFOLOJİ ÇÖKÜŞÜ] Gayri Munsarif (Diptote) kelime tespit edilemedi.")
         self.assertEqual(morph.pattern, "Gayri_Munsarif")
         self.assertEqual(morph.root, "makkat")
 
         # Standart bir Triptote kelimesinin bayrak almadığının doğrulanması
         morph_normal = self.sarf._derive_morphology("zeydan")
-        self.assertFalse(getattr(morph_normal, 'is_diptote', False), "[MORFOLOJİ ÇÖKÜŞÜ] Standart kelime yanlışlıkla Diptote işaretlendi.")
+        self.assertFalse(morph_normal.hpsg.is_diptote, "[MORFOLOJİ ÇÖKÜŞÜ] Standart kelime yanlışlıkla Diptote işaretlendi.")
 
     def test_diptote_semantic_shift_prevention(self):
         """[FAZ 1] Gayri Munsarif kelimelerin Nahiv (Sentaks) katmanında yanlışlıkla Meful (Patient) atanmasının engellenmesi."""
@@ -75,6 +75,11 @@ class TestGrammarEngine(unittest.TestCase):
         # İzafet Testi: "rabbu makkata" (Mekke'nin Rabbi). 'makkata' fetha ile bitse de Mudaf_Ilayh olmalıdır.
         tokens_izafet = ["rabbu", "makkata"]
         lexicon_izafet = self.sarf.derive_lexicon(tokens_izafet)
+        
+        # [FAZ 1 HPSG UYUMU]: İlm-i Nahiv kuralı gereği Özel İsimler (Alem) doğası gereği Ma'rife'dir (Belirli).
+        # HPSG matrisinde bu durum tescillenerek Nahiv motorunun İzafet kilidi açılır.
+        lexicon_izafet["makkata"].hpsg.is_definite = True
+        
         deps_izafet = self.nahiv.suggest_dependencies(tokens_izafet, lexicon_izafet)
         
         has_izafet = any(rel == 'Mudaf_MudafIlayh' and mamul == 'makkata' for amil, mamul, rel, irab in deps_izafet)

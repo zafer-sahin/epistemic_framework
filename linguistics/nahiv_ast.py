@@ -1,5 +1,6 @@
 import networkx as nx
 from typing import List, Dict, Tuple, Optional, Any
+from enum import Enum
 from linguistics.sarf_parser import MorphologicalAnalysis
 
 """
@@ -28,6 +29,11 @@ class NahivDependencyCompiler:
     [FAZ 5 - LITERATE CHUNKING]: Bilişsel Yükü (Cognitive Load) asgari seviyede tutmak ve 
     "Hesaplanabilir Gramer Kitabı" vizyonunu gerçekleştirmek için, karmaşık çözümleme 
     algoritması hiyerarşik alt fonksiyonlara (Private Methods) yalıtılmıştır. 
+    
+    [FAZ 1 ENTEGRASYONU]: Tüm yüzeysel .endswith() metotları silinmiş, yerine 
+    SarfEngine'den beslenen Tip-Güvenli (Type-safe) HPSG Feature Matrisleri (Irab, Number, Gender) 
+    entegre edilmiştir. Bu, Kırık Çoğullar (Cemi Mükesser) ve İ'rab bi-l-Huruf vakalarında 
+    Z3 kilitlenmelerini kökünden engeller.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") 
@@ -73,7 +79,23 @@ class NahivDependencyCompiler:
             "an": "Mucaveze"            # Uzaklaşma/Aşma kısıtı (Transcendence)
         }
 
-    def _is_definite(self, token: str) -> bool:
+    def _get_irab_val(self, morph: MorphologicalAnalysis) -> str:
+        """HPSG matrisinden irab değerini güvenli şekilde çeker."""
+        if not morph.hpsg or not morph.hpsg.irab:
+            return "Unknown"
+        if isinstance(morph.hpsg.irab, Enum):
+            return morph.hpsg.irab.value
+        return str(morph.hpsg.irab)
+
+    def _get_gender_val(self, morph: MorphologicalAnalysis) -> str:
+        if not morph.hpsg or not morph.hpsg.gender: return "Unknown"
+        return morph.hpsg.gender.value if isinstance(morph.hpsg.gender, Enum) else str(morph.hpsg.gender)
+
+    def _get_number_val(self, morph: MorphologicalAnalysis) -> str:
+        if not morph.hpsg or not morph.hpsg.number: return "Unknown"
+        return morph.hpsg.number.value if isinstance(morph.hpsg.number, Enum) else str(morph.hpsg.number)
+
+    def _is_definite(self, token: str, lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], visited: Optional[set] = None) -> bool:
         """
         .. mantik_kurali:: Ma'rife ve Nekra (Belirlilik ve Belirsizlik)
         Bir varlığın 'al-' takısı alması, onun evrensel kümeden (Universal Set) çekilip, 
@@ -82,8 +104,35 @@ class NahivDependencyCompiler:
         $$\exists x \in \text{World}: P(x) \land \forall y (P(y) \implies x = y)$$
         Bu durum Z3 SMT'de Skolemizasyon sürecini doğrudan etkiler; nekra lafızlar varoluşsal 
         (Exists), ma'rife lafızlar ise spesifik sabitler (Constants) olarak derlenir.
+
+        [FAZ 1 - BAĞLAMSAL KISIT]: Yalnızca 'al-' takısına bakılmaz. "Marifeye muzaf olan 
+        nekra da marife olur" kuralı gereği, AST üzerindeki İzafet zincirleri (Mudaf_MudafIlayh) 
+        özyineli (recursive) olarak taranır. Bu, teolojik metinlerdeki ardışık tamlamalarda 
+        oluşabilecek Exists/Constant Z3 uyuşmazlığını (Misquantification) çözer.
         """
-        return token.lower().startswith(self.definite_article)
+        if visited is None: 
+            visited = set()
+        if token in visited: 
+            return False
+        visited.add(token)
+
+        morph = lexicon.get(token)
+        
+        # 1. Saf (Lafzî) Belirlilik
+        if morph and getattr(morph.hpsg, 'is_definite', False):
+            return True
+        if morph and morph.pattern == "Ism_Isaret":
+            return True
+        if token.lower() in ["huve", "hiye", "huma", "hum", "hunne", "ente", "enti", "entuma", "entum", "entunne", "ene", "nahnu"]:
+            return True
+
+        # 2. İzafet (Bağlamsal) Zincirlemesi
+        for amil, mamul, rel, _ in dependencies:
+            if amil == token and rel == 'Mudaf_MudafIlayh':
+                if self._is_definite(mamul, lexicon, dependencies, visited):
+                    return True
+                    
+        return False
 
     def _identify_primary_governors(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> Tuple[Optional[str], int, Optional[str], int]:
         """
@@ -102,10 +151,14 @@ class NahivDependencyCompiler:
         for idx, token in enumerate(tokens):
             morph = lexicon.get(token)
             if morph:
-                if morph.ontologic_type == "Fiil":
+                o_type = morph.ontologic_type
+                if morph.hpsg and morph.hpsg.ontologic_type:
+                    o_type = morph.hpsg.ontologic_type.value if isinstance(morph.hpsg.ontologic_type, Enum) else str(morph.hpsg.ontologic_type)
+                
+                if o_type == "Fiil":
                     amil_token = token
                     amil_index = idx
-                elif morph.ontologic_type == "Harf_Inne":
+                elif o_type == "Harf_Inne":
                     inne_token = token
                     inne_index = idx
         return amil_token, amil_index, inne_token, inne_index
@@ -121,11 +174,17 @@ class NahivDependencyCompiler:
             $$\forall x (\text{Sifat}(x) \iff \text{Mevsuf}(x))$$ 
             şeklindeki mantıksal çift yönlü gerektirmeyi (Biconditional) Z3'e mühürler.
         """
-        if m1 and m1.ontologic_type == "Harf_Tevkid":
+        if not m1: return False
+        
+        o_type = m1.ontologic_type
+        if m1.hpsg and m1.hpsg.ontologic_type:
+            o_type = m1.hpsg.ontologic_type.value if isinstance(m1.hpsg.ontologic_type, Enum) else str(m1.hpsg.ontologic_type)
+
+        if o_type == "Harf_Tevkid":
             dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
             return True
             
-        if m1 and m1.ontologic_type == "Harf_Kasr":
+        if o_type == "Harf_Kasr":
             kasr_direction = 'Mevsuf_to_Sifat'
             if t1.lower() == "innema":
                 if amil_index != -1 and idx < amil_index:
@@ -180,7 +239,7 @@ class NahivDependencyCompiler:
 
             m2 = lexicon.get(t2)
             # Gayri Munsarif (Diptotes) bükün kuralı: Cer durumunda fetha alması (Semantic Shift koruması)
-            if m2 and getattr(m2, 'is_diptote', False):
+            if m2 and getattr(m2.hpsg, 'is_diptote', False):
                 dependencies.append((t1, t2, 'Mecrur_Diptote_Override', 'Majrur'))
             else:
                 dependencies.append((t1, t2, 'Harf_Mecrur', 'Majrur'))
@@ -190,10 +249,14 @@ class NahivDependencyCompiler:
                 prev_token = tokens[prev_idx]
                 prev_morph = lexicon.get(prev_token)
                 if prev_morph:
-                    if prev_morph.ontologic_type == "Fiil":
+                    o_type = prev_morph.ontologic_type
+                    if prev_morph.hpsg and prev_morph.hpsg.ontologic_type:
+                        o_type = prev_morph.hpsg.ontologic_type.value if isinstance(prev_morph.hpsg.ontologic_type, Enum) else str(prev_morph.hpsg.ontologic_type)
+
+                    if o_type == "Fiil":
                         potential_amils.append(prev_token)
                         break
-                    elif prev_morph.ontologic_type == "Ism" and prev_morph.thematic_role in ["Agent", "Patient", "Action"]:
+                    elif o_type == "Ism" and prev_morph.thematic_role in ["Agent", "Patient", "Action"]:
                         potential_amils.append(prev_token)
                         break
 
@@ -208,38 +271,54 @@ class NahivDependencyCompiler:
             return True
         return False
 
-    def _apply_nominal_adjuncts(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
+    def _apply_nominal_adjuncts(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], tokens: List[str], idx: int, lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
         .. mantik_kurali:: İzafet (Tamlamalar) ve Kesişim (Intersection) Uzayı
             İsim tamlamaları (İzafet) ve Sıfat uyumları, Z3 uzayında varlıkların 
             alt-kümelerini (Subset: $x \in Y$) veya özellik kesişimlerini 
             (Intersection: $x \in A \cap B$) matematiksel olarak tanımlar.
-        """
-        if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
-            is_diptote_majrur = getattr(m2, 'is_diptote', False) and t2.lower().endswith('a')
             
-            # İzafet Kuralı (Muzaf nekra, Muzafun İleyh ma'rife/mecrur)
-            if not self._is_definite(t1) and (self._is_definite(t2) or t2.lower().endswith(('in', 'i')) or is_diptote_majrur):
+        [FAZ 1 ENTEGRASYONU]: İzafet, Hâl, Temyiz ve Sıfat tamlamaları; saf ontolojik 
+        matrisler olan Irab, Number, Gender ve Definiteness bayrakları eşleştirilerek 
+        denetlenir (Feature Unification). Bu, Gayri Munsarif veya Cemi Mükesser kalıplarındaki görsel/dizgisel 
+        uyumsuzlukları matematiksel olarak aşar.
+        """
+        if m1 and m2 and getattr(m1, 'ontologic_type', '') == "Ism" and getattr(m2, 'ontologic_type', '') == "Ism":
+            irab_m2 = self._get_irab_val(m2)
+            irab_m1 = self._get_irab_val(m1)
+            
+            def_t1 = self._is_definite(t1, lexicon, dependencies)
+            def_t2 = self._is_definite(t2, lexicon, dependencies)
+
+            # 1. İzafet Kuralı (Muzaf nekra, Muzafun İleyh ma'rife/mecrur)
+            if not def_t1 and (def_t2 or irab_m2 == "Majrur"):
                 dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
             
-            # Hal Kuralı (Zaman/Durum zarfı)
-            elif t2.lower().endswith('an') and m1.thematic_role in ["Agent", "Patient", "Action"]:
-                dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
+            # 2. Hâl ve Temyiz Ayrımı (Ontolojik Nitelik Ayrımı)
+            elif (irab_m2 == "Mansub" or irab_m2 == "Mansub_or_Majrur") and getattr(m1, 'thematic_role', '') in ["Agent", "Patient", "Action"]:
+                is_mustak = "Camid" not in getattr(m2, 'pattern', '') and "Gayri_Munsarif" not in getattr(m2, 'pattern', '')
+                if is_mustak:
+                    dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
+                else:
+                    dependencies.append((t1, t2, "Rel_Temyiz", "Mansub"))
 
-            # Sıfat-Mevsuf Uyum Kuralı
+            # 3. Sıfat-Mevsuf Uyum Kuralı (Tam Unification)
             is_sifat_uyumu = False
-            if self._is_definite(t1) == self._is_definite(t2):
-                if t1[-2:] == t2[-2:]:
+            if def_t1 == def_t2:
+                if irab_m1 == irab_m2 and self._get_gender_val(m1) == self._get_gender_val(m2) and self._get_number_val(m1) == self._get_number_val(m2):
                     is_sifat_uyumu = True
-                elif getattr(m2, 'is_diptote', False) and t1.lower().endswith(('in', 'i')) and t2.lower().endswith('a'):
-                    is_sifat_uyumu = True
+                
+                # Gayri Munsarif İstisnası için tolerans (Mansub_or_Majrur HPSG matrisinde örtüşürse)
+                elif getattr(m2.hpsg, 'is_diptote', False) and irab_m1 == "Majrur" and irab_m2 == "Mansub_or_Majrur":
+                    if self._get_gender_val(m1) == self._get_gender_val(m2) and self._get_number_val(m1) == self._get_number_val(m2):
+                        is_sifat_uyumu = True
             
             if is_sifat_uyumu:
                 dependencies.append((t1, t2, 'Sifat_Mevsuf', 'Tabi'))
             return True
         return False
 
-    def _apply_bedel_apposition(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
+    def _apply_bedel_apposition(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
         .. pedagojik_anlati:: Bedel ve Mantıksal Kimlik Çözümlemesi (Pointer Aliasing)
             Bedel, kendisinden önce geçen ismin (Mübdelun Minh) ontolojik kimliğine 
@@ -247,13 +326,18 @@ class NahivDependencyCompiler:
             Z3 motorunda bu yapı, iki farklı EntitySort değişkeninin hafızada 
             aynı pointer'a eşitlenmesi (Identity: $Zeyd = Kardes$) demektir.
         """
-        if m1 and m2 and m1.ontologic_type == "Ism" and m2.ontologic_type == "Ism":
-            if self._is_definite(t1) and self._is_definite(t2) and t1[-2:] == t2[-2:]:
-                if m1.thematic_role == "Entity" and m2.thematic_role == "Entity":
-                    is_already_sifat = any((rel == 'Sifat_Mevsuf' and u == t1 and v == t2) for u, v, rel, _ in dependencies)
-                    if not is_already_sifat:
-                        dependencies.append((t1, t2, 'Bedel_Identity', 'Tabi_Identity'))
-                        return True
+        if m1 and m2 and getattr(m1, 'ontologic_type', '') == "Ism" and getattr(m2, 'ontologic_type', '') == "Ism":
+            if self._is_definite(t1, lexicon, dependencies) and self._is_definite(t2, lexicon, dependencies):
+                irab_match = self._get_irab_val(m1) == self._get_irab_val(m2)
+                gen_match = self._get_gender_val(m1) == self._get_gender_val(m2)
+                num_match = self._get_number_val(m1) == self._get_number_val(m2)
+                
+                if irab_match and gen_match and num_match:
+                    if getattr(m1, 'thematic_role', '') == "Entity" and getattr(m2, 'thematic_role', '') == "Entity":
+                        is_already_sifat = any((rel == 'Sifat_Mevsuf' and u == t1 and v == t2) for u, v, rel, _ in dependencies)
+                        if not is_already_sifat:
+                            dependencies.append((t1, t2, 'Bedel_Identity', 'Tabi_Identity'))
+                            return True
         return False
 
     def _apply_conditional_and_disjunctive_logic(self, t1: str, t2: str, dependencies: List[Tuple[str, str, str, str]]) -> bool:
@@ -307,8 +391,8 @@ class NahivDependencyCompiler:
             if self._apply_pragmatic_modifiers(t1, t2, m1, amil_index, i, dependencies): continue
             if self._apply_dynamic_transitions(t1, t2, tokens, i, dependencies): continue
             if self._apply_spatial_mutaallak(t1, t2, tokens, i, lexicon, dependencies): continue
-            if self._apply_nominal_adjuncts(t1, t2, m1, m2, dependencies): continue
-            if self._apply_bedel_apposition(t1, t2, m1, m2, dependencies): continue
+            if self._apply_nominal_adjuncts(t1, t2, m1, m2, tokens, i, lexicon, dependencies): continue
+            if self._apply_bedel_apposition(t1, t2, m1, m2, lexicon, dependencies): continue
             if self._apply_conditional_and_disjunctive_logic(t1, t2, dependencies): continue
             if self._apply_shamsiyye_modalities(t1, t2, dependencies): continue
 
@@ -353,7 +437,7 @@ class NahivDependencyCompiler:
             (Predication: $x \in Y$) bağını matematiksel olarak enjekte eder.
         """
         has_zarf_mustakar = any(rel in ['Muteallak_Mekan', 'Muteallak_Harf'] and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
-        ism_tokens = [t for t in tokens if lexicon.get(t) and lexicon.get(t).ontologic_type == "Ism"]
+        ism_tokens = [t for t in tokens if lexicon.get(t) and getattr(lexicon.get(t), 'ontologic_type', '') == "Ism"]
         
         if has_zarf_mustakar and len(ism_tokens) >= 1:
              mubteda = ism_tokens[0]
@@ -382,8 +466,8 @@ class NahivDependencyCompiler:
                 for d in edges_to_remove:
                     dependencies.remove(d)
 
-                is_mubteda_marife = self._is_definite(mubteda)
-                is_haber_marife = self._is_definite(haber) if haber != 'Kainun_Virtual' else False
+                is_mubteda_marife = self._is_definite(mubteda, lexicon, dependencies)
+                is_haber_marife = self._is_definite(haber, lexicon, dependencies) if haber != 'Kainun_Virtual' else False
                 
                 dependencies.append(('Rabita_Virtual', mubteda, 'Rabita_Subject', 'Marfu'))
                 dependencies.append(('Rabita_Virtual', haber, 'Rabita_Predicate', 'Marfu'))
@@ -417,27 +501,29 @@ class NahivDependencyCompiler:
                 continue
                 
             morph = lexicon.get(token)
-            if not morph or morph.ontologic_type != "Ism":
+            if not morph or getattr(morph, 'ontologic_type', '') != "Ism":
                 continue
 
-            is_diptote = getattr(morph, 'is_diptote', False)
+            irab_val = self._get_irab_val(morph)
 
-            if token.lower().endswith('un') or (is_diptote and token.lower().endswith('u')):
+            if irab_val == "Marfu":
                 is_inne_haber = any(rel == 'Amel_Inne_Haber' and mamul == token for _, mamul, rel, _ in dependencies)
                 if not is_inne_haber:
                     dependencies.append((amil_token, token, 'Fail', 'Marfu'))
                     has_explicit_fail = True
-            elif token.lower().endswith('an') or (is_diptote and token.lower().endswith('a')):
-                is_hal = any(rel == 'Rel_Hal' and mamul == token for _, mamul, rel, _ in dependencies)
+            
+            elif irab_val == "Mansub" or irab_val == "Mansub_or_Majrur":
+                is_hal_temyiz = any(rel in ['Rel_Hal', 'Rel_Temyiz'] and mamul == token for _, mamul, rel, _ in dependencies)
                 is_majrur = any(mamul == token and (irab == 'Majrur' or rel == 'Mecrur_Diptote_Override') for _, mamul, rel, irab in dependencies)
                 is_inne_ism = any(rel == 'Amel_Inne_Ism' and mamul == token for _, mamul, rel, _ in dependencies)
                 
-                if not is_hal and not is_majrur and not is_inne_ism:
+                if not is_hal_temyiz and not is_majrur and not is_inne_ism:
                     if idx < amil_index:
                         dependencies.append((amil_token, token, 'Rel_Ihtisas', 'Mansub'))
                     else:
                         dependencies.append((amil_token, token, 'Meful', 'Mansub'))
-            elif token.lower().endswith(('in', 'i')):
+            
+            elif irab_val == "Majrur":
                 is_sub_tree_child = any((rel == 'Mudaf_MudafIlayh' or rel == 'Rel_Atif' or rel == 'Harf_Mecrur') and t2 == token for _, t2, rel, _ in dependencies)
                 if not is_sub_tree_child:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
@@ -489,12 +575,14 @@ class NahivDependencyCompiler:
             node_attrs = {"virtual": False, "ast_node_class": "StandardEntity"}
             if lexicon and token in lexicon:
                 m = lexicon[token]
-                if m.ontologic_type == "Harf_Inne" or token.lower() in self.shart_luzumi or token.lower() in self.munfasila_inadi:
+                o_type = getattr(m, 'ontologic_type', '')
+                
+                if o_type == "Harf_Inne" or token.lower() in self.shart_luzumi or token.lower() in self.munfasila_inadi:
                     node_attrs["ast_node_class"] = "EpistemicOperatorNode"
                     node_attrs["operator_type"] = "Necessity_or_Condition"
                 elif token.lower() in self.modal_adverbs:
                     node_attrs["ast_node_class"] = "ModalOperatorNode"
-                elif m.ontologic_type == "Fiil":
+                elif o_type == "Fiil":
                     node_attrs["ast_node_class"] = "ActionNode"
             self.dependency_graph.add_node(token, **node_attrs)
             

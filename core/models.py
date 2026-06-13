@@ -5,6 +5,55 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Literal, Dict, Any
 
+# [FAZ 1 ENTEGRASYONU]: HPSG (Head-driven Phrase Structure Grammar) ve İlm-i Sarf Matrisi Enumarasyonları
+
+class IrabState(str, Enum):
+    RAF = "Raf"
+    NASB = "Nasb"
+    CER = "Cer"
+    CEZM = "Cezm"
+    MEBNI = "Mebni"
+
+class GrammaticalNumber(str, Enum):
+    MUFRED = "Mufred"
+    TESNIYE = "Tesniye"
+    CEMI = "Cemi"
+
+class Gender(str, Enum):
+    MUZEKKER = "Muzekker"
+    MUENNES = "Muennes"
+
+class OntologicType(str, Enum):
+    ISM_CAMID = "Ism_Camid"
+    ISM_MUSTAK = "Ism_Mustak"
+    FIIL = "Fiil"
+    HARF_INNE = "Harf_Inne"
+    HARF_CER = "Harf_Cer"
+    HARF_ATIF = "Harf_Atif"
+    HARF_SART = "Harf_Sart"
+    HARF_NIDA = "Harf_Nida"
+    HARF_ISTIFHAM = "Harf_Istifham"
+    HARF_NEFY = "Harf_Nefy"
+    HARF_TAHKIK = "Harf_Tahkik"
+    ZARF = "Zarf"
+
+class HPSGFeatureMatrix(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    irab: Optional[IrabState] = Field(default=None, description="Ontolojik-Sentaktik konum (Raf/Nasb/Cer/Cezm)")
+    number: Optional[GrammaticalNumber] = Field(default=None, description="Varlığın niceliği (Mufred/Tesniye/Cemi)")
+    gender: Optional[Gender] = Field(default=None, description="Varlığın cinsiyeti (Muzekker/Muennes)")
+    ontologic_type: Optional[OntologicType] = Field(default=None, description="Zat/Araz/Amil ayrımı (Camid/Mustak/Fiil vb.)")
+    is_diptote: bool = Field(default=False, description="Gayri Munsarif kısıtı (İlleteyn). Cer durumunda kesra yerine fetha alır.")
+    is_definite: bool = Field(default=False, description="Bağlamsal belirlilik (Marife/Nekra). Z3 Skolemizasyon/Varoluşsal niceleyici tayini için.")
+
+class NahivToken(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    index: int = Field(description="Cümle içerisindeki doğrusal indis (Lineer Zaman Oku)")
+    surface_form: str = Field(description="Sathî (zahirî) kelime formu")
+    root: Optional[str] = Field(default=None, description="Ontolojik kök (Cüz-ü Lisanî)")
+    pattern: Optional[str] = Field(default=None, description="İlm-i Sarf vezni (Örn: fa'ala, mef'ul, mufa'ale)")
+    hpsg: HPSGFeatureMatrix = Field(default_factory=HPSGFeatureMatrix, description="Deterministik kurallarla doldurulmuş Tip-Güvenli (Type-safe) özellik matrisi")
+
 class EpistemicNamespace(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str

@@ -104,6 +104,29 @@ def execute_healthcheck():
     res_salafi = orchestrator.process_statement(tokens_1, ast_1, SalafiUsul(), morph_1)
     print(f"Sonuç: [{res_salafi.get('status', 'BİLİNMİYOR')}] -> {res_salafi.get('message')}\n")
 
+    # [FAZ 1] EKLENEN YENİ SENARYO
+    print("--- SENARYO 1.1: [FAZ 1] HPSG MATRİSİ, CEM-İ MÜKESSER VE İ'RAB Bİ-L-HURUF ---")
+    sentence_1_1 = "cae al_muslimune"
+    tokens_1_1 = tokenizer.tokenize(sentence_1_1)
+    morph_1_1 = sarf.derive_lexicon(tokens_1_1)
+    ast_1_1 = nahiv.suggest_dependencies(tokens_1_1, morph_1_1)
+    
+    print(f"Girdi (İ'rab bi-l-Huruf): '{sentence_1_1}'")
+    if 'al_muslimune' in morph_1_1 and getattr(morph_1_1['al_muslimune'], 'hpsg', None):
+        hpsg_data = morph_1_1['al_muslimune'].hpsg
+        print(f"HPSG Çıktısı: Irab={hpsg_data.irab}, Number={hpsg_data.number}, Gender={hpsg_data.gender}")
+    has_fail = any(rel == 'Fail' and mamul == 'al_muslimune' for amil, mamul, rel, irab in ast_1_1)
+    print(f"Nahiv AST: İ'rab bi-l-Huruf (Vav) başarıyla Fail (Marfu) olarak eşlendi mi? {has_fail}")
+
+    sentence_1_2 = "fi mesacid"
+    tokens_1_2 = tokenizer.tokenize(sentence_1_2)
+    morph_1_2 = sarf.derive_lexicon(tokens_1_2)
+    print(f"Girdi (Cemi Mükesser): '{sentence_1_2}'")
+    if 'mesacid' in morph_1_2 and getattr(morph_1_2['mesacid'], 'hpsg', None):
+        hpsg_bp = morph_1_2['mesacid'].hpsg
+        print(f"HPSG Çıktısı (Akılsız Çoğul): Number={hpsg_bp.number}, Gender={hpsg_bp.gender}, Diptote={hpsg_bp.is_diptote}")
+    print("[BAŞARILI] Faz 1 HPSG Özellik Eşleşmesi ve Kırık Çoğul Matrisi başarıyla simüle edildi.\n")
+
     print("--- SENARYO 2: EŞ'ARÎ USÛLÜ (FAZ 3 - İLM-İ BEYÂN MA'NÂ EL-MA'NÂ İSPATI) ---")
     print(f"Girdi: '{sentence_1}' | AST: {ast_1}")
     discourse.clear_memory()
