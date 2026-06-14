@@ -17,6 +17,8 @@ from linguistics.sarf_parser import MorphologicalAnalysis
     4. [FAZ 2 ENTEGRASYONU]: Edilgen eylemlerde (Mebnî lil-Meçhul) failsiz eylem safsatasını 
        önlemek üzere ontolojik sanal failin (Unknown_Agent_Virtual) grafiğe zerk edildiğini 
        matematiksel teorem ispatları (Proof of Concept) şeklinde doğrular.
+    5. [FAZ 3 ENTEGRASYONU]: İsm-i Mevsûl (Sıla) ve Cümle-i Fiiliye Haber matrislerinin
+       Kripke uzayında deterministik alt-kapsüller (SubClause/PointerAlias) ürettiğini kanıtlar.
 """
 
 class TestNahivASTAndOntology:
@@ -39,7 +41,10 @@ class TestNahivASTAndOntology:
             "fi": MorphologicalAnalysis(original_word="fi", root="fi", pattern="Harf", ontologic_type="Harf"),
             "beytin": MorphologicalAnalysis(original_word="beytin", root="beyt", pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Majrur", thematic_role="Entity"),
             "daima": MorphologicalAnalysis(original_word="daima", root="daim", pattern="Zarf", ontologic_type="Harf"),
-            "in": MorphologicalAnalysis(original_word="in", root="in", pattern="Harf_Shart", ontologic_type="Harf")
+            "in": MorphologicalAnalysis(original_word="in", root="in", pattern="Harf_Shart", ontologic_type="Harf"),
+            # FAZ 3 Test Verileri: İsm-i Mevsûl ve Geniş Zaman Fiili
+            "ellezi": MorphologicalAnalysis(original_word="ellezi", root="ellezi", pattern="Ism_Mevsul", ontologic_type="Ism_Mevsul", is_definite=True),
+            "yansuru": MorphologicalAnalysis(original_word="yansuru", root="nsr", pattern="Yaf'ulu", ontologic_type="Fiil", hidden_pronoun="Huve")
         }
 
     def test_epistemic_necessity_of_inne(self):
@@ -197,3 +202,47 @@ class TestNahivASTAndOntology:
         assert virtual_agent_edge["relation"] == "Fail"
         assert virtual_agent_edge["irab"] == "Marfu_Virtual"
         assert ast.nodes["Unknown_Agent_Virtual"]["ast_node_class"] == "DRT_ExistentialNode"
+
+    def test_ism_mevsul_and_sila_subclause(self):
+        """
+        .. mantik_kurali:: İsm-i Mevsûl ve Sıla Cümlesi (Lambda Soyutlaması)
+        [FAZ 3 ENTEGRASYONU]: "Zeydan ellezi daraba" (O Zeyd ki vurdu).
+        Arapçada 'Ellezî' (Mevsûl) sıradan bir varlık değil, Z3 Kripke uzayında Lambda 
+        ($\lambda x. \Phi(x)$) işlevi gören bir işaretçidir. Test, Mevsûl'den fiile 
+        'Rel_Sila' bağının çekildiğini ve sanal Âid zamirinin Pointer Aliasing 
+        (Hafıza eşitlemesi) için otonom olarak üretildiğini ispatlar.
+        """
+        tokens = ["zeydan", "ellezi", "daraba"]
+        dependencies = self.compiler.suggest_dependencies(tokens, self.mock_lexicon)
+        ast = self.compiler.build_ast(tokens, dependencies, self.mock_lexicon)
+        
+        # Ellezi düğümünün LambdaAbstractionNode olarak işaretlendiğini doğrula
+        assert ast.nodes["ellezi"]["ast_node_class"] == "LambdaAbstractionNode"
+        
+        # Sıla bağının SubClausePredicate olarak mühürlendiğini doğrula
+        sila_edge = ast.edges["ellezi", "daraba"]
+        assert sila_edge["relation"] == "Rel_Sila"
+        assert sila_edge["z3_mapping"] == "SubClausePredicate"
+        
+        # Âid zamirinin sanal olarak türetilip Pointer Alias yapıldığını doğrula
+        assert "daraba_Aid_Virtual" in ast.nodes
+        aid_edge = ast.edges["ellezi", "daraba_Aid_Virtual"]
+        assert aid_edge["relation"] == "Rel_Aid"
+        assert aid_edge["z3_mapping"] == "PointerAlias"
+
+    def test_cumle_i_fiiliye_haber_and_action_rabita(self):
+        """
+        .. pedagojik_anlati:: Cümle-i Fiiliye Haber
+        [FAZ 3 ENTEGRASYONU]: "Zeydan yansuru" (Zeyd yardım eder).
+        Mübteda (Zeyd) ile Haber olan Fiil (Yansuru) arasındaki bağın sıradan bir 
+        özellik aidiyeti (Predication) değil, doğrudan aksiyon yüklemi (Rabita_Cümle_Fiiliye)
+        olarak Kripke uzayına (SubClausePredicate) yansıdığını ispatlar.
+        """
+        tokens = ["zeydan", "yansuru"]
+        dependencies = self.compiler.suggest_dependencies(tokens, self.mock_lexicon)
+        ast = self.compiler.build_ast(tokens, dependencies, self.mock_lexicon)
+        
+        # Mübteda ile Cümle-i Fiiliye haberi bağlandığını doğrula
+        action_edge = ast.edges["yansuru", "zeydan"]
+        assert action_edge["relation"] == "Rabita_Cümle_Fiiliye"
+        assert action_edge["z3_mapping"] == "SubClausePredicate"

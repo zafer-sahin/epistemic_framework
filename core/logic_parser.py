@@ -12,6 +12,8 @@ class Z3ExpressionBuilder:
     Faz 1 - Adım 4 kapsamında: İlm-i Nahiv'deki Rabıta (Identity), İnne'nin Ameli (Necessity), 
     ve Müteallak (SpaceSort) gibi klasik Arapça ontolojilerinin Modal Mantık karşılıkları
     (Kripke Semantiği) sisteme entegre edilmiştir.
+    [FAZ 3 ENTEGRASYONU]: İsm-i Mevsûl (Sıla Cümleleri) için 'SubClauseSila' 
+    (Lambda Soyutlaması ve Küme Kesişimi) otonom düğümleri eklenmiştir.
     """
     def __init__(self, max_depth: int = 15):
         # 1. Ontolojik Temel Evren (Sorts)
@@ -109,7 +111,7 @@ class Z3ExpressionBuilder:
                 return z3.Not(self._eval_node(node.args[0], bound_vars, current_depth + 1))
             
             # ------------------------------------------------------------------
-            # 2. İLM-İ NAHİV SENTAKTİK-ONTOLOJİK MÜHÜRLERİ (FAZ 1 EKLENTİLERİ)
+            # 2. İLM-İ NAHİV SENTAKTİK-ONTOLOJİK MÜHÜRLERİ (FAZ 1 VE 3 EKLENTİLERİ)
             # ------------------------------------------------------------------
             elif func_name == 'Identity':
                 # Bedel ve Zero-Copula: İki değişkenin Kripke uzayında aynı varlık pointer'ına (EntitySort) eşitlenmesi.
@@ -135,6 +137,11 @@ class Z3ExpressionBuilder:
                 arg_b = self._eval_node(node.args[1], new_vars, current_depth + 1)
                 
                 return z3.And(arg_a, z3.Exists([t_prime], z3.And(self.TimeTransition(current_t_vasfi, t_prime), arg_b)))
+                
+            elif func_name == 'SubClauseSila':
+                # [FAZ 3 ENTEGRASYONU] İsm-i Mevsûl (Sıla Cümlesi): Lambda soyutlamasının 
+                # Z3 FOL matrisindeki karşılığı olarak Kesişim (Intersection / z3.And).
+                return z3.And(*[self._eval_node(arg, bound_vars, current_depth + 1) for arg in node.args])
 
             # ------------------------------------------------------------------
             # 3. ŞARTLI VE AYRIK ÖNERMELER (ŞEMSİYYE DİYALEKTİĞİ)

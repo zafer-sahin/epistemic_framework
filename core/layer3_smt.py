@@ -12,6 +12,8 @@ class Layer3SMTCircuitBreaker:
     olarak engeller.
     [FAZ 3 ENTEGRASYONU]: 'İnne' ve kardeşlerinin ürettiği 'Epistemic_Necessity' operatörü 
     Zorunluluk Operatörü (□) olarak Kripke uzayına (z3.ForAll ile) işlenmiştir.
+    [FAZ 3.1 ENTEGRASYONU]: İsm-i Mevsûl (`SubClause_Sila`), Âid Zamiri (`Rel_Pointer_Alias`) ve
+    Cümle-i Fiiliye Haber (`Rel_Rabita_Action`) yapıları SMT çözümleyiciye tanıtılmıştır.
     [FAZ 4 ENTEGRASYONU]: Kripke Uzayına Mekânsal Boyut (SpaceSort) eklendi. Tüm Modal,
     Deontik ve Epistemik operatörler s_const (Space) düzleminde kısıtlanmıştır.
     [FAZ 5 ENTEGRASYONU]: Mekân (Zarfiyye) ve Harf-i Cer müteallak bağları için Çift-Yönlü 
@@ -49,7 +51,8 @@ class Layer3SMTCircuitBreaker:
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                 
-                if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                # [FAZ 3 ENTEGRASYONU] Rel_Pointer_Alias: Hafıza eşdeğerliği
+                if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber", "Rel_Pointer_Alias"]:
                     return amil_const == mamul_const
                 
                 # [FAZ 5 ENTEGRASYONU] Çift-Yönlü Mekân/Müteallak Zerk İşlemi
@@ -61,6 +64,12 @@ class Layer3SMTCircuitBreaker:
                     rel_constraint = zarfiyye_pred(w_const, tz_const, tv_const, s_const, amil_const, mamul_const)
                     return z3.And(loc_constraint, rel_constraint)
 
+                # [FAZ 3 ENTEGRASYONU] Cümle-i Fiiliye Haber
+                # Özneyi doğrudan eylem mantığına birleştirir
+                if pred_id == "Rel_Rabita_Action":
+                    action_pred = self.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
+                    return action_pred(w_const, tz_const, tv_const, s_const, mamul_const)
+
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
                 return predicate(w_const, tz_const, tv_const, s_const, amil_const, mamul_const)
             else:
@@ -68,7 +77,11 @@ class Layer3SMTCircuitBreaker:
         else:
             args = [self._build_z3_expr(a, w_const, tz_const, tv_const, s_const) for a in item.args]
             
-            if item.operator == "Luzumi":
+            # [FAZ 3 ENTEGRASYONU] Sıla Cümlesi (İsm-i Mevsûl Lambda İzdüşümü)
+            # Sıla cümlesindeki tüm önermelerin, Mevsûl varlığıyla eş zamanlı (And) geçerli olmasını sağlar.
+            if item.operator == "SubClause_Sila":
+                return z3.And(args)
+            elif item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
                 return z3.And(args) 
@@ -115,7 +128,7 @@ class Layer3SMTCircuitBreaker:
                         amil_str, mamul_str = arg_id.split('::', 1)
                         
                         # [FAZ 5 YAMASI] Arity Mismatch Koruması ve System Constraints Baypası
-                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber", "Rel_Pointer_Alias"]:
                             continue
                             
                         target_pred_id = "Rel_Zarfiyye" if pred_id == "LocatedIn" else pred_id
@@ -146,7 +159,7 @@ class Layer3SMTCircuitBreaker:
                         amil_str, mamul_str = arg_id.split('::', 1)
                         
                         # [FAZ 5 YAMASI] Arity Mismatch Koruması ve System Constraints Baypası
-                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber", "Rel_Pointer_Alias"]:
                             continue
                             
                         target_pred_id = "Rel_Zarfiyye" if pred_id == "LocatedIn" else pred_id

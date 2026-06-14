@@ -168,6 +168,31 @@ class IlmWadAdapter:
                 atomic_predicates.append((ism_id, ism_id, 1))
                 atomic_predicates.append((haber_id, haber_id, 1))
 
+    def _resolve_subclauses_and_pointers(self, amil: str, mamul: str, rel_type: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> bool:
+        """
+        .. mantik_kurali:: İsm-i Mevsûl (Lambda Soyutlaması) ve Âid Zamiri Çözümlemesi
+        [FAZ 3 ENTEGRASYONU]: İsm-i Mevsûl ile başlayan yan cümleleri (Sıla) sıradan 
+        yüklemlerden ayırarak Z3 uzayına `SubClause_Sila` matrisi (NestedPredicate) olarak gönderir.
+        Âid zamiri ise FOL'da iki değişkenin hafıza eşitlemesi ($x = y$) olarak raptedilir.
+        """
+        if rel_type == 'Rel_Sila':
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            
+            # Sıla cümlesi ana entity'ye NestedPredicate (Alt Kapsül) olarak bağlanır
+            atomic_predicates.append(NestedPredicate(operator="SubClause_Sila", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
+            atomic_predicates.append((amil_id, amil_id, 1))
+            atomic_predicates.append((mamul_id, mamul_id, 1))
+            return True
+            
+        if rel_type == 'Rel_Aid':
+            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            # Âid zamiri sanal olduğu için doğrudan pointer aliasing oluşturulur
+            atomic_predicates.append(("Rel_Pointer_Alias", f"{amil_id}::{mamul}", 2))
+            return True
+            
+        return False
+
     def _resolve_rabita_and_dynamic_logic(self, amil: str, mamul: str, rel_type: str, irab: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> bool:
         """
         .. felsefe_notu:: Rabıta (Gizli Yüklem) ve Dinamik Geçişler (Dynamic Logic)
@@ -175,6 +200,9 @@ class IlmWadAdapter:
         eşdeğerlik (Identity: $x \equiv y$) ya da özellik aidiyeti (Predication: $x \in Y$) kurar. 
         Ayrıca Fâ-i Füzâiyye gibi atıf harfleri, zaman okunda anlık bir Kripke dünyası sıçramasını 
         (Dynamic State Transition: $W_t \implies W_{t+1}$) tetikler.
+        
+        [FAZ 3 ENTEGRASYONU]: Cümle-i Fiiliye Haberleri (`Rabita_Cümle_Fiiliye`) için
+        aksiyonel yüklem mantığı (`Rel_Rabita_Action`) eklenmiştir.
         """
         if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
             return True
@@ -182,12 +210,15 @@ class IlmWadAdapter:
         if rel_type in ['Rabita_Predication', 'Mubteda_Haber'] and amil == 'Kainun_Virtual':
             return True
 
-        if rel_type in ['Rabita_Identity', 'Rabita_Predication', 'Mubteda_Haber']: 
+        if rel_type in ['Rabita_Identity', 'Rabita_Predication', 'Mubteda_Haber', 'Rabita_Cümle_Fiiliye']: 
             amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             
             if rel_type == 'Rabita_Identity':
                 atomic_predicates.append(("Rel_Rabita_Identity", f"{amil_id}::{mamul_id}", 2))
+            elif rel_type == 'Rabita_Cümle_Fiiliye':
+                # [FAZ 3]: Cümle-i Fiiliye Haber
+                atomic_predicates.append(("Rel_Rabita_Action", f"{amil_id}::{mamul_id}", 2))
             else:
                 atomic_predicates.append(("Rel_Rabita_Predication", f"{amil_id}::{mamul_id}", 2))
             
@@ -282,6 +313,8 @@ class IlmWadAdapter:
         Tüm sentaktik yüzey ağacını (AST), $P(x)$, $R(x, y)$ formundaki mantıksal 
         atomlara (Monads) indirger. Önermenin iskeleti bu sayede felsefi çelişkilerin 
         (UNSAT) denetlenmesi için Z3 motoruna pürüzsüzce sunulur.
+        
+        [FAZ 3 ENTEGRASYONU]: İsm-i Mevsûl (Sıla) ve Pointer (Âid) mantığı izolasyonu eklendi.
         """
         processed_roles = set()
         for amil, mamul, rel_type, irab in dependencies:
@@ -289,6 +322,9 @@ class IlmWadAdapter:
                 continue
                 
             if self._resolve_mutaallak_spatial_logic(amil, mamul, rel_type, dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch, allow_tevil, conflicting_node):
+                continue
+                
+            if self._resolve_subclauses_and_pointers(amil, mamul, rel_type, dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch, allow_tevil, conflicting_node):
                 continue
 
             if rel_type == 'Harf_Mecrur':
@@ -464,6 +500,10 @@ class IlmWadAdapter:
         if word in ["Unknown_Agent_Virtual", "Kainun_Virtual", "Rabita_Virtual"]:
             return word
             
+        # [FAZ 3 KORUMASI] Âid zamirlerinin sanal pointerlarını yakalar
+        if word.endswith("_Aid_Virtual"):
+            return word
+
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
             StrictAirGapValidator.validate_provenance(pronoun_res)
