@@ -1,7 +1,7 @@
 import pytest
 import networkx as nx
 from linguistics.nahiv_ast import NahivDependencyCompiler
-from linguistics.sarf_parser import MorphologicalAnalysis
+from linguistics.sarf_parser import MorphologicalAnalysis, OntologicType, HPSGFeatureMatrix, IrabState, GrammaticalNumber, Gender
 
 """
 .. felsefe_notu:: Literate Testing ve İlm-i Nahiv'in Matematiksel İspatı
@@ -19,6 +19,8 @@ from linguistics.sarf_parser import MorphologicalAnalysis
        matematiksel teorem ispatları (Proof of Concept) şeklinde doğrular.
     5. [FAZ 3 ENTEGRASYONU]: İsm-i Mevsûl (Sıla) ve Cümle-i Fiiliye Haber matrislerinin
        Kripke uzayında deterministik alt-kapsüller (SubClause/PointerAlias) ürettiğini kanıtlar.
+    6. [FAZ 4 ENTEGRASYONU]: Ontolojik Temyiz/Hâl (Zât/Araz) hiyerarşisinin ve sağdan-sola
+       İzafet kilitlenmelerinin niceliksel patlamaları engellediğini doğrular.
 """
 
 class TestNahivASTAndOntology:
@@ -44,7 +46,29 @@ class TestNahivASTAndOntology:
             "in": MorphologicalAnalysis(original_word="in", root="in", pattern="Harf_Shart", ontologic_type="Harf"),
             # FAZ 3 Test Verileri: İsm-i Mevsûl ve Geniş Zaman Fiili
             "ellezi": MorphologicalAnalysis(original_word="ellezi", root="ellezi", pattern="Ism_Mevsul", ontologic_type="Ism_Mevsul", is_definite=True),
-            "yansuru": MorphologicalAnalysis(original_word="yansuru", root="nsr", pattern="Yaf'ulu", ontologic_type="Fiil", hidden_pronoun="Huve")
+            "yansuru": MorphologicalAnalysis(original_word="yansuru", root="nsr", pattern="Yaf'ulu", ontologic_type="Fiil", hidden_pronoun="Huve"),
+            
+            # FAZ 4 Test Verileri: Temyiz (Zât) vs Hâl (Araz) ve İzafet
+            "rakiben": MorphologicalAnalysis(
+                original_word="rakiben", root="rkb", pattern="Fâ'ilun", ontologic_type="Ism_Mustak", irab="Mansub",
+                hpsg=HPSGFeatureMatrix(irab=IrabState.MANSUB, ontologic_type=OntologicType.ISM_MUSTAK, number=GrammaticalNumber.MUFRED, gender=Gender.MUZEKKER)
+            ),
+            "zeyten": MorphologicalAnalysis(
+                original_word="zeyten", root="zyt", pattern="Alem/Camid_Munevven", ontologic_type="Ism_Camid", irab="Mansub",
+                hpsg=HPSGFeatureMatrix(irab=IrabState.MANSUB, ontologic_type=OntologicType.ISM_CAMID, number=GrammaticalNumber.MUFRED, gender=Gender.MUZEKKER)
+            ),
+            "babu": MorphologicalAnalysis(
+                original_word="babu", root="bw", pattern="Alem/Camid_Mudaf", ontologic_type="Ism", irab="Marfu",
+                hpsg=HPSGFeatureMatrix(irab=IrabState.MARFU, ontologic_type=OntologicType.ISM_CAMID, is_definite=False)
+            ),
+            "beyti": MorphologicalAnalysis(
+                original_word="beyti", root="byt", pattern="Alem/Camid_Mudaf", ontologic_type="Ism", irab="Majrur",
+                hpsg=HPSGFeatureMatrix(irab=IrabState.MAJRUR, ontologic_type=OntologicType.ISM_CAMID, is_definite=False)
+            ),
+            "er_racul": MorphologicalAnalysis(
+                original_word="er_racul", root="rcl", pattern="Alem/Camid", ontologic_type="Ism", irab="Majrur",
+                hpsg=HPSGFeatureMatrix(irab=IrabState.MAJRUR, ontologic_type=OntologicType.ISM_CAMID, is_definite=True)
+            )
         }
 
     def test_epistemic_necessity_of_inne(self):
@@ -246,3 +270,51 @@ class TestNahivASTAndOntology:
         action_edge = ast.edges["yansuru", "zeydan"]
         assert action_edge["relation"] == "Rabita_Cümle_Fiiliye"
         assert action_edge["z3_mapping"] == "SubClausePredicate"
+
+    def test_ontological_split_hal_vs_temyiz(self):
+        """
+        .. mantik_kurali:: Ontolojik Zât-Araz Ayrışması (Hâl ve Temyiz)
+        [FAZ 4 ENTEGRASYONU]: Z3 uzayında Temyiz Câmid (Türememiş Zât) olup kalıcı 
+        bir kısıttır (TimeSortZati). Hâl ise Müştak (Türemiş) olup geçici bir 
+        durumdur (TimeSortVasfi). HPSG matrisinden okunan bu farkın Kripke 
+        düğümlerine yansıması test edilir.
+        """
+        # Hâl Senaryosu: "Daraba zeydun rakiben" (Zeyd binerek vurdu) - Rakiben (Müştak/Araz)
+        tokens_hal = ["daraba", "zeydan", "rakiben"]
+        deps_hal = self.compiler.suggest_dependencies(tokens_hal, self.mock_lexicon)
+        ast_hal = self.compiler.build_ast(tokens_hal, deps_hal, self.mock_lexicon)
+        
+        hal_edge = ast_hal.edges["zeydan", "rakiben"]
+        assert hal_edge["relation"] == "Rel_Hal"
+        assert hal_edge["z3_mapping"] == "TimeSortVasfi"
+        
+        # Temyiz Senaryosu: "Daraba zeydun zeyten" (Zeyd zeytin [yağı] bakımından vurdu) - Zeyten (Câmid/Zât)
+        tokens_temyiz = ["daraba", "zeydan", "zeyten"]
+        deps_temyiz = self.compiler.suggest_dependencies(tokens_temyiz, self.mock_lexicon)
+        ast_temyiz = self.compiler.build_ast(tokens_temyiz, deps_temyiz, self.mock_lexicon)
+        
+        temyiz_edge = ast_temyiz.edges["zeydan", "zeyten"]
+        assert temyiz_edge["relation"] == "Rel_Temyiz"
+        assert temyiz_edge["z3_mapping"] == "TimeSortZati"
+
+    def test_right_to_left_izafet_chaining_and_definiteness(self):
+        """
+        .. felsefe_notu:: İzafet Zincirinde Skolemizasyon (Pointer Aliasing) Sızıntısını Önleme
+        [FAZ 4 ENTEGRASYONU]: "Bâbu beyti'r-racul" (Adamın evinin kapısı).
+        Zincirleme isim tamlamalarında, en sondaki marife ismin (`er_racul`) taşıdığı
+        belirlilik (Definiteness / Z3 Skolem Constant), zincirin en başına (`babu`) 
+        kadar özyineli aktarılmalıdır. 
+        """
+        tokens = ["babu", "beyti", "er_racul"]
+        dependencies = self.compiler.suggest_dependencies(tokens, self.mock_lexicon)
+        
+        # İzafet bağlarının kurulduğu ispatlanmalıdır
+        has_babu_beyti = any(u == "babu" and v == "beyti" and rel == "Mudaf_MudafIlayh" for u, v, rel, _ in dependencies)
+        has_beyti_racul = any(u == "beyti" and v == "er_racul" and rel == "Mudaf_MudafIlayh" for u, v, rel, _ in dependencies)
+        
+        assert has_babu_beyti is True
+        assert has_beyti_racul is True
+        
+        # Geriye dönük DAG taraması: 'babu' kelimesi 'er_racul'e kadar gidip marifeliği alabilmelidir.
+        is_babu_definite = self.compiler._is_definite("babu", self.mock_lexicon, dependencies)
+        assert is_babu_definite is True

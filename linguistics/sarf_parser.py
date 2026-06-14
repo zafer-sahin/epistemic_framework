@@ -42,6 +42,8 @@ class Gender(str, Enum):
     MUENNES = "Muennes"
 
 class OntologicType(str, Enum):
+    ISM_CAMID = "Ism_Camid"
+    ISM_MUSTAK = "Ism_Mustak"
     ISM = "Ism"
     FIIL = "Fiil"
     HARF = "Harf"
@@ -213,7 +215,7 @@ class LocalOntoLexGraphClient:
 
     def query_closed_set(self, core_word: str) -> Optional[Dict[str, str]]:
         if core_word in self._ism_isaret_set:
-            return {"pattern": "Ism_Isaret", "ontologic_type": "Ism", "gender": "Muzekker" if core_word in ["haza", "zalike"] else "Muennes", "number": "Mufred"}
+            return {"pattern": "Ism_Isaret", "ontologic_type": "Ism", "hpsg_ontologic_type": "Ism_Camid", "gender": "Muzekker" if core_word in ["haza", "zalike"] else "Muennes", "number": "Mufred"}
         if core_word in self._kasr_set:
             return {"pattern": "Harf_Kasr", "ontologic_type": "Harf_Kasr"}
         if core_word in self._inne_set:
@@ -335,12 +337,13 @@ class SarfEngine:
         result = self.graph_client.query_closed_set(core_word)
         if result:
             o_type = result.get("ontologic_type", "Harf")
+            hpsg_o_type = result.get("hpsg_ontologic_type", o_type)
             
             hpsg = HPSGFeatureMatrix(
                 irab=IrabState.MEBNI,
                 number=GrammaticalNumber(result.get("number")) if result.get("number") else None,
                 gender=Gender(result.get("gender")) if result.get("gender") else None,
-                ontologic_type=OntologicType(o_type) if o_type in [e.value for e in OntologicType] else OntologicType.HARF,
+                ontologic_type=OntologicType(hpsg_o_type) if hpsg_o_type in [e.value for e in OntologicType] else OntologicType.HARF,
                 is_diptote=False,
                 is_definite=has_al_prefix
             )
@@ -376,19 +379,26 @@ class SarfEngine:
             extracted_root = self._apply_ontolex_rules(core_word, entry.extraction_rules)
             
             irab_val = None
-            if entry.ontologic_type == "Ism":
+            hpsg_o_type = entry.ontologic_type
+            
+            if entry.ontologic_type.startswith("Ism"):
                 if core_word.endswith(("un", "ün", "u", "ü")):
                     irab_val = "Marfu"
                 elif core_word.endswith(("an", "en", "a", "e")):
                     irab_val = "Mansub"
                 elif core_word.endswith(("in", "ın", "i", "ı")):
                     irab_val = "Majrur"
+                    
+                if entry.pattern_id in ["Fâ'ilun", "Fâ'ilatun", "Maf'ûlun", "Maf'ûlatun"]:
+                    hpsg_o_type = OntologicType.ISM_MUSTAK
+                else:
+                    hpsg_o_type = OntologicType.ISM_CAMID
 
             hpsg = HPSGFeatureMatrix(
                 irab=IrabState(irab_val) if irab_val else None,
                 number=GrammaticalNumber(entry.number) if entry.number else None,
                 gender=Gender(entry.gender) if entry.gender else None,
-                ontologic_type=OntologicType(entry.ontologic_type) if entry.ontologic_type in [e.value for e in OntologicType] else None,
+                ontologic_type=OntologicType(hpsg_o_type) if hpsg_o_type in [e.value for e in OntologicType] else None,
                 is_diptote=False,
                 is_definite=has_al_prefix
             )
@@ -438,7 +448,7 @@ class SarfEngine:
                 irab=IrabState(irab_val) if irab_val != "Waqf" else IrabState.WAQF,
                 number=GrammaticalNumber(bp_info["number"]),
                 gender=Gender(bp_info["gender"]),
-                ontologic_type=OntologicType.ISM,
+                ontologic_type=OntologicType.ISM_CAMID,
                 is_diptote=is_dip,
                 is_definite=has_al_prefix
             )
@@ -471,11 +481,17 @@ class SarfEngine:
         """
         
         def _build_morph(root: str, pattern: str, irab_val: str, is_dip: bool, gen: str, num: str) -> MorphologicalAnalysis:
+            # [FAZ 4] DİNAMİK ONTOLOJİK ÇÖZÜMLEME (Mustak/Camid Ayrımı)
+            # Çoğul ve Tesniye gibi bükünlere giren kelimelerin (Örn: daribuna) kök imzası (CaCiC) taranarak Mustak statüleri korunur.
+            sig = self._generate_structural_signature(root)
+            is_mustak_sig = sig in ["CaCiC", "maCCuC", "muCaCCiC", "muCaCCaC", "CaCCaC", "CaCaaC"]
+            hpsg_type = OntologicType.ISM_MUSTAK if is_mustak_sig else OntologicType.ISM_CAMID
+
             hpsg = HPSGFeatureMatrix(
-                irab=IrabState(irab_val),
+                irab=IrabState(irab_val) if irab_val != "Waqf" else IrabState.WAQF,
                 number=GrammaticalNumber(num),
                 gender=Gender(gen),
-                ontologic_type=OntologicType.ISM,
+                ontologic_type=hpsg_type,
                 is_diptote=is_dip,
                 is_definite=has_al_prefix
             )

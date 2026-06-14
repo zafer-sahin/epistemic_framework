@@ -47,7 +47,7 @@ class NahivDependencyCompiler:
         self.dependency_graph = nx.DiGraph()
         
         # .. mantik_kurali:: Şemsiyye Kiplikleri (Temporal ve Modal Triggers)
-        self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart", "Rel_Shart_Luzumi"]
+        self.temporal_triggers = ["Rel_Hal", "Rel_Zarf_Zaman", "Rel_Shart", "Rel_Shart_Luzumi", "Rel_Temyiz"]
         
         # Kadiyye-i Şartiyye (Hipotetik Önerme) için Fasıl (Ayrılma) ve Vasıl (Birleşme)
         self.atif_particles = ["wa", "fa", "aw", "summe", "am", "bal", "la", "lakin"]
@@ -102,6 +102,27 @@ class NahivDependencyCompiler:
         if not morph.hpsg or not morph.hpsg.number: return "Unknown"
         return morph.hpsg.number.value if isinstance(morph.hpsg.number, Enum) else str(morph.hpsg.number)
 
+    def _is_inherently_definite(self, token: str, morph: Optional[MorphologicalAnalysis]) -> bool:
+        """Sadece ontolojik veya sözcüksel yapıya bağlı lafzî belirlilik tespiti."""
+        if not morph: 
+            return False
+        if getattr(morph.hpsg, 'is_definite', False):
+            return True
+        pattern = getattr(morph, 'pattern', '')
+        if pattern in ["Ism_Isaret", "Ism_Mevsul"]:
+            return True
+        if token.lower() in ["huve", "hiye", "huma", "hum", "hunne", "ente", "enti", "entuma", "entum", "entunne", "ene", "nahnu", "ellezi", "elleti", "ellezine", "men", "ma"]:
+            return True
+        return False
+
+    def _resolve_izafet_definiteness(self, token: str, lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], visited: set) -> bool:
+        """DAG üzerinde geriye dönük İzafet (Bağlamsal Belirlilik) taraması."""
+        for amil, mamul, rel, _ in dependencies:
+            if amil == token and rel == 'Mudaf_MudafIlayh':
+                if self._is_definite(mamul, lexicon, dependencies, visited):
+                    return True
+        return False
+
     def _is_definite(self, token: str, lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], visited: Optional[set] = None) -> bool:
         """
         .. mantik_kurali:: Ma'rife ve Nekra (Belirlilik ve Belirsizlik)
@@ -118,7 +139,8 @@ class NahivDependencyCompiler:
         oluşabilecek Exists/Constant Z3 uyuşmazlığını (Misquantification) çözer.
         
         [FAZ 4 ENTEGRASYONU]: İzafet zincirinin derinlik sınırı kaldırılarak tam DAG taraması 
-        haline getirilmiştir.
+        haline getirilmiştir. Özyineli olarak Muzaf'tan Muzafun İleyh'e doğru pointer aliasing 
+        yapılarak Z3 niceliyecileri (Skolemization vs Existence) denetlenir.
         """
         if visited is None: 
             visited = set()
@@ -129,23 +151,11 @@ class NahivDependencyCompiler:
         morph = lexicon.get(token)
         
         # 1. Saf (Lafzî) Belirlilik
-        if morph and getattr(morph.hpsg, 'is_definite', False):
-            return True
-        if morph and getattr(morph, 'pattern', '') == "Ism_Isaret":
-            return True
-        if morph and getattr(morph, 'pattern', '') == "Ism_Mevsul":
-            return True
-        if token.lower() in ["huve", "hiye", "huma", "hum", "hunne", "ente", "enti", "entuma", "entum", "entunne", "ene", "nahnu", "ellezi", "elleti", "ellezine", "men", "ma"]:
+        if self._is_inherently_definite(token, morph):
             return True
 
         # 2. İzafet (Bağlamsal) Zincirlemesi (Recursive DAG Traversal)
-        for amil, mamul, rel, _ in dependencies:
-            if amil == token and rel == 'Mudaf_MudafIlayh':
-                # Eğer Muzafun İleyh marife ise, Muzaf da marife statüsü kazanır.
-                if self._is_definite(mamul, lexicon, dependencies, visited):
-                    return True
-                    
-        return False
+        return self._resolve_izafet_definiteness(token, lexicon, dependencies, visited)
 
     def _identify_primary_governors(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> Tuple[Optional[str], int, Optional[str], int]:
         """
@@ -284,6 +294,29 @@ class NahivDependencyCompiler:
             return True
         return False
 
+    def _resolve_izafet_chains(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> None:
+        """
+        [FAZ 4 ENTEGRASYONU]: İzafet zincirlerini sağdan sola (Right-to-Left) kurar.
+        Böylece "Bâbu beyti'r-racul" gibi ardışık tamlamalarda marifelik sondan başa 
+        doğru (DAG üzerinde) eksiksiz aktarılır. Aksi halde _is_definite fonksiyonu 
+        sol taraftaki niceliyicilerde (Quantifier) halüsinasyon yaratır.
+        """
+        for i in range(len(tokens) - 2, -1, -1):
+            t1 = tokens[i]
+            t2 = tokens[i+1]
+            
+            m1 = lexicon.get(t1)
+            m2 = lexicon.get(t2)
+            
+            if m1 and m2 and getattr(m1, 'ontologic_type', '') == "Ism" and getattr(m2, 'ontologic_type', '') == "Ism":
+                irab_m2 = self._get_irab_val(m2)
+                def_t1_lafzi = self._is_inherently_definite(t1, m1)
+                def_t2_contextual = self._is_definite(t2, lexicon, dependencies)
+                
+                if not def_t1_lafzi and (def_t2_contextual or irab_m2 == "Majrur"):
+                    if not any(u == t1 and v == t2 and rel == 'Mudaf_MudafIlayh' for u, v, rel, _ in dependencies):
+                        dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
+
     def _apply_nominal_adjuncts(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], tokens: List[str], idx: int, lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
         .. mantik_kurali:: İzafet (Tamlamalar) ve Kesişim (Intersection) Uzayı
@@ -296,9 +329,11 @@ class NahivDependencyCompiler:
         denetlenir (Feature Unification). Bu, Gayri Munsarif veya Cemi Mükesser kalıplarındaki görsel/dizgisel 
         uyumsuzlukları matematiksel olarak aşar.
         
-        [FAZ 4 ENTEGRASYONU]: Hâl ve Temyiz ontolojik ayrımı katı HPSG matrisinden okunarak
+        [FAZ 4 ENTEGRASYONU]: İzafet kuralı Right-to-Left zincirlemesine taşınmıştır. 
+        Burada yalnızca Hâl ve Temyiz ontolojik ayrımı katı HPSG matrisinden okunarak
         Z3 kısıt uzayı (TimeSortVasfi vs TimeSortZati) için güvence altına alınmıştır.
         """
+        applied = False
         if m1 and m2 and getattr(m1, 'ontologic_type', '') == "Ism" and getattr(m2, 'ontologic_type', '') == "Ism":
             irab_m2 = self._get_irab_val(m2)
             irab_m1 = self._get_irab_val(m1)
@@ -306,12 +341,8 @@ class NahivDependencyCompiler:
             def_t1 = self._is_definite(t1, lexicon, dependencies)
             def_t2 = self._is_definite(t2, lexicon, dependencies)
 
-            # 1. İzafet Kuralı (Muzaf nekra, Muzafun İleyh ma'rife/mecrur)
-            if not def_t1 and (def_t2 or irab_m2 == "Majrur"):
-                dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
-            
-            # 2. Hâl ve Temyiz Ayrımı (Ontolojik Nitelik Ayrımı - Faz 4 Yaması)
-            elif (irab_m2 == "Mansub" or irab_m2 == "Mansub_or_Majrur") and getattr(m1, 'thematic_role', '') in ["Agent", "Patient", "Action"]:
+            # 1. Hâl ve Temyiz Ayrımı (Ontolojik Nitelik Ayrımı - Faz 4 Yaması)
+            if (irab_m2 == "Mansub" or irab_m2 == "Mansub_or_Majrur") and getattr(m1, 'thematic_role', '') in ["Agent", "Patient", "Action"]:
                 
                 # Câmid (Türememiş) ve Müştak (Türemiş) kontrolü HPSG veya Ontolojik Tip üzerinden yapılır
                 m2_o_type = getattr(m2, 'ontologic_type', '')
@@ -323,11 +354,13 @@ class NahivDependencyCompiler:
                 if is_mustak:
                     # Hâl: Geçici durum arazıdır (TimeSortVasfi'ye kilitlenir)
                     dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
+                    applied = True
                 else:
                     # Temyiz: Zâtî ve evrensel bir açıklamadır (TimeSortZati'ye kilitlenir)
                     dependencies.append((t1, t2, "Rel_Temyiz", "Mansub"))
+                    applied = True
 
-            # 3. Sıfat-Mevsuf Uyum Kuralı (Tam Unification)
+            # 2. Sıfat-Mevsuf Uyum Kuralı (Tam Unification)
             is_sifat_uyumu = False
             if def_t1 == def_t2:
                 if irab_m1 == irab_m2 and self._get_gender_val(m1) == self._get_gender_val(m2) and self._get_number_val(m1) == self._get_number_val(m2):
@@ -339,9 +372,12 @@ class NahivDependencyCompiler:
                         is_sifat_uyumu = True
             
             if is_sifat_uyumu:
-                dependencies.append((t1, t2, 'Sifat_Mevsuf', 'Tabi'))
-            return True
-        return False
+                # İzafet Zinciri fazı önden kilitlediği için çift bağlamayı engelle
+                is_mudaf = any(rel == 'Mudaf_MudafIlayh' and u == t1 and v == t2 for u, v, rel, _ in dependencies)
+                if not is_mudaf:
+                    dependencies.append((t1, t2, 'Sifat_Mevsuf', 'Tabi'))
+                    applied = True
+        return applied
 
     def _apply_bedel_apposition(self, t1: str, t2: str, m1: Optional[MorphologicalAnalysis], m2: Optional[MorphologicalAnalysis], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> bool:
         """
@@ -674,6 +710,8 @@ class NahivDependencyCompiler:
         
         amil_token, amil_index, inne_token, inne_index = self._identify_primary_governors(tokens, lexicon)
         
+        self._resolve_izafet_chains(tokens, lexicon, dependencies)
+        
         self._resolve_adjacent_pairs(tokens, lexicon, dependencies, amil_index)
         self._resolve_ism_mevsul_and_sila(tokens, lexicon, dependencies)
         self._resolve_inne_scope(tokens, lexicon, dependencies, inne_token, inne_index, amil_token, amil_index)
@@ -748,6 +786,10 @@ class NahivDependencyCompiler:
                 edge_attrs["z3_mapping"] = "StrictImplication_Luzumi"
             elif rel == 'Rel_Munfasila_Inadi':
                 edge_attrs["z3_mapping"] = "StrictDisjunction_Inadi"
+            elif rel == 'Rel_Hal':
+                edge_attrs["z3_mapping"] = "TimeSortVasfi"
+            elif rel == 'Rel_Temyiz':
+                edge_attrs["z3_mapping"] = "TimeSortZati"
             elif str(rel).startswith('Modal_'):
                 edge_attrs["z3_mapping"] = rel # Örn: Modal_Zaruriyye_i_Mutlaka
                 
@@ -798,7 +840,7 @@ class NahivDependencyCompiler:
                 isolated_phases["PHASE_2_IDENTITY_ALIAS"].append((u, v, data))
             elif rel in ['Amel_Inne_Ism', 'Amel_Inne_Haber', 'Tevkid_Modifier', 'Kasr_Modifier']:
                 isolated_phases["PHASE_3_NECESSITY_SCOPE"].append((u, v, data))
-            elif rel in ['Muteallak_Mekan', 'Muteallak_Harf', 'Rel_Zarf_Zaman', 'Rel_Shart']:
+            elif rel in ['Muteallak_Mekan', 'Muteallak_Harf', 'Rel_Zarf_Zaman', 'Rel_Shart', 'Rel_Hal', 'Rel_Temyiz']:
                 isolated_phases["PHASE_4_SPATIAL_TEMPORAL"].append((u, v, data))
             elif rel in ['Rel_Fa_Fuzaiyye', 'Rel_Fa_Sebebiyye']:
                 isolated_phases["PHASE_5_DYNAMIC_TRANSITION"].append((u, v, data))
