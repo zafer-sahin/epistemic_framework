@@ -13,7 +13,10 @@ from linguistics.sarf_parser import MorphologicalAnalysis
     2. 'İnne' edatının sıradan bir söz edimi değil, Modal Mantıktaki 'Epistemik Zorunluluk' 
        (Necessity: $\square$) olduğunu,
     3. 'Fâ-i Füzâiyye'nin zamanı bükerek 'Dinamik Durum Geçişi' (Dynamic State Transition) 
-       yarattığını matematiksel teorem ispatları (Proof of Concept) şeklinde doğrular.
+       yarattığını,
+    4. [FAZ 2 ENTEGRASYONU]: Edilgen eylemlerde (Mebnî lil-Meçhul) failsiz eylem safsatasını 
+       önlemek üzere ontolojik sanal failin (Unknown_Agent_Virtual) grafiğe zerk edildiğini 
+       matematiksel teorem ispatları (Proof of Concept) şeklinde doğrular.
 """
 
 class TestNahivASTAndOntology:
@@ -30,6 +33,7 @@ class TestNahivASTAndOntology:
             "zeydan": MorphologicalAnalysis(original_word="zeydan", root="zeyd", pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Mansub", gender="Muzekker", number="Mufred", thematic_role="Entity"),
             "kaimun": MorphologicalAnalysis(original_word="kaimun", root="kym", pattern="Fâ'ilun", ontologic_type="Ism", irab="Marfu", gender="Muzekker", number="Mufred", thematic_role="Agent"),
             "daraba": MorphologicalAnalysis(original_word="daraba", root="drb", pattern="Fa'ala", ontologic_type="Fiil", hidden_pronoun="Huve"),
+            "duriba": MorphologicalAnalysis(original_word="duriba", root="drb", pattern="Fu'ila", ontologic_type="Fiil", voice="Passive", hidden_pronoun="Huve"),
             "fa": MorphologicalAnalysis(original_word="fa", root="fa", pattern="Harf", ontologic_type="Harf"),
             "amrun": MorphologicalAnalysis(original_word="amrun", root="amr", pattern="Alem/Camid_Munevven", ontologic_type="Ism", irab="Marfu", gender="Muzekker", number="Mufred"),
             "fi": MorphologicalAnalysis(original_word="fi", root="fi", pattern="Harf", ontologic_type="Harf"),
@@ -169,3 +173,27 @@ class TestNahivASTAndOntology:
         
         # Şart cümlesinde gelen 'fa' artık Füzâiyye değil, Sebebiyye'dir (A -> B Lüzum bağı)
         assert ast_shart.edges["daraba", "amrun"]["z3_mapping"] == "DynamicStateTransition" # Rel_Fa_Sebebiyye (Modus Ponens Chain)
+        
+    def test_mebni_lil_mechul_naib_fail_and_virtual_agent(self):
+        """
+        .. mantik_kurali:: Mebnî lil-Meçhul ve Ontolojik Fail Gizlenmesi (Naib Fâil)
+        [FAZ 2 ENTEGRASYONU]: "Duriba amrun" (Amr vuruldu) önermesinde eylemi yapan (Fail) 
+        formel olarak gizlenmiştir. Kelâmî nedensellik (İlliyet) aksiyomu gereği failsiz 
+        eylem olamayacağı için, SMT uzayına `Unknown_Agent_Virtual` zerk edilir ve merfu 
+        öge (Amr) `Role_Patient` izdüşümü alacak şekilde `Naib_Fail` ilişkisiyle bağlanır.
+        """
+        tokens = ["duriba", "amrun"]
+        dependencies = self.compiler.suggest_dependencies(tokens, self.mock_lexicon)
+        ast = self.compiler.build_ast(tokens, dependencies, self.mock_lexicon)
+        
+        # Amr'ın (merfu isim) Naib_Fail olarak raptedildiği ispatlanmalıdır.
+        naib_fail_edge = ast.edges["duriba", "amrun"]
+        assert naib_fail_edge["relation"] == "Naib_Fail"
+        assert naib_fail_edge["irab"] == "Marfu"
+        
+        # Failsiz eylem paradoksunun sanal aktör ile (Unknown_Agent_Virtual) kapatıldığı ispatlanmalıdır.
+        assert "Unknown_Agent_Virtual" in ast.nodes
+        virtual_agent_edge = ast.edges["duriba", "Unknown_Agent_Virtual"]
+        assert virtual_agent_edge["relation"] == "Fail"
+        assert virtual_agent_edge["irab"] == "Marfu_Virtual"
+        assert ast.nodes["Unknown_Agent_Virtual"]["ast_node_class"] == "DRT_ExistentialNode"

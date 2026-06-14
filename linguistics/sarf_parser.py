@@ -84,6 +84,7 @@ class MorphologicalAnalysis(BaseModel):
     pattern: str        
     ontologic_type: str 
     thematic_role: Optional[str] = None
+    voice: str = Field(default="Active", description="Fiil çatısı: Active (Etken/Mebnî lil-Ma'lûm) veya Passive (Edilgen/Mebnî lil-Meçhul)")
     
     # [FAZ 1] Geriye dönük uyumluluk (Legacy) alanları
     irab: Optional[str] = Field(default=None, description="İ'rab Durumu: Marfu, Mansub, Majrur, vb.")
@@ -121,6 +122,7 @@ class OntoLexMorphEntry(BaseModel):
     pattern_id: str
     ontologic_type: str
     thematic_role: Optional[str] = None
+    voice: str = Field(default="Active")
     gender: Optional[str] = None
     number: Optional[str] = None
     hidden_pronoun: Optional[str] = None
@@ -186,21 +188,27 @@ class LocalOntoLexGraphClient:
         # Klasik medrese müfredatındaki fiil çekim kalıplarının (Vezinler), cebirsel imzalara 
         # (Structural Signatures - CaCaCa) dönüştürülmüş halleridir. Z3 bu imzalara göre kökleri türetir.
         self._pattern_graph: Dict[str, OntoLexMorphEntry] = {
-            "CaCaCa": OntoLexMorphEntry(pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
-            "CaCaCat": OntoLexMorphEntry(pattern_id="Fa'alat", ontologic_type="Fiil", thematic_role="Action", gender="Muennes", number="Mufred", hidden_pronoun="Hiye", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
-            "yaCCiCu": OntoLexMorphEntry(pattern_id="Yaf'ilu", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
-            "taCCiCu": OntoLexMorphEntry(pattern_id="Taf'ilu", ontologic_type="Fiil", thematic_role="Action", gender="Muennes", number="Mufred", hidden_pronoun="Hiye", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
-            "yaCCaCu": OntoLexMorphEntry(pattern_id="Yaf'alu", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
-            "yaCCuCu": OntoLexMorphEntry(pattern_id="Yaf'ulu", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
-            "CaaCa": OntoLexMorphEntry(pattern_id="Fa'ala_Ecvef", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[0, 'W_Y', 3])),
-            "yaCooCu": OntoLexMorphEntry(pattern_id="Yaf'ulu_Ecvef", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'W', 4])),
-            "yaCeeCu": OntoLexMorphEntry(pattern_id="Yaf'ilu_Ecvef", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'Y', 4])),
-            "CaCaa": OntoLexMorphEntry(pattern_id="Fa'ala_Nakis", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Nakis", positions=[0, 2, 'W_Y'])),
-            "iCCaCaCa": OntoLexMorphEntry(pattern_id="Ifta'ala_Ibdal", ontologic_type="Fiil", thematic_role="Action", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ibdal", positions=['IBDAL', 4, 6])),
-            "CaCiCun": OntoLexMorphEntry(pattern_id="Fâ'ilun", ontologic_type="Ism", thematic_role="Agent", gender="Muzekker", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
-            "CaCiCaCun": OntoLexMorphEntry(pattern_id="Fâ'ilatun", ontologic_type="Ism", thematic_role="Agent", gender="Muennes", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
-            "maCCuCun": OntoLexMorphEntry(pattern_id="Maf'ûlun", ontologic_type="Ism", thematic_role="Patient", gender="Muzekker", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
-            "maCCuCaCun": OntoLexMorphEntry(pattern_id="Maf'ûlatun", ontologic_type="Ism", thematic_role="Patient", gender="Muennes", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
+            "CaCaCa": OntoLexMorphEntry(pattern_id="Fa'ala", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
+            "CaCaCat": OntoLexMorphEntry(pattern_id="Fa'alat", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muennes", number="Mufred", hidden_pronoun="Hiye", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
+            "yaCCiCu": OntoLexMorphEntry(pattern_id="Yaf'ilu", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
+            "taCCiCu": OntoLexMorphEntry(pattern_id="Taf'ilu", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muennes", number="Mufred", hidden_pronoun="Hiye", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
+            "yaCCaCu": OntoLexMorphEntry(pattern_id="Yaf'alu", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
+            "yaCCuCu": OntoLexMorphEntry(pattern_id="Yaf'ulu", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
+            
+            # [FAZ 2 ENTEGRASYONU] Mebnî lil-Meçhul (Passive Voice) Fiil Matrisleri
+            "CuCiCa": OntoLexMorphEntry(pattern_id="Fu'ila", ontologic_type="Fiil", thematic_role="Action", voice="Passive", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
+            "yuCCaCu": OntoLexMorphEntry(pattern_id="Yuf'alu", ontologic_type="Fiil", thematic_role="Action", voice="Passive", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
+            
+            "CaaCa": OntoLexMorphEntry(pattern_id="Fa'ala_Ecvef", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[0, 'W_Y', 3])),
+            "yaCooCu": OntoLexMorphEntry(pattern_id="Yaf'ulu_Ecvef", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'W', 4])),
+            "yaCeeCu": OntoLexMorphEntry(pattern_id="Yaf'ilu_Ecvef", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Ecvef", positions=[2, 'Y', 4])),
+            "CaCaa": OntoLexMorphEntry(pattern_id="Fa'ala_Nakis", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ilal_Nakis", positions=[0, 2, 'W_Y'])),
+            "iCCaCaCa": OntoLexMorphEntry(pattern_id="Ifta'ala_Ibdal", ontologic_type="Fiil", thematic_role="Action", voice="Active", gender="Muzekker", number="Mufred", hidden_pronoun="Huve", extraction_rules=OntoLexRule(rule_type="Ibdal", positions=['IBDAL', 4, 6])),
+            
+            "CaCiCun": OntoLexMorphEntry(pattern_id="Fâ'ilun", ontologic_type="Ism", thematic_role="Agent", voice="Active", gender="Muzekker", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
+            "CaCiCaCun": OntoLexMorphEntry(pattern_id="Fâ'ilatun", ontologic_type="Ism", thematic_role="Agent", voice="Active", gender="Muennes", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[0, 2, 4])),
+            "maCCuCun": OntoLexMorphEntry(pattern_id="Maf'ûlun", ontologic_type="Ism", thematic_role="Patient", voice="Passive", gender="Muzekker", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
+            "maCCuCaCun": OntoLexMorphEntry(pattern_id="Maf'ûlatun", ontologic_type="Ism", thematic_role="Patient", voice="Passive", gender="Muennes", number="Mufred", extraction_rules=OntoLexRule(rule_type="Standard", positions=[2, 3, 5])),
         }
 
     def query_closed_set(self, core_word: str) -> Optional[Dict[str, str]]:
@@ -343,6 +351,7 @@ class SarfEngine:
                 pattern=result.get("pattern"),
                 ontologic_type=o_type, 
                 thematic_role=result.get("thematic_role"), 
+                voice="Active",
                 is_diptote=False,
                 gender=result.get("gender"), 
                 number=result.get("number"),
@@ -390,6 +399,7 @@ class SarfEngine:
                 pattern=entry.pattern_id,
                 ontologic_type=entry.ontologic_type, 
                 thematic_role=entry.thematic_role,
+                voice=entry.voice,
                 is_diptote=False, 
                 gender=entry.gender, 
                 number=entry.number,
@@ -439,6 +449,7 @@ class SarfEngine:
                 pattern=bp_info["pattern"],
                 ontologic_type="Ism",
                 thematic_role=None,
+                voice="Active",
                 irab=irab_val,
                 is_diptote=is_dip,
                 gender=bp_info["gender"],
@@ -470,7 +481,7 @@ class SarfEngine:
             )
             return MorphologicalAnalysis(
                 original_word=original_word, root=root, pattern=pattern,
-                ontologic_type="Ism", thematic_role=None, irab=irab_val, is_diptote=is_dip,
+                ontologic_type="Ism", thematic_role=None, voice="Active", irab=irab_val, is_diptote=is_dip,
                 gender=gen, number=num, hpsg=hpsg
             )
 

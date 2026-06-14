@@ -2,12 +2,16 @@ import unittest
 from linguistics.sarf_parser import SarfEngine
 from linguistics.tokenizer import EpistemicTokenizer
 from linguistics.nahiv_ast import NahivDependencyCompiler
+from linguistics.contextual_lexicon import ContextualLexicon
+from linguistics.discourse_state import DiscourseRegister
+from linguistics.ilm_wad_adapter import IlmWadAdapter
 
 class TestGrammarEngine(unittest.TestCase):
     """
     Sarf, Nahiv ve Tokenizer katmanlarındaki İ'lâl, İbdâl ve Terkib
     (Alt-Ağaç) çözümleyicilerini test eden Red-Teaming (Stres) paketi.
     [FAZ 1 ENTEGRASYONU]: Gayri Munsarif (Diptotes) i'rab koruması ve sentaktik rol (Meful kayması) testleri eklendi.
+    [FAZ 2 ENTEGRASYONU]: Edilgen Fiil (Mebnî lil-Meçhul) ve Nâib Fâil Semantik İntikal testleri eklendi.
     """
     def setUp(self):
         self.sarf = SarfEngine()
@@ -84,6 +88,53 @@ class TestGrammarEngine(unittest.TestCase):
         
         has_izafet = any(rel == 'Mudaf_MudafIlayh' and mamul == 'makkata' for amil, mamul, rel, irab in deps_izafet)
         self.assertTrue(has_izafet, "[NAHİV ÇÖKÜŞÜ] Gayri Munsarif kelimenin fetha alması, İzafet (Tamlama) zincirini kopardı.")
+
+    def test_mebni_lil_mechul_semantic_shift_and_virtual_agent(self):
+        """
+        [FAZ 2 ENTEGRASYONU] Edilgen Fiil (Mebnî lil-Meçhul) E2E Semantik İntikal Testi.
+        'Duriba Zeydun' (Zeyd vuruldu) önermesinde Zeyd'in Kripke uzayında eyleyen (Role_Agent) 
+        olarak değil, eyleme maruz kalan (Role_Patient) olarak Z3'e aktarıldığını ve failsiz eylem 
+        safsatasının önüne geçmek için varoluşsal sanal fail (Exists_Virtual_Agent) kapsülünün 
+        üretildiğini doğrular.
+        """
+        # 1. Ortam Hazırlığı
+        lexicon = ContextualLexicon()
+        discourse = DiscourseRegister()
+        adapter = IlmWadAdapter(lexicon, discourse)
+        
+        # Sözlüğe manuel kayıt (Mocking Lexicon)
+        lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
+        lexicon.register_word("drb", "Base", "Fiil_Daraba")
+
+        # 2. Boru Hattı (Pipeline) Çalıştırma
+        tokens = self.tokenizer.tokenize("duriba zeydun")
+        auto_lexicon = self.sarf.derive_lexicon(tokens)
+        deps = self.nahiv.suggest_dependencies(tokens, auto_lexicon)
+        
+        # 3. İlm-i Vaz' Adaptörü ile Semantik IR Üretimi
+        ir_matrix = adapter.generate_ir(tokens, deps, active_namespace="Base", auto_lexicon=auto_lexicon, epoch="Classical")
+        
+        # 4. Red-Teaming Denetimleri
+        # a) Zeyd'in 'Role_Patient' (Edilgen/Meful) rolünü alıp almadığı kontrolü
+        has_role_patient = any(
+            isinstance(p, tuple) and p[0] == "Role_Patient" and p[1] == "Zeyd_Entity"
+            for p in ir_matrix.predicates
+        )
+        self.assertTrue(has_role_patient, "[SEMANTİK ÇÖKÜŞ] Naib Fail (Zeyd) 'Role_Patient' (Eyleme maruz kalan) olarak Z3'e aktarılamadı.")
+        
+        # b) Zeyd'in yanlışlıkla 'Role_Agent' (Eyleyen) rolünü ALMADIĞI kontrolü (Semantic Shift Koruması)
+        has_role_agent_zeyd = any(
+            isinstance(p, tuple) and p[0] == "Role_Agent" and p[1] == "Zeyd_Entity"
+            for p in ir_matrix.predicates
+        )
+        self.assertFalse(has_role_agent_zeyd, "[SEMANTİK KAYMA İHLALİ] Naib Fail (Zeyd) yanlışlıkla eylemi yapan (Role_Agent) olarak işaretlendi!")
+
+        # c) Failsiz Eylem Zırhı: Varoluşsal Sanal Fail (Exists_Virtual_Agent) kapsülünün varlığı
+        has_virtual_agent_capsule = any(
+            hasattr(p, 'operator') and p.operator == "Exists_Virtual_Agent"
+            for p in ir_matrix.predicates
+        )
+        self.assertTrue(has_virtual_agent_capsule, "[ONTOLOJİK BOŞLUK] Edilgen fiilde failsiz eylem safsatasını önleyen 'Exists_Virtual_Agent' kapsülü bulunamadı.")
 
 if __name__ == '__main__':
     unittest.main()

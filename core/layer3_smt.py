@@ -99,6 +99,12 @@ class Layer3SMTCircuitBreaker:
                 # [FAZ 3/4 ENTEGRASYONU] İnne ve Kardeşleri (Tahkik / Yakîn Makamı)
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, tz_const, tv_const, s_const], body)
+            elif item.operator == "Exists_Virtual_Agent":
+                # [FAZ 2 ENTEGRASYONU] Edilgen Fiil/Mebnî lil-Meçhul Ontolojik Zırhı
+                # Unknown_Agent_Virtual Skolem sabiti olmaktan çıkarılarak varoluşsal niceleyici (∃x) yapılır.
+                body = args[0] if len(args) == 1 else z3.And(args)
+                virtual_agent_const = z3.Const("Unknown_Agent_Virtual", self.core_solver.builder.EntitySort)
+                return z3.Exists([virtual_agent_const], body)
             elif item.operator == "Kasr_Sifat_to_Mevsuf":
                 base_truth = args[0] if len(args) == 1 else z3.And(args)
                 exclusion_axioms = []

@@ -494,8 +494,19 @@ class NahivDependencyCompiler:
             Bunun yerine Discourse Representation Theory (DRT) kuralları işletilerek 
             Müstatir Zamir (Hidden Pronoun) cümlenin mantıksal matrisine soyut 
             `z3.Exists` varoluşsal değişkenleri olarak zerk edilir.
+
+            [FAZ 2 ENTEGRASYONU]: Mebnî lil-Meçhul (Edilgen/Passive) Fiil Çözümlemesi.
+            Eğer amilin (fiilin) çatısı (voice) 'Passive' ise:
+            1. Merfu öge (Örn: Zeydun) 'Fail' değil, 'Naib_Fail' olarak işaretlenir.
+            2. 'Fail' (Agent) ontolojik olarak gizlendiği için, nedensellik aksiyomu 
+               gereği AST'ye 'Unknown_Agent_Virtual' (z3.Exists) düğümü Fail olarak raptedilir.
         """
         has_explicit_fail = False
+        has_explicit_naib_fail = False
+        
+        amil_morph = lexicon.get(amil_token)
+        voice = getattr(amil_morph, 'voice', 'Active') if amil_morph else 'Active'
+        
         for idx, token in enumerate(tokens):
             if token == amil_token: 
                 continue
@@ -509,8 +520,12 @@ class NahivDependencyCompiler:
             if irab_val == "Marfu":
                 is_inne_haber = any(rel == 'Amel_Inne_Haber' and mamul == token for _, mamul, rel, _ in dependencies)
                 if not is_inne_haber:
-                    dependencies.append((amil_token, token, 'Fail', 'Marfu'))
-                    has_explicit_fail = True
+                    if voice == "Passive":
+                        dependencies.append((amil_token, token, 'Naib_Fail', 'Marfu'))
+                        has_explicit_naib_fail = True
+                    else:
+                        dependencies.append((amil_token, token, 'Fail', 'Marfu'))
+                        has_explicit_fail = True
             
             elif irab_val == "Mansub" or irab_val == "Mansub_or_Majrur":
                 is_hal_temyiz = any(rel in ['Rel_Hal', 'Rel_Temyiz'] and mamul == token for _, mamul, rel, _ in dependencies)
@@ -529,11 +544,21 @@ class NahivDependencyCompiler:
                     dependencies.append((amil_token, token, 'Majrur', 'Majrur'))
 
         # DRT Müstatir Zamir Zerk Etme (Hidden Pronoun Injection)
-        if amil_token and not has_explicit_fail:
-            amil_morph = lexicon.get(amil_token)
-            hidden_pronoun = getattr(amil_morph, 'hidden_pronoun', None)
-            if hidden_pronoun:
-                dependencies.append((amil_token, hidden_pronoun, 'Fail', 'Marfu_Virtual'))
+        if amil_token:
+            if voice == "Passive":
+                # Aksiyom: Failsiz eylem olamaz. Edilgen yapıda fail varoluşsal bir bilinmeze eşittir.
+                dependencies.append((amil_token, 'Unknown_Agent_Virtual', 'Fail', 'Marfu_Virtual'))
+                
+                # Eğer dışsal bir naib fail (Örn: "Zeyd") yoksa, gizli zamir (Örn: "Huve") naib fail olur.
+                if not has_explicit_naib_fail and amil_morph:
+                    hidden_pronoun = getattr(amil_morph, 'hidden_pronoun', None)
+                    if hidden_pronoun:
+                        dependencies.append((amil_token, hidden_pronoun, 'Naib_Fail', 'Marfu_Virtual'))
+            else:
+                if not has_explicit_fail and amil_morph:
+                    hidden_pronoun = getattr(amil_morph, 'hidden_pronoun', None)
+                    if hidden_pronoun:
+                        dependencies.append((amil_token, hidden_pronoun, 'Fail', 'Marfu_Virtual'))
 
     def suggest_dependencies(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, str, str]]:
         """

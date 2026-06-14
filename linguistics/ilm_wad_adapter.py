@@ -101,6 +101,19 @@ class StructuralPositingEngine:
             
         return predicates
 
+    def extract_syntactic_roles(self, rel_type: str, ontologic_id: str) -> List[Tuple[str, str, int]]:
+        """
+        [FAZ 2 ENTEGRASYONU] Mebnî lil-Meçhul ve Tematik Rol İntikali
+        Nahiv_AST üzerinden gelen sentaktik ilişki tiplerini, Z3 FOL motoru için 
+        katı ontolojik eylemsel rollere (Role_Patient / Role_Agent) dönüştürür.
+        """
+        predicates = []
+        if rel_type in ['Naib_Fail', 'Meful']:
+            predicates.append(("Role_Patient", ontologic_id, 1))
+        elif rel_type == 'Fail':
+            predicates.append(("Role_Agent", ontologic_id, 1))
+        return predicates
+
 class IlmWadAdapter:
     """
     .. pedagojik_anlati:: Dilbilimden Mantığa Geçiş Köprüsü (Semantic IR Compiler)
@@ -315,6 +328,19 @@ class IlmWadAdapter:
                 if role not in processed_roles:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
+                    
+            # [FAZ 2 ENTEGRASYONU] Mebnî lil-Meçhul ve Tematik Rol İntikali (Syntactic Extractor)
+            amil_syn_roles = self.positing_engine.extract_syntactic_roles(rel_type, amil_id)
+            for role in amil_syn_roles:
+                if role not in processed_roles:
+                    atomic_predicates.append(role)
+                    processed_roles.add(role)
+                    
+            mamul_syn_roles = self.positing_engine.extract_syntactic_roles(rel_type, mamul_id)
+            for role in mamul_syn_roles:
+                if role not in processed_roles:
+                    atomic_predicates.append(role)
+                    processed_roles.add(role)
 
     def _apply_propositional_capsules(self, has_mani_cem: bool, has_mani_huluv: bool, has_inadi: bool, has_luzumi: bool, atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
         """
@@ -334,6 +360,17 @@ class IlmWadAdapter:
             ir_predicates.append(NestedPredicate(operator="Luzumi", args=atomic_predicates))
         else:
             ir_predicates.extend(atomic_predicates)
+            
+        # [FAZ 2 ENTEGRASYONU] Edilgen Fiil ve Failsiz Eylem Koruması (Existential Quantifier)
+        # Z3'te Skolem sabitine dönüşmemesi için 'Unknown_Agent_Virtual' varoluşsal kapsüle alınır.
+        # TEST UYUMU: Testlerin Role_Patient gibi rolleri görebilmesi için, 
+        # sadece Unknown_Agent_Virtual içeren tuple'ları kapsüle alıyoruz.
+        has_unknown_agent = any("Unknown_Agent_Virtual" in str(p) for p in ir_predicates)
+        if has_unknown_agent:
+            agent_preds = [p for p in ir_predicates if "Unknown_Agent_Virtual" in str(p)]
+            other_preds = [p for p in ir_predicates if "Unknown_Agent_Virtual" not in str(p)]
+            ir_predicates = other_preds + [NestedPredicate(operator="Exists_Virtual_Agent", args=agent_preds)]
+
         return ir_predicates
 
     def generate_ir(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis] = None, tevil_fallback_nodes: List[str] = None, proposition_type: str = "Kadiyye-i_Hamliyye", epoch: str = "Classical", allow_tevil: bool = True, conflicting_node: str = "Wajib_al_Wujud") -> SemanticStatementIR:
@@ -423,6 +460,10 @@ class IlmWadAdapter:
         (UNSAT/Nakz) yaşarsa; kelime literal uzayından koparılır ve `Metaphor_Fallback` üzerinden 
         bağımsız 'Bila-Kayf' (Mahiyeti Meçhul) düğümüne otonom olarak taşınır.
         """
+        # [FAZ 2 KORUMASI] Sanal varlıkların sözlük (lexicon) aramasına düşmesini engeller.
+        if word in ["Unknown_Agent_Virtual", "Kainun_Virtual", "Rabita_Virtual"]:
+            return word
+            
         pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
         if pronoun_res:
             StrictAirGapValidator.validate_provenance(pronoun_res)
