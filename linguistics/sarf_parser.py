@@ -156,10 +156,13 @@ class LocalOntoLexGraphClient:
     gibi evrensel kalıpları geçici olarak barındıran bir bellek (Hafıza) işlevi görür.
     """
     def __init__(self):
+        # [FAZ 2 / FAZ 14 KORUMASI] Şart, İnadî (Ayrıklık) ve Atıf edatları buraya eksiksiz 
+        # girilmelidir. Aksi halde AST derleyicisi (Nahiv) bunları Waqf (İsim) sanıp 
+        # Rabıta döngüsüne (Cyclic Dependency) sokar.
         self._harf_set = {
-            "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in",
-            "hal", "a", "mata", "kayfa", "man", "ma", "eyne",  
-            "illa", "lam", "lan", "fa", "fe"
+            "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in", "iza", "law",
+            "hal", "a", "mata", "kayfa", "man", "ma", "eyne", "aw", "am", "imma", "amma",
+            "illa", "lam", "lan", "fa", "fe", "bal", "lakin"
         }
         self._tevkid_set = {"kad", "qad", "la", "nun"}
         # İnne ve Kardeşleri (Epistemik Operatörler)

@@ -60,6 +60,7 @@ class NahivDependencyCompiler:
         self.modal_adverbs = {
             "daima": "Daime_i_Mutlaka",         # Zamanın tamamında zorunluluk (De re)
             "qat'an": "Zaruriyye_i_Mutlaka",      # Mutlak zâtî zorunluluk
+            "qatan": "Zaruriyye_i_Mutlaka",       # Tokenizer toleransı (Apostrof sızıntısı)
             "zaruretan": "Zaruriyye_i_Mutlaka",   # Mutlak zâtî zorunluluk
             "rubbema": "Mumkine_i_Amme",          # Olasılık uzayında mevcudiyet
             "qad": "Mumkine_i_Amme",              # Olasılık uzayında mevcudiyet
@@ -175,7 +176,7 @@ class NahivDependencyCompiler:
             morph = lexicon.get(token)
             if morph:
                 o_type = getattr(morph, 'ontologic_type', '')
-                if morph.hpsg and morph.hpsg.ontologic_type:
+                if morph.hpsg and getattr(morph.hpsg, 'ontologic_type', None):
                     o_type = morph.hpsg.ontologic_type.value if isinstance(morph.hpsg.ontologic_type, Enum) else str(morph.hpsg.ontologic_type)
                 
                 if o_type == "Fiil":
@@ -200,7 +201,7 @@ class NahivDependencyCompiler:
         if not m1: return False
         
         o_type = getattr(m1, 'ontologic_type', '')
-        if m1.hpsg and m1.hpsg.ontologic_type:
+        if m1.hpsg and getattr(m1.hpsg, 'ontologic_type', None):
             o_type = m1.hpsg.ontologic_type.value if isinstance(m1.hpsg.ontologic_type, Enum) else str(m1.hpsg.ontologic_type)
 
         if o_type == "Harf_Tevkid":
@@ -273,7 +274,7 @@ class NahivDependencyCompiler:
                 prev_morph = lexicon.get(prev_token)
                 if prev_morph:
                     o_type = getattr(prev_morph, 'ontologic_type', '')
-                    if prev_morph.hpsg and prev_morph.hpsg.ontologic_type:
+                    if prev_morph.hpsg and getattr(prev_morph.hpsg, 'ontologic_type', None):
                         o_type = prev_morph.hpsg.ontologic_type.value if isinstance(prev_morph.hpsg.ontologic_type, Enum) else str(prev_morph.hpsg.ontologic_type)
 
                     if o_type == "Fiil":
@@ -346,7 +347,7 @@ class NahivDependencyCompiler:
                 
                 # Câmid (Türememiş) ve Müştak (Türemiş) kontrolü HPSG veya Ontolojik Tip üzerinden yapılır
                 m2_o_type = getattr(m2, 'ontologic_type', '')
-                if m2.hpsg and m2.hpsg.ontologic_type:
+                if m2.hpsg and getattr(m2.hpsg, 'ontologic_type', None):
                     m2_o_type = m2.hpsg.ontologic_type.value if isinstance(m2.hpsg.ontologic_type, Enum) else str(m2.hpsg.ontologic_type)
                     
                 is_mustak = m2_o_type == "Ism_Mustak" or ("Camid" not in getattr(m2, 'pattern', '') and "Gayri_Munsarif" not in getattr(m2, 'pattern', ''))
@@ -479,7 +480,7 @@ class NahivDependencyCompiler:
                 continue
                 
             o_type = getattr(morph, 'ontologic_type', '')
-            if morph.hpsg and morph.hpsg.ontologic_type:
+            if morph.hpsg and getattr(morph.hpsg, 'ontologic_type', None):
                 o_type = morph.hpsg.ontologic_type.value if isinstance(morph.hpsg.ontologic_type, Enum) else str(morph.hpsg.ontologic_type)
             
             pattern = getattr(morph, 'pattern', '')
@@ -492,7 +493,7 @@ class NahivDependencyCompiler:
                     sub_morph = lexicon.get(sub_token)
                     if sub_morph:
                         sub_o_type = getattr(sub_morph, 'ontologic_type', '')
-                        if sub_morph.hpsg and sub_morph.hpsg.ontologic_type:
+                        if sub_morph.hpsg and getattr(sub_morph.hpsg, 'ontologic_type', None):
                             sub_o_type = sub_morph.hpsg.ontologic_type.value if isinstance(sub_morph.hpsg.ontologic_type, Enum) else str(sub_morph.hpsg.ontologic_type)
                         
                         if sub_o_type == "Fiil":
@@ -548,10 +549,15 @@ class NahivDependencyCompiler:
             m = lexicon.get(t)
             if m and getattr(m, 'ontologic_type', '') == "Ism":
                 is_invalid = any(rel in ['Mudaf_MudafIlayh', 'Harf_Mecrur', 'Mecrur_Diptote_Override', 'Amel_Inne_Ism', 'Amel_Inne_Haber', 'Fail', 'Naib_Fail', 'Meful', 'Rel_Sila', 'Rel_Ihtisas', 'Rel_Hal', 'Rel_Temyiz'] and v == t for u, v, rel, ir in dependencies)
-                # Kayan pencerede "qat'an" veya "daima" modalite olarak sağdan bağlanmışsa (t2->t1)
-                # Döngü Hatası (Cyclic Dependency) engellemesi:
                 is_modal = any(str(rel).startswith('Modal_') and u == t for u, v, rel, ir in dependencies)
-                if not is_invalid and not is_modal:
+                
+                # [CYCLE KORUMASI - DAG GÜVENLİĞİ]: 'imma', 'aw', 'law' gibi mantıksal operatörler
+                # Sarf motorunda yanlışlıkla 'Ism' (Waqf) algılansa bile, üzerlerinde Şart/Ayrıklık yükü varsa
+                # Mübteda olarak seçilmeleri kesin surette engellenir.
+                is_logical_operator = any(rel in ['Rel_Shart_Luzumi', 'Rel_Munfasila_Inadi'] and u == t for u, v, rel, ir in dependencies)
+                is_logical_target = any(rel in ['Rel_Shart_Luzumi', 'Rel_Munfasila_Inadi'] and v == t for u, v, rel, ir in dependencies)
+                
+                if not is_invalid and not is_modal and not is_logical_operator and not is_logical_target:
                     valid_mubteda_candidates.append(t)
 
         if not valid_mubteda_candidates:
@@ -574,7 +580,7 @@ class NahivDependencyCompiler:
             m_sub = lexicon.get(t_sub)
             if m_sub:
                 o_type = getattr(m_sub, 'ontologic_type', '')
-                if m_sub.hpsg and m_sub.hpsg.ontologic_type:
+                if m_sub.hpsg and getattr(m_sub.hpsg, 'ontologic_type', None):
                     o_type = m_sub.hpsg.ontologic_type.value if isinstance(m_sub.hpsg.ontologic_type, Enum) else str(m_sub.hpsg.ontologic_type)
                 
                 if o_type == "Ism":
@@ -582,7 +588,10 @@ class NahivDependencyCompiler:
                     is_sifat = any(rel == 'Sifat_Mevsuf' and v == t_sub for u, v, rel, ir in dependencies)
                     is_badal = any(rel == 'Bedel_Identity' and v == t_sub for u, v, rel, ir in dependencies)
                     is_modal_sub = any(str(rel).startswith('Modal_') and u == t_sub for u, v, rel, ir in dependencies)
-                    if not is_mudaf_ilayh and not is_sifat and not is_badal and not is_modal_sub:
+                    is_logical_operator_sub = any(rel in ['Rel_Shart_Luzumi', 'Rel_Munfasila_Inadi'] and u == t_sub for u, v, rel, ir in dependencies)
+                    is_logical_target_sub = any(rel in ['Rel_Shart_Luzumi', 'Rel_Munfasila_Inadi'] and v == t_sub for u, v, rel, ir in dependencies)
+                    
+                    if not is_mudaf_ilayh and not is_sifat and not is_badal and not is_modal_sub and not is_logical_operator_sub and not is_logical_target_sub:
                         haber = t_sub
                         break
                 elif o_type == "Fiil":

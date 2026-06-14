@@ -605,13 +605,16 @@ def execute_healthcheck():
         print("[HATA] İsm-i Mevsûl (Sıla/Âid) topolojisi başarısız.\n")
 
     print("--- SENARYO 29: FAZ 4 - ZİNCİRLEME İZAFET VE ÖZYİNELİ (RECURSIVE) BELİRLİLİK ---")
-    sentence_29 = "babu beyti zeydin"
+    sentence_29 = "babu beyti er_racul" 
     tokens_29 = tokenizer.tokenize(sentence_29)
     morph_29 = sarf.derive_lexicon(tokens_29)
     ast_29 = nahiv.suggest_dependencies(tokens_29, morph_29)
+    
     discourse.clear_memory()
     print(f"Girdi: '{sentence_29}'")
+    
     is_bab_definite = nahiv._is_definite("babu", morph_29, ast_29)
+    
     print(f"Zincirleme İzafet Sonucu En Baştaki Nekra İsim (Babu) Marife Oldu mu?: {is_bab_definite}")
     if is_bab_definite:
         print("[BAŞARILI] Özyineli (Recursive) bağlamsal belirlilik aktarımı Z3 Skolemizasyonu için doğrulandı.\n")
@@ -619,8 +622,9 @@ def execute_healthcheck():
         print("[HATA] İzafet zincirlemesinde belirlilik (Definiteness) kopukluğu.\n")
 
     print("--- SENARYO 30: FAZ 4 - HÂL (ARAZ) VE TEMYİZ (ZÂTÎ NETLİK) ONTOLOJİK AYRIMI ---")
-    sentence_30a = "jaa zeydun rakiban" # Hal
-    sentence_30b = "hasuna zeydun nefsan" # Temyiz
+    sentence_30a = "daraba daribun rakiben" # Hal (Rakiben -> Müştak)
+    sentence_30b = "daraba daribun zeyten"  # Temyiz (Zeyten -> Câmid)
+    
     tokens_30a = tokenizer.tokenize(sentence_30a)
     morph_30a = sarf.derive_lexicon(tokens_30a)
     ast_30a = nahiv.suggest_dependencies(tokens_30a, morph_30a)
@@ -630,6 +634,7 @@ def execute_healthcheck():
     ast_30b = nahiv.suggest_dependencies(tokens_30b, morph_30b)
     
     discourse.clear_memory()
+    
     print(f"Girdi 1 (Müştak/Türemiş - Hâl Beklentisi): '{sentence_30a}'")
     print(f"Girdi 2 (Câmid/Türememiş - Temyiz Beklentisi): '{sentence_30b}'")
     
@@ -638,6 +643,7 @@ def execute_healthcheck():
     
     print(f"Girdi 1'de Hâl (Geçici Araz - TimeSortVasfi) Tespit Edildi mi?: {has_hal}")
     print(f"Girdi 2'de Temyiz (Zâtî Açıklama - TimeSortZati) Tespit Edildi mi?: {has_temyiz}")
+    
     if has_hal and has_temyiz:
         print("[BAŞARILI] Hâl ve Temyiz ontolojik niteliklerine göre (Müştak/Câmid) başarıyla ayrıştırıldı.\n")
     else:
