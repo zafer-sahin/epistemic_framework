@@ -38,6 +38,9 @@ class NahivDependencyCompiler:
     [FAZ 3 ENTEGRASYONU]: İsm-i Mevsûl (Sıla Cümleleri), Şibh-i Cümle Haberleri ve 
     Cümle-i Fiiliye Haberleri, karmaşık yönlü asiklik çizge (DAG) topolojisinde alt-kısıtlar 
     (Sub-graph Constraints) olarak bağlanmıştır.
+
+    [FAZ 4 ENTEGRASYONU]: Bağlamsal Belirlilik (Contextual Definiteness) özyinelemesi ve
+    Hâl (Araz) / Temyiz (Zâtî Netlik) ayrımları ontolojik kalıp üzerinden ayrıştırılmıştır.
     """
     def __init__(self):
         self.definite_article = ("al_", "el_") 
@@ -113,6 +116,9 @@ class NahivDependencyCompiler:
         nekra da marife olur" kuralı gereği, AST üzerindeki İzafet zincirleri (Mudaf_MudafIlayh) 
         özyineli (recursive) olarak taranır. Bu, teolojik metinlerdeki ardışık tamlamalarda 
         oluşabilecek Exists/Constant Z3 uyuşmazlığını (Misquantification) çözer.
+        
+        [FAZ 4 ENTEGRASYONU]: İzafet zincirinin derinlik sınırı kaldırılarak tam DAG taraması 
+        haline getirilmiştir.
         """
         if visited is None: 
             visited = set()
@@ -132,9 +138,10 @@ class NahivDependencyCompiler:
         if token.lower() in ["huve", "hiye", "huma", "hum", "hunne", "ente", "enti", "entuma", "entum", "entunne", "ene", "nahnu", "ellezi", "elleti", "ellezine", "men", "ma"]:
             return True
 
-        # 2. İzafet (Bağlamsal) Zincirlemesi
+        # 2. İzafet (Bağlamsal) Zincirlemesi (Recursive DAG Traversal)
         for amil, mamul, rel, _ in dependencies:
             if amil == token and rel == 'Mudaf_MudafIlayh':
+                # Eğer Muzafun İleyh marife ise, Muzaf da marife statüsü kazanır.
                 if self._is_definite(mamul, lexicon, dependencies, visited):
                     return True
                     
@@ -288,6 +295,9 @@ class NahivDependencyCompiler:
         matrisler olan Irab, Number, Gender ve Definiteness bayrakları eşleştirilerek 
         denetlenir (Feature Unification). Bu, Gayri Munsarif veya Cemi Mükesser kalıplarındaki görsel/dizgisel 
         uyumsuzlukları matematiksel olarak aşar.
+        
+        [FAZ 4 ENTEGRASYONU]: Hâl ve Temyiz ontolojik ayrımı katı HPSG matrisinden okunarak
+        Z3 kısıt uzayı (TimeSortVasfi vs TimeSortZati) için güvence altına alınmıştır.
         """
         if m1 and m2 and getattr(m1, 'ontologic_type', '') == "Ism" and getattr(m2, 'ontologic_type', '') == "Ism":
             irab_m2 = self._get_irab_val(m2)
@@ -300,12 +310,21 @@ class NahivDependencyCompiler:
             if not def_t1 and (def_t2 or irab_m2 == "Majrur"):
                 dependencies.append((t1, t2, 'Mudaf_MudafIlayh', 'Majrur'))
             
-            # 2. Hâl ve Temyiz Ayrımı (Ontolojik Nitelik Ayrımı)
+            # 2. Hâl ve Temyiz Ayrımı (Ontolojik Nitelik Ayrımı - Faz 4 Yaması)
             elif (irab_m2 == "Mansub" or irab_m2 == "Mansub_or_Majrur") and getattr(m1, 'thematic_role', '') in ["Agent", "Patient", "Action"]:
-                is_mustak = "Camid" not in getattr(m2, 'pattern', '') and "Gayri_Munsarif" not in getattr(m2, 'pattern', '')
+                
+                # Câmid (Türememiş) ve Müştak (Türemiş) kontrolü HPSG veya Ontolojik Tip üzerinden yapılır
+                m2_o_type = getattr(m2, 'ontologic_type', '')
+                if m2.hpsg and m2.hpsg.ontologic_type:
+                    m2_o_type = m2.hpsg.ontologic_type.value if isinstance(m2.hpsg.ontologic_type, Enum) else str(m2.hpsg.ontologic_type)
+                    
+                is_mustak = m2_o_type == "Ism_Mustak" or ("Camid" not in getattr(m2, 'pattern', '') and "Gayri_Munsarif" not in getattr(m2, 'pattern', ''))
+                
                 if is_mustak:
+                    # Hâl: Geçici durum arazıdır (TimeSortVasfi'ye kilitlenir)
                     dependencies.append((t1, t2, "Rel_Hal", "Mansub"))
                 else:
+                    # Temyiz: Zâtî ve evrensel bir açıklamadır (TimeSortZati'ye kilitlenir)
                     dependencies.append((t1, t2, "Rel_Temyiz", "Mansub"))
 
             # 3. Sıfat-Mevsuf Uyum Kuralı (Tam Unification)
@@ -374,10 +393,18 @@ class NahivDependencyCompiler:
             sokan ontolojik mühürlerdir. AST tarafında doğrudan Z3 Modal Operator 
             düğümlerine çevrilir.
         """
+        # Hata 1 (Cyclic Dependency) Düzeltmesi: Kiplik zarfı hem t1 hem de t2 pozisyonunda
+        # olabilir. Kayan pencere kontrolünde cümlenin sonundaysa ('qat'an' gibi) 
+        # t2 pozisyonunda da yakalanıp t1'e eklemlenmelidir.
         if t1.lower() in self.modal_adverbs:
             modality = self.modal_adverbs[t1.lower()]
             dependencies.append((t1, t2, f'Modal_{modality}', 'Mansub'))
             return True
+        elif t2.lower() in self.modal_adverbs:
+            modality = self.modal_adverbs[t2.lower()]
+            dependencies.append((t2, t1, f'Modal_{modality}', 'Mansub'))
+            return True
+            
         return False
 
     def _resolve_adjacent_pairs(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_index: int) -> None:
@@ -475,21 +502,20 @@ class NahivDependencyCompiler:
     def _resolve_nominal_copula(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]]) -> List[Tuple[str, str, str, str]]:
         """
         .. pedagojik_anlati:: Kadiyye-i Hamliyye ve Rabıta (Zero-Copula) Düğümü
-            Arapça isim cümlelerinde (Kadiyye-i Hamliyye) 'dır/dir' bildirme eki (Copula) 
-            görünmezdir (Müstatir). SMT motoru için bu görünmezlik ontolojik kopukluk demektir.
-            Bu algoritma, soyut AST'de görünmez bir "Rabıta Düğümü" (Zero-Copula Node) üreterek; 
-            mübteda ile haber arasına mantıksal eşdeğerlik (Identity: $x = y$) veya aidiyet 
-            (Predication: $x \in Y$) bağını matematiksel olarak enjekte eder.
-
             [FAZ 3 ENTEGRASYONU]: İbn Hişâm'ın 'Muğni'l-Lebîb' kuralı gereği Haber 
             müfred (tekil isim), Şibh-i Cümle (Zarf/Harf-i Cer) veya Cümle-i Fiiliye olabilir.
+            Mübteda ile Haber arasına Rabıta düğümü atılarak zımnî (Copula) bağ kurulur.
+            Hata Ayıklama Yaması: Copula yalnızca İsim Cümlelerinde devreye girer.
         """
         valid_mubteda_candidates = []
         for t in tokens:
             m = lexicon.get(t)
             if m and getattr(m, 'ontologic_type', '') == "Ism":
-                is_invalid = any(rel in ['Mudaf_MudafIlayh', 'Harf_Mecrur', 'Mecrur_Diptote_Override', 'Amel_Inne_Ism', 'Amel_Inne_Haber', 'Fail', 'Naib_Fail', 'Meful', 'Rel_Sila', 'Rel_Ihtisas'] and v == t for u, v, rel, ir in dependencies)
-                if not is_invalid:
+                is_invalid = any(rel in ['Mudaf_MudafIlayh', 'Harf_Mecrur', 'Mecrur_Diptote_Override', 'Amel_Inne_Ism', 'Amel_Inne_Haber', 'Fail', 'Naib_Fail', 'Meful', 'Rel_Sila', 'Rel_Ihtisas', 'Rel_Hal', 'Rel_Temyiz'] and v == t for u, v, rel, ir in dependencies)
+                # Kayan pencerede "qat'an" veya "daima" modalite olarak sağdan bağlanmışsa (t2->t1)
+                # Döngü Hatası (Cyclic Dependency) engellemesi:
+                is_modal = any(str(rel).startswith('Modal_') and u == t for u, v, rel, ir in dependencies)
+                if not is_invalid and not is_modal:
                     valid_mubteda_candidates.append(t)
 
         if not valid_mubteda_candidates:
@@ -498,6 +524,12 @@ class NahivDependencyCompiler:
         mubteda = valid_mubteda_candidates[0]
         mubteda_idx = tokens.index(mubteda)
         haber = None
+        
+        # [Cümle-i Fiiliye vs İsmiye Denetimi]: Eğer ilk geçerli mübteda adayı bir 
+        # Fiil'den SONRA geliyorsa, bu cümle zaten bir Fiil Cümlesidir. Copula iptal edilir.
+        amil_index = next((idx for idx, t in enumerate(tokens) if lexicon.get(t) and getattr(lexicon.get(t), 'ontologic_type', '') == "Fiil"), -1)
+        if amil_index != -1 and amil_index < mubteda_idx:
+            return dependencies
 
         has_zarf_mustakar = any(rel in ['Muteallak_Mekan', 'Muteallak_Harf'] and am == 'Kainun_Virtual' for am, ma, rel, ir in dependencies)
 
@@ -513,15 +545,14 @@ class NahivDependencyCompiler:
                     is_mudaf_ilayh = any(rel == 'Mudaf_MudafIlayh' and v == t_sub for u, v, rel, ir in dependencies)
                     is_sifat = any(rel == 'Sifat_Mevsuf' and v == t_sub for u, v, rel, ir in dependencies)
                     is_badal = any(rel == 'Bedel_Identity' and v == t_sub for u, v, rel, ir in dependencies)
-                    if not is_mudaf_ilayh and not is_sifat and not is_badal:
+                    is_modal_sub = any(str(rel).startswith('Modal_') and u == t_sub for u, v, rel, ir in dependencies)
+                    if not is_mudaf_ilayh and not is_sifat and not is_badal and not is_modal_sub:
                         haber = t_sub
                         break
                 elif o_type == "Fiil":
-                    # [FAZ 3]: Cümle-i Fiiliye Haber
                     haber = t_sub
                     break
         
-        # [FAZ 3]: Şibh-i Cümle Haber (Zarf-ı Müstakar)
         if not haber and has_zarf_mustakar:
             haber = 'Kainun_Virtual'
             
@@ -555,7 +586,7 @@ class NahivDependencyCompiler:
                 dependencies.append((haber, mubteda, 'Rabita_Cümle_Fiiliye', 'Marfu'))
             else:
                 dependencies.append((haber, mubteda, 'Rabita_Predication', 'Marfu'))
-                
+
         return dependencies
 
     def _resolve_verbal_arguments(self, tokens: List[str], lexicon: Dict[str, MorphologicalAnalysis], dependencies: List[Tuple[str, str, str, str]], amil_token: str, amil_index: int) -> None:
@@ -665,7 +696,9 @@ class NahivDependencyCompiler:
         [FAZ 3 MİMARİSİ]: İsm-i Mevsûl (Rel_Sila), Âid Zamiri (Rel_Aid) ve Cümle-i 
         Fiiliye Haber (Rabita_Cümle_Fiiliye) için SMT karşılıkları kısıt haritasına eklenmiştir.
         """
-        self.dependency_graph.clear()
+        # Hata 1 (Graph State Leak) Düzeltmesi: Graf objesini doğrudan .clear() ile silmek 
+        # yerine temiz ve izole yeni bir graf tahsis ediliyor (Thread-Safe).
+        self.dependency_graph = nx.DiGraph()
          
         for token in tokens:
             node_attrs = {"virtual": False, "ast_node_class": "StandardEntity"}

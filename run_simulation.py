@@ -570,6 +570,79 @@ def execute_healthcheck():
     else:
         print("[HATA] Bila-Kayf düğüm taşınması başarısız.\n")
 
+    # -------------------------------------------------------------------------
+    # EKLENEN FAZ 3 VE FAZ 4 SİMÜLASYON SENARYOLARI
+    # -------------------------------------------------------------------------
+
+    print("--- SENARYO 27: FAZ 3 - CÜMLE-İ FİİLİYE HABER (ACTION PREDICATION) ---")
+    sentence_27 = "zeydun yansuru"
+    tokens_27 = tokenizer.tokenize(sentence_27)
+    morph_27 = sarf.derive_lexicon(tokens_27)
+    ast_27 = nahiv.suggest_dependencies(tokens_27, morph_27)
+    discourse.clear_memory()
+    print(f"Girdi: '{sentence_27}'")
+    has_action_copula = any(rel == 'Rabita_Cümle_Fiiliye' for _, _, rel, _ in ast_27)
+    print(f"Fiil Cümlesi Haber Olarak Bağlandı mı? (Rabita_Cümle_Fiiliye): {has_action_copula}")
+    if has_action_copula:
+        print("[BAŞARILI] Mübteda (Zeyd) doğrudan eylem yüklemine (Yansuru) ontolojik olarak bağlandı.\n")
+    else:
+        print("[HATA] Cümle-i Fiiliye Haber bağlantısı başarısız.\n")
+
+    print("--- SENARYO 28: FAZ 3 - İSM-İ MEVSÛL, SILA VE ÂİD ZAMİRİ (LAMBDA SOYUTLAMASI) ---")
+    sentence_28 = "zeydan ellezi daraba"
+    tokens_28 = tokenizer.tokenize(sentence_28)
+    morph_28 = sarf.derive_lexicon(tokens_28)
+    ast_28 = nahiv.suggest_dependencies(tokens_28, morph_28)
+    discourse.clear_memory()
+    print(f"Girdi: '{sentence_28}'")
+    has_sila = any(rel == 'Rel_Sila' for _, _, rel, _ in ast_28)
+    has_aid = any(rel == 'Rel_Aid' for _, _, rel, _ in ast_28)
+    print(f"Sıla Cümlesi Bağlantısı (Rel_Sila): {has_sila}")
+    print(f"Sanal Âid Zamiri Pointer Eşitlemesi (Rel_Aid): {has_aid}")
+    if has_sila and has_aid:
+        print("[BAŞARILI] İsm-i Mevsûl, Sıla cümlesi ve Âid zamiri ile Z3 Lambda alt-grafı olarak mühürlendi.\n")
+    else:
+        print("[HATA] İsm-i Mevsûl (Sıla/Âid) topolojisi başarısız.\n")
+
+    print("--- SENARYO 29: FAZ 4 - ZİNCİRLEME İZAFET VE ÖZYİNELİ (RECURSIVE) BELİRLİLİK ---")
+    sentence_29 = "babu beyti zeydin"
+    tokens_29 = tokenizer.tokenize(sentence_29)
+    morph_29 = sarf.derive_lexicon(tokens_29)
+    ast_29 = nahiv.suggest_dependencies(tokens_29, morph_29)
+    discourse.clear_memory()
+    print(f"Girdi: '{sentence_29}'")
+    is_bab_definite = nahiv._is_definite("babu", morph_29, ast_29)
+    print(f"Zincirleme İzafet Sonucu En Baştaki Nekra İsim (Babu) Marife Oldu mu?: {is_bab_definite}")
+    if is_bab_definite:
+        print("[BAŞARILI] Özyineli (Recursive) bağlamsal belirlilik aktarımı Z3 Skolemizasyonu için doğrulandı.\n")
+    else:
+        print("[HATA] İzafet zincirlemesinde belirlilik (Definiteness) kopukluğu.\n")
+
+    print("--- SENARYO 30: FAZ 4 - HÂL (ARAZ) VE TEMYİZ (ZÂTÎ NETLİK) ONTOLOJİK AYRIMI ---")
+    sentence_30a = "jaa zeydun rakiban" # Hal
+    sentence_30b = "hasuna zeydun nefsan" # Temyiz
+    tokens_30a = tokenizer.tokenize(sentence_30a)
+    morph_30a = sarf.derive_lexicon(tokens_30a)
+    ast_30a = nahiv.suggest_dependencies(tokens_30a, morph_30a)
+    
+    tokens_30b = tokenizer.tokenize(sentence_30b)
+    morph_30b = sarf.derive_lexicon(tokens_30b)
+    ast_30b = nahiv.suggest_dependencies(tokens_30b, morph_30b)
+    
+    discourse.clear_memory()
+    print(f"Girdi 1 (Müştak/Türemiş - Hâl Beklentisi): '{sentence_30a}'")
+    print(f"Girdi 2 (Câmid/Türememiş - Temyiz Beklentisi): '{sentence_30b}'")
+    
+    has_hal = any(rel == 'Rel_Hal' for _, _, rel, _ in ast_30a)
+    has_temyiz = any(rel == 'Rel_Temyiz' for _, _, rel, _ in ast_30b)
+    
+    print(f"Girdi 1'de Hâl (Geçici Araz - TimeSortVasfi) Tespit Edildi mi?: {has_hal}")
+    print(f"Girdi 2'de Temyiz (Zâtî Açıklama - TimeSortZati) Tespit Edildi mi?: {has_temyiz}")
+    if has_hal and has_temyiz:
+        print("[BAŞARILI] Hâl ve Temyiz ontolojik niteliklerine göre (Müştak/Câmid) başarıyla ayrıştırıldı.\n")
+    else:
+        print("[HATA] Hâl ve Temyiz ayrıştırması başarısız.\n")
+
     print("[SİSTEM] Tüm Faz 1-12 ve İlm-i Vaz' (Faz 6) Healthcheck Testleri Tamamlandı. Sıfır Entropi Doğrulandı.")
 
 if __name__ == "__main__":
