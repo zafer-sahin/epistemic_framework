@@ -87,7 +87,9 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             self.orchestrator = EpistemicOrchestrator(self.adapter, self.l1, self.l2, self.l3)
             
             # [FAZ 5] Diyalektik FSM Motoru
-            self.fsm = AdabAlBahthEngine(self.solver, self.discourse)
+            # [HATA DÜZELTMESİ - P0-4]: FSM kendi çözücüsünü kullanır; münazara kapsamları (push/pop)
+            # L3'ün cümle hükümlerine karışmaz.
+            self.fsm = AdabAlBahthEngine(AristotelianSolver(self.ontology), self.discourse)
 
             print("[SİSTEM] N-Tier Boru Hattı ve Âdâb-ı Bahs FSM başarıyla başlatıldı.")
         except Exception as e:

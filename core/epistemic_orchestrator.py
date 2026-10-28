@@ -53,16 +53,19 @@ class EpistemicOrchestrator:
 
         _scan_items(ir_matrix.predicates)
 
-    def _resolve_ilm_i_beyan(self, ir_matrix: SemanticStatementIR, flagged_elements: List[str], school_rules: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    def _resolve_ilm_i_beyan(self, ir_matrix: SemanticStatementIR, flagged_elements: List[str], school_rules: Dict[str, Any]) -> Tuple[bool, List[str], List[Tuple[str, Any]]]:
         """
         [FAZ 3 ENTEGRASYONU] Deterministik Te'vil ve Ma'nâ el-Ma'nâ (İlm-i Beyân) İşlemcisi.
+        [HATA DÜZELTMESİ - P0-2]: Her te'vil adayı yalnızca kendi köprüleriyle sınanır; başarısız adayın
+        köprüleri hiçbir yerde kalmaz. Kabul edilen köprüler, nihai kontrolde yeniden kullanılmak üzere döner.
         """
         allow_tevil = school_rules.get("allow_tevil", False)
         blocked_nodes = school_rules.get("blocked_nodes", [])
         bridge_messages = []
+        accepted_bridges: List[Tuple[str, Any]] = []
 
         if not allow_tevil:
-            return False, bridge_messages
+            return False, bridge_messages, accepted_bridges
 
         tevil_basarili = False
 
@@ -89,9 +92,9 @@ class EpistemicOrchestrator:
                     chain_data = self.l1.find_mana_el_mana_chain(node_str, target_id)
                     
                     if chain_data.get("is_found"):
-                        bridge_proved = self.l3.prove_metaphorical_bridge(chain_data)
-                        
-                        if bridge_proved:
+                        bridge_axioms = self.l3.prove_metaphorical_bridge(chain_data)
+
+                        if bridge_axioms:
                             # MATRİS MUTASYONU ÖNCESİ ORİJİNAL DURUMU YEDEKLE (BACKTRACKING)
                             original_predicates = copy.deepcopy(ir_matrix.predicates)
                             
@@ -122,21 +125,22 @@ class EpistemicOrchestrator:
                                 
                                 ir_matrix.predicates = _traverse_and_replace(ir_matrix.predicates)
                             
-                            # YENİ MATRİSİN SAT KONTROLÜ
-                            l3_result = self.l3.execute_sat_check(ir_matrix)
+                            # YENİ MATRİSİN SAT KONTROLÜ (köprüler yalnızca bu kontrolün kapsamında geçerli)
+                            l3_result = self.l3.execute_sat_check(ir_matrix, bridge_axioms=bridge_axioms)
                             if l3_result["status"] == "SAT":
                                 alaka_str = chain_data.get("alaka_type", "Unknown")
                                 bridge_messages.append(f"İlm-i Beyân Çıkarımı: {node_str} -> {target_id} ({alaka_str}) zihinsel köprüsü Z3'e ispatlatıldı.")
+                                accepted_bridges = bridge_axioms
                                 tevil_basarili = True
-                                break 
+                                break
                             else:
                                 # UNSAT ALINDI: MATRİSİ ESKİ HALİNE DÖNDÜR VE SIRADAKİ ADAYA GEÇ (ROLLBACK)
                                 ir_matrix.predicates = original_predicates
-                                
+
                 if tevil_basarili:
                     break
-                    
-        return tevil_basarili, bridge_messages
+
+        return tevil_basarili, bridge_messages, accepted_bridges
 
     def process_statement(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], usul_profile: AbstractSchoolUsul, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
         max_tevil_retries = usul_profile.dsl_ruleset.get("max_tevil_retries", 1)
@@ -165,13 +169,14 @@ class EpistemicOrchestrator:
                 l1_analysis = self.l1.analyze_ir(ir_matrix)
                 flagged = l1_analysis.get("flagged_elements", [])
                 
-                resolved, bridge_messages = self._resolve_ilm_i_beyan(ir_matrix, flagged, usul_profile.dsl_ruleset)
-                
+                resolved, bridge_messages, accepted_bridges = self._resolve_ilm_i_beyan(ir_matrix, flagged, usul_profile.dsl_ruleset)
+
                 if resolved:
-                    l3_result = self.l3.execute_sat_check(ir_matrix)
+                    l3_result = self.l3.execute_sat_check(ir_matrix, bridge_axioms=accepted_bridges)
                     if l3_result["status"] == "SAT":
                         execution_result["status"] = "SAT"
                         execution_result["tevil_applied"] = True
+                        execution_result["tevil_bridges"] = [name for name, _ in accepted_bridges]
                         msg_append = f" (Te'vil uygulandı)"
                         if bridge_messages:
                             msg_append += " | " + " | ".join(bridge_messages)
@@ -244,7 +249,7 @@ class EpistemicOrchestrator:
                 
                 if model.eval(penalty_score).as_long() == 0:
                     if fsm_engine:
-                        fsm_engine.current_state = "RESOLVED"
+                        fsm_engine.resolve_debate()
                     return {
                         "status": "MUARADAH_INEFFECTIVE",
                         "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik). Mucîb kazandı (İlzam)."
@@ -252,20 +257,15 @@ class EpistemicOrchestrator:
                 else:
                     if fsm_engine:
                         # Çapraz kilitlenme sağlandı, FSM diyalektiği sonuçlandırır.
-                        try:
-                            fsm_engine.solver.solver.pop()
-                            fsm_engine.discourse.pop_scope()
-                        except z3.Z3Exception:
-                            pass
-                        fsm_engine.current_state = "RESOLVED"
-                        
+                        fsm_engine.resolve_debate()
+
                     return {
                         "status": "MUARADAH_SUCCESS",
                         "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ontolojik ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate)."
                     }
             else:
                 if fsm_engine:
-                    fsm_engine.current_state = "RESOLVED"
+                    fsm_engine.resolve_debate()
                 return {
                     "status": "MUJIB_INVALID",
                     "message": "Mucîb'in argümanları ile Sâil'in iddiaları yapısal olarak z3.Optimize düzleminde bile çözülemez bir kilitlenme yarattı."

@@ -1,5 +1,6 @@
 import z3
 from typing import Dict, Any, Tuple, Union, List
+from collections import OrderedDict
 from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
@@ -16,19 +17,22 @@ class Layer3SMTCircuitBreaker:
     Cümle-i Fiiliye Haber (`Rel_Rabita_Action`) yapıları SMT çözümleyiciye tanıtılmıştır.
     [FAZ 4 ENTEGRASYONU]: Kripke Uzayına Mekânsal Boyut (SpaceSort) eklendi. Tüm Modal,
     Deontik ve Epistemik operatörler s_const (Space) düzleminde kısıtlanmıştır.
-    [FAZ 5 ENTEGRASYONU]: Mekân (Zarfiyye) ve Harf-i Cer müteallak bağları için Çift-Yönlü 
+    [FAZ 5 ENTEGRASYONU]: Mekân (Zarfiyye) ve Harf-i Cer müteallak bağları için Çift-Yönlü
     Zerk (Dual-Injection) ve Kasr (Hasr) döngülerinde Arity Mismatch koruması entegre edildi.
+    [HATA DÜZELTMESİ - P0-2/P0-3]: Te'vil köprüleri kalıcı (global) değildir; yalnızca verildikleri
+    kontrolün push/pop kapsamında, izlenerek (unsat core'da adlarıyla) yer alır. Önbellek anahtarı
+    IR'ye ek olarak köprüleri ve çözücü bağlamını içerir; önbellek boyutu hükmü değil, yalnızca
+    performansı etkiler.
     """
-    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
+    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000, max_cache_size: int = 1000):
         self.core_solver = solver
-        
+        self.max_cache_size = max_cache_size
+
         self.core_solver.solver.set("timeout", timeout_ms)
         self.core_solver.solver.set("smt.mbqi", True)
         self.core_solver.solver.set("smt.macro_finder", True)
-        
-        self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
-        self._proven_bridges = set()
-        self._active_bridge_axioms = []
+
+        self._memoization_cache: Dict[Tuple, Dict[str, Any]] = OrderedDict()
 
     def _freeze_ir_matrix(self, predicates: list) -> Tuple:
         frozen_elements = []
@@ -213,18 +217,21 @@ class Layer3SMTCircuitBreaker:
         )
         self.core_solver.solver.add(patient_axiom)
 
-    def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> bool:
+    def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> List[Tuple[str, z3.ExprRef]]:
         """
         [FAZ 3/4 ENTEGRASYONU] İlm-i Beyân Ma'nâ el-Ma'nâ İspatı.
-        L1'den gelen İlm-i Beyân analiz paketini, 4 Boyutlu Kripke Semantiğine (w, tz, tv, s) 
+        L1'den gelen İlm-i Beyân analiz paketini, 4 Boyutlu Kripke Semantiğine (w, tz, tv, s)
         uygun Z3 aksiyomlarına dönüştürür.
+        Köprüler saklanmaz: dönen (ad, aksiyom) çiftleri yalnızca `execute_sat_check(..., bridge_axioms=...)`
+        ile verildikleri kontrolde geçerlidir. Te'vil karîneye bağlıdır; bir cümlenin te'vili başka bir
+        cümlenin (veya başka bir ekolün) hükmüne sızmamalıdır.
         """
         if not chain_data or not chain_data.get("is_found"):
-            return False
+            return []
 
         path = chain_data.get("path", [])
         if not path or len(path) < 2:
-            return False
+            return []
 
         alaka_type = chain_data.get("alaka_type", "Unknown")
         luzum_derecesi = chain_data.get("luzum_derecesi", "Luzum_u_Zihni")
@@ -236,14 +243,12 @@ class Layer3SMTCircuitBreaker:
         s_var = z3.Const('s_beyan', self.core_solver.builder.SpaceSort)
         x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
 
+        bridges: List[Tuple[str, z3.ExprRef]] = []
         for i in range(len(path) - 1):
             source_id = path[i]
             target_id = path[i+1]
-            
+
             bridge_id = f"AXIOM_BEYAN_{alaka_type}_{source_id}_TO_{target_id}"
-            
-            if bridge_id in self._proven_bridges:
-                continue
 
             source_pred = self.core_solver.builder.get_or_create_predicate(source_id, arity=1)
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
@@ -254,7 +259,8 @@ class Layer3SMTCircuitBreaker:
                     trait_pred = self.core_solver.builder.get_or_create_predicate(trait, arity=1)
                     trait_axiom_src = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var], z3.Implies(source_pred(w_var, tz_var, tv_var, s_var, x_var), trait_pred(w_var, tz_var, tv_var, s_var, x_var)))
                     trait_axiom_tgt = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var], z3.Implies(target_pred(w_var, tz_var, tv_var, s_var, x_var), trait_pred(w_var, tz_var, tv_var, s_var, x_var)))
-                    self._active_bridge_axioms.extend([trait_axiom_src, trait_axiom_tgt])
+                    bridges.append((f"{bridge_id}_MUSHABEHAT_{trait}_SRC", trait_axiom_src))
+                    bridges.append((f"{bridge_id}_MUSHABEHAT_{trait}_TGT", trait_axiom_tgt))
 
             if luzum_derecesi == "Luzum_u_Harici":
                 w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
@@ -265,25 +271,40 @@ class Layer3SMTCircuitBreaker:
                 bridge_axiom = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var],
                     z3.Implies(source_pred(w_var, tz_var, tv_var, s_var, x_var), target_pred(w_var, tz_var, tv_var, s_var, x_var))
                 )
-            
-            self._active_bridge_axioms.append(bridge_axiom)
-            self._proven_bridges.add(bridge_id)
-            
-        return True
 
-    def execute_sat_check(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
-        matrix_signature = self._freeze_ir_matrix(ir_matrix.predicates)
-        
+            bridges.append((bridge_id, bridge_axiom))
+
+        return bridges
+
+    def _context_fingerprint(self) -> Tuple[int, int]:
+        """
+        Önbellek anahtarına giren çözücü bağlamı: açık scope sayısı ve aksiyom sayısı.
+        Çözücüye dışarıdan push/add yapıldığında (ör. paylaşılan bir münazara oturumu),
+        eski bağlamda hesaplanmış bir sonuç yeniden kullanılmaz.
+        """
+        solver = self.core_solver.solver
+        return solver.num_scopes(), len(solver.assertions())
+
+    def execute_sat_check(self, ir_matrix: SemanticStatementIR, bridge_axioms: List[Tuple[str, z3.ExprRef]] = None) -> Dict[str, Any]:
+        bridge_axioms = list(bridge_axioms or [])
+        matrix_signature = (
+            self._freeze_ir_matrix(ir_matrix.predicates),
+            tuple(sorted((name, axiom.sexpr()) for name, axiom in bridge_axioms)),
+            self._context_fingerprint(),
+        )
+
         if matrix_signature in self._memoization_cache:
+            self._memoization_cache.move_to_end(matrix_signature)
             return self._memoization_cache[matrix_signature]
 
         self.core_solver.solver.push()
-        
+
         try:
             self._inject_structural_axioms()
-            
-            for b_axiom in self._active_bridge_axioms:
-                self.core_solver.solver.add(b_axiom)
+
+            # Köprüler izlenerek eklenir: çelişkiye katılırlarsa unsat core'da adlarıyla görünürler.
+            for name, axiom in bridge_axioms:
+                self.core_solver.solver.assert_and_track(axiom, name)
 
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.core_solver.builder.TimeSortZati)
@@ -303,6 +324,9 @@ class Layer3SMTCircuitBreaker:
                 response = {"status": "UNSAT", "message": f"Ontolojik Çelişki: {[str(c) for c in core]}"}
             else:
                 response = {"status": "UNKNOWN", "message": f"Devre Kesici Tetiklendi veya Kararsız Durum: {self.core_solver.solver.reason_unknown()}"}
+                
+            if len(self._memoization_cache) >= self.max_cache_size:
+                self._memoization_cache.popitem(last=False)
                 
             self._memoization_cache[matrix_signature] = response
             return response
