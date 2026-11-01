@@ -75,9 +75,8 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             self.lexicon.register_word("cemad", "Base", "Cemad")
             self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
 
-            # [FAZ 1 TESTİ] Seküler kavram kirliliği (MSA Sızıntısı) örneği
-            self.lexicon.register_word("demokrasi", "Base", "Sekuler_Otorite", epoch="Modern")
-            
+            # [FAZ 1 TESTİ] 'Modern' dönem kaydının reddi açılışta değil, tests/regression/test_p0_regressions.py içinde sınanır.
+
             self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
             self.l1 = Layer1HeuristicGraph(self.ontology)

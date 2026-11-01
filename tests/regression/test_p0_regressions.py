@@ -3,10 +3,10 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
 
 import z3
 
+from core.exceptions import DiachronicViolationError
 from core.models import OntologyLoader
 from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
@@ -112,17 +112,28 @@ def _munazara_delile_kadar(solver: AristotelianSolver, discourse: DiscourseRegis
     return fsm
 
 
-@unittest.expectedFailure
+def _repl_kur():
+    """REPL'i açılış mesajlarını bastırarak kurar."""
+    from repl import EpistemicShell
+    with redirect_stdout(io.StringIO()):
+        return EpistemicShell()
+
+
 class TestP0_1_ReplBaslatma(unittest.TestCase):
     """[P0-1] README'nin son kullanıcı arayüzü olan REPL açılabilmelidir."""
 
     def test_repl_starts_without_exit(self):
-        from repl import EpistemicShell
-        with redirect_stdout(io.StringIO()):
-            try:
-                EpistemicShell()
-            except SystemExit as exc:
-                self.fail(f"REPL başlatılırken sys.exit({exc.code}) çağrıldı.")
+        try:
+            _repl_kur()
+        except SystemExit as exc:
+            self.fail(f"REPL başlatılırken sys.exit({exc.code}) çağrıldı.")
+
+    def test_repl_lexicon_still_rejects_modern_epoch(self):
+        """Açılıştan kaldırılan 'Modern' kaydının yerini alır: koruma REPL'in kendi sözlüğünde çalışmalı."""
+        shell = _repl_kur()
+        with self.assertRaises(DiachronicViolationError):
+            shell.lexicon.register_word("demokrasi", "Base", "Sekuler_Otorite", epoch="Modern")
+        self.assertNotIn("demokrasi", shell.lexicon.dump_tensor(), "Reddedilen kayıt sözlüğe yazılmamalı.")
 
 
 class TestP0_2_TevilKopruleri(unittest.TestCase):
@@ -243,17 +254,7 @@ class TestP0_4_MunazaraScopeDengesi(unittest.TestCase):
         self.assertEqual(p.solver.solver.num_scopes(), 0)
 
     def test_repl_gives_fsm_its_own_solver(self):
-        from repl import EpistemicShell
-        gercek_kayit = ContextualLexicon.register_word
-
-        def modern_kaydi_atla(lexicon, word, namespace, ontologic_id, *args, **kwargs):
-            # P0-1 (REPL'in 'Modern' kayıtta kapanması) bu testin kapsamı dışında tutulur.
-            if kwargs.get("epoch") == "Modern":
-                return None
-            return gercek_kayit(lexicon, word, namespace, ontologic_id, *args, **kwargs)
-
-        with mock.patch.object(ContextualLexicon, "register_word", modern_kaydi_atla), redirect_stdout(io.StringIO()):
-            shell = EpistemicShell()
+        shell = _repl_kur()
         self.assertIsNot(shell.fsm.solver, shell.l3.core_solver,
                          "FSM ile L3 aynı çözücüyü paylaşıyor; münazara kapsamları cümle hükümlerine karışır.")
 
