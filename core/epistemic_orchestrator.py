@@ -1,6 +1,6 @@
 import z3
 import copy
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 import re
 from linguistics.ilm_wad_adapter import IlmWadAdapter, SemanticStatementIR, NestedPredicate
 from linguistics.sarf_parser import MorphologicalAnalysis
@@ -8,6 +8,10 @@ from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
 from schools.base_usul import AbstractSchoolUsul
 from core.exceptions import DiachronicViolationError, OutOfOntologyError
+
+# Bir okumanın kendi usûlünde tutarlı bulunduğunu gösteren hükümler (Selefî bilâ-keyf okuması dahil).
+# Te'vil denendikten sonra da çelişkili kalan (FALLBACK_TRIGGERED) okuma bu kümede değildir.
+CONSISTENT_STATUSES = ("SAT", "SAT_BILA_KAYF")
 
 class EpistemicOrchestrator:
     def __init__(self, adapter: IlmWadAdapter, l1: Layer1HeuristicGraph, l2: Layer2RuleEngine, l3_circuit_breaker):
@@ -143,6 +147,13 @@ class EpistemicOrchestrator:
         return tevil_basarili, bridge_messages, accepted_bridges
 
     def process_statement(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], usul_profile: AbstractSchoolUsul, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Dict[str, Any]:
+        return self.evaluate_statement(tokens, dependencies, usul_profile, auto_lexicon)[0]
+
+    def evaluate_statement(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], usul_profile: AbstractSchoolUsul, auto_lexicon: Dict[str, MorphologicalAnalysis] = None) -> Tuple[Dict[str, Any], Optional[SemanticStatementIR]]:
+        """
+        `process_statement` ile aynı değerlendirme; ek olarak hükme esas olan IR'yi (te'vil uygulandıysa
+        te'vil sonrası okumayı) döndürür. Mu'ârazada hem Mucîb'in iddiası hem Sâil'in okuması buradan gelir.
+        """
         max_tevil_retries = usul_profile.dsl_ruleset.get("max_tevil_retries", 1)
         current_attempt = 0
         tevil_flagged_nodes = []
@@ -157,9 +168,9 @@ class EpistemicOrchestrator:
             
             if not ir_matrix.is_valid_for_z3:
                 return {
-                    "status": "PRAGMATICS_REJECT", 
+                    "status": "PRAGMATICS_REJECT",
                     "message": "İlm-i Ma'ânî İhlali: İnşâî form (İstifham-ı Hakikî) veya Muktazâ el-Hâl uyumsuzluğu."
-                }
+                }, ir_matrix
             
             self._verify_air_gapped_ontology(ir_matrix)
             
@@ -181,12 +192,12 @@ class EpistemicOrchestrator:
                         if bridge_messages:
                             msg_append += " | " + " | ".join(bridge_messages)
                         execution_result["message"] = execution_result.get("message", "") + msg_append
-                        return execution_result
-            
-            return execution_result
-            
+                        return execution_result, ir_matrix
+
+            return execution_result, ir_matrix
+
         except (DiachronicViolationError, OutOfOntologyError) as e:
-            return {"status": "EPISTEMIC_BREACH", "message": str(e)}
+            return {"status": "EPISTEMIC_BREACH", "message": str(e)}, None
 
     def execute_cross_school_muaradah(self, 
                                       mujib_claim_ir: SemanticStatementIR, 
@@ -201,6 +212,8 @@ class EpistemicOrchestrator:
         Sâil'in 'AWAITING_ATTACK' durumunda gönderdiği karşı-argümanı (Anti-Tez) Z3 Optimize 
         motorunda Mucîb'in argümanıyla çarpıştırır. Çapraz ekol kilitlenmesi FSM durumunu günceller.
         [FAZ 4 YAMASI]: Kripke Uzayı (SpaceSort) eksik parametresi eklendi.
+        [HATA DÜZELTMESİ]: Karşılaştırmaya Sâil'in kendi usûlündeki (te'vil dahil) okuması girer;
+        cümlesi Mucîb'in sözlüğüyle yeniden okunmaz.
         """
         
         if fsm_engine and getattr(fsm_engine, "current_state", None) != "AWAITING_ATTACK":
@@ -210,20 +223,18 @@ class EpistemicOrchestrator:
             }
         
         try:
-            sail_native_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, sail_usul.namespace, sail_auto_lexicon, epoch="Classical")
-            self._verify_air_gapped_ontology(sail_native_ir)
-            
-            sail_result = sail_usul.execute_dag(sail_native_ir, self.l1, self.l2, self.l3, current_attempt=0)
+            # Sâil'in karşı delili kendi usûlünde (te'vil dahil) tam olarak değerlendirilir; zerk edilen de bu okumadır.
+            sail_result, sail_reading_ir = self.evaluate_statement(sail_tokens, sail_dependencies, sail_usul, sail_auto_lexicon)
 
-            if sail_result["status"] not in ["SAT", "FALLBACK_TRIGGERED"]:
+            if sail_result["status"] == "EPISTEMIC_BREACH":
+                return {"status": "EPISTEMIC_BREACH", "message": f"Sâil'in argümanı ontolojik sızıntı barındırıyor: {sail_result['message']}"}
+
+            if sail_result["status"] not in CONSISTENT_STATUSES:
                 return {
                     "status": "MUARADAH_FAILED",
                     "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
                 }
 
-            cross_injected_ir = self.adapter.generate_ir(sail_tokens, sail_dependencies, mujib_usul.namespace, sail_auto_lexicon, epoch="Classical")
-            self._verify_air_gapped_ontology(cross_injected_ir)
-            
             optimizer = z3.Optimize()
             # Performans iyileştirmesi: Modal mantık (ForAll/Exists) Optimizer'ı NP-Hard uzaya sürükler. 2 saniyede çözemezse kilitlenmeyi reddet.
             optimizer.set("timeout", 2000)
@@ -237,7 +248,7 @@ class EpistemicOrchestrator:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
                 optimizer.add_soft(z3_expr, weight=1)
                 
-            for item in cross_injected_ir.predicates:
+            for item in sail_reading_ir.predicates:
                 z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
                 optimizer.add(z3_expr)
 
@@ -252,7 +263,8 @@ class EpistemicOrchestrator:
                         fsm_engine.resolve_debate()
                     return {
                         "status": "MUARADAH_INEFFECTIVE",
-                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik). Mucîb kazandı (İlzam)."
+                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik). Mucîb kazandı (İlzam).",
+                        "sail_reading": sail_reading_ir.predicates
                     }
                 else:
                     if fsm_engine:
@@ -261,14 +273,16 @@ class EpistemicOrchestrator:
 
                     return {
                         "status": "MUARADAH_SUCCESS",
-                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ontolojik ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate)."
+                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ontolojik ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate).",
+                        "sail_reading": sail_reading_ir.predicates
                     }
             else:
                 if fsm_engine:
                     fsm_engine.resolve_debate()
                 return {
                     "status": "MUJIB_INVALID",
-                    "message": "Mucîb'in argümanları ile Sâil'in iddiaları yapısal olarak z3.Optimize düzleminde bile çözülemez bir kilitlenme yarattı."
+                    "message": "Mucîb'in argümanları ile Sâil'in iddiaları yapısal olarak z3.Optimize düzleminde bile çözülemez bir kilitlenme yarattı.",
+                    "sail_reading": sail_reading_ir.predicates
                 }
         except (DiachronicViolationError, OutOfOntologyError) as e:
             return {"status": "EPISTEMIC_BREACH", "message": f"Sâil'in argümanı ontolojik sızıntı barındırıyor: {e}"}

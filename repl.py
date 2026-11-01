@@ -8,7 +8,7 @@ from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
 from core.layer3_smt import Layer3SMTCircuitBreaker
-from core.epistemic_orchestrator import EpistemicOrchestrator
+from core.epistemic_orchestrator import EpistemicOrchestrator, CONSISTENT_STATUSES
 
 from linguistics.tokenizer import EpistemicTokenizer
 from linguistics.sarf_parser import SarfEngine
@@ -119,15 +119,20 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             print("[HATA] Analiz edilecek cümleyi girin.")
             return
 
+        # Mucîb'in iddiası her zaman son sunulan cümledir; değerlendirilemeyen cümle eski iddiayı geçerli bırakmaz.
+        self.last_ir = None
+
         try:
             tokens = self.tokenizer.tokenize(arg)
             auto_lexicon = self.sarf.derive_lexicon(tokens)
             ast_dependencies = self.nahiv.suggest_dependencies(tokens, auto_lexicon)
-            
+
             print(f"\n[SENTAKS] AST: {ast_dependencies}")
-            
-            self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon, epoch="Classical")
-            result = self.orchestrator.process_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
+
+            result, evaluated_ir = self.orchestrator.evaluate_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
+            # Mu'ârazada Mucîb'i, usûlünün tutarlı bulduğu (te'vil uygulandıysa te'vil sonrası) okuma temsil eder.
+            if result.get("status") in CONSISTENT_STATUSES:
+                self.last_ir = evaluated_ir
 
             if result.get("status") == "EPISTEMIC_BREACH":
                 print(f"\n[SİSTEMİK RED] Epistemik Kopuş / Sızıntı Tespit Edildi:")
@@ -181,7 +186,10 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
                 return
 
             print(f"[{result.get('status', 'BİLİNMİYOR')}] -> {result.get('message')}")
-            
+            if "sail_reading" in result:
+                print(f"Mucîb Okuması (karşılaştırmaya giren): {self.last_ir.predicates}")
+                print(f"Sâil Okuması (karşılaştırmaya giren): {result['sail_reading']}")
+
         except Exception as e:
             print(f"\n[SİSTEM ÇÖKÜŞÜ] Mu'aradah İhlali:")
             traceback.print_exc()

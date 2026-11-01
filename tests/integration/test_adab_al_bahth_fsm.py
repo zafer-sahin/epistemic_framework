@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest import mock
 import z3
 from core.models import OntologyLoader
 from core.logic_engine import AristotelianSolver
@@ -140,6 +141,82 @@ class TestDialecticsFSM(unittest.TestCase):
         self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE"])
         if result["status"] == "MUARADAH_SUCCESS":
             self.assertIn("ontolojik ağırlık maliyetiyle", result["message"])
+
+    def _yed_okumalarini_kaydet(self):
+        """REPL ile aynı 'yad' kayıtları: Selefî bilâ-keyf, Eş'arî literal ve mecaz okumaları."""
+        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Literal")
+        self.lexicon.register_word("yad", "Salafi", "Sifat_Yed_Bila_Kayf", proposition_type="Kadiyye-i_Hamliyye", sibak_trigger="allah")
+        self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Literal", proposition_type="Kadiyye-i_Hamliyye")
+        self.lexicon.register_word("yad", "Ashari", "Sifat_Yed_Metaphor", proposition_type="Metaphor_Fallback")
+
+    def _cozumle(self, cumle):
+        tokens = self.tokenizer.tokenize(cumle)
+        morph = self.sarf.derive_lexicon(tokens)
+        return tokens, morph, self.nahiv.suggest_dependencies(tokens, morph)
+
+    def _mucib_iddiasi(self, cumle, namespace):
+        tokens, morph, deps = self._cozumle(cumle)
+        self.discourse.set_agent("Mujib")
+        mujib_ir = self.adapter.generate_ir(tokens, deps, namespace, morph)
+        self.discourse.set_agent("Sail")
+        return mujib_ir
+
+    def test_cross_school_muaradah_accepts_salafi_bila_kayf_reading(self):
+        """Selefî profilin tutarlı sonucu (SAT_BILA_KAYF), Sâil'in karşı delili olarak geçersiz sayılmamalı."""
+        self._yed_okumalarini_kaydet()
+        tokens, morph, deps = self._cozumle("yadu allahi")
+        mujib_ir = self._mucib_iddiasi("yadu allahi", "Ashari")
+
+        sail_ir = self.adapter.generate_ir(tokens, deps, "Salafi", morph)
+        self.assertEqual(SalafiUsul().execute_dag(sail_ir, self.l1, self.l2, self.l3)["status"], "SAT_BILA_KAYF")
+
+        result = self.orchestrator.execute_cross_school_muaradah(
+            mujib_ir, AshariUsul(), tokens, deps, SalafiUsul(), morph
+        )
+
+        self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE", "MUJIB_INVALID"], result.get("message"))
+
+    def test_cross_school_muaradah_injects_sails_own_reading(self):
+        """Çapraz zerkte Sâil'in kendi usûlündeki okuması kullanılmalı; cümlesi Mucîb'in sözlüğüyle yeniden okunmamalı."""
+        self._yed_okumalarini_kaydet()
+        tokens, morph, deps = self._cozumle("yadu allahi")
+        mujib_ir = self._mucib_iddiasi("yadu allahi", "Ashari")
+
+        result = self.orchestrator.execute_cross_school_muaradah(
+            mujib_ir, AshariUsul(), tokens, deps, SalafiUsul(), morph
+        )
+
+        okuma = str(result.get("sail_reading"))
+        self.assertIn("Sifat_Yed_Bila_Kayf", okuma, "Selefî okuması karşılaştırmaya girmedi.")
+        self.assertNotIn("Sifat_Yed_Literal", okuma, "Sâil'in cümlesi Mucîb'in (Eş'arî) sözlüğüyle yeniden okundu.")
+
+    def test_cross_school_muaradah_uses_sails_tevil_reading(self):
+        """Te'vil uygulayan bir ekolün Sâil'i, karşılaştırmaya te'vil sonrası okumasıyla girmeli."""
+        self._yed_okumalarini_kaydet()
+        tokens, morph, deps = self._cozumle("yadu allahi")
+        mujib_ir = self._mucib_iddiasi("yadu allahi", "Salafi")
+
+        result = self.orchestrator.execute_cross_school_muaradah(
+            mujib_ir, SalafiUsul(), tokens, deps, AshariUsul(), morph
+        )
+
+        okuma = str(result.get("sail_reading"))
+        self.assertIn("Kudret", okuma, "Eş'arî Sâil'in te'vil sonrası okuması karşılaştırmaya girmedi.")
+        self.assertNotIn("Sifat_Yed_Literal", okuma)
+
+    def test_cross_school_muaradah_rejects_sail_reading_that_stays_contradictory(self):
+        """Sâil'in okuması kendi usûlünde (te'vil denendikten sonra da) çelişkili kalıyorsa karşı delil sayılmaz."""
+        tokens, morph, deps = self._cozumle("cemadun")
+        mujib_ir = SemanticStatementIR(active_namespace="Salafi", active_agent="Mujib", predicates=[("Cemad", "Cemad", 1)], is_valid_for_z3=True)
+        sail_usul = AshariUsul()
+        celiskili = {"status": "FALLBACK_TRIGGERED", "message": "Z3 Çelişkisi.", "unsat_core": "", "l2_context": "PROCEED_LITERAL"}
+
+        with mock.patch.object(sail_usul, "execute_dag", return_value=celiskili):
+            result = self.orchestrator.execute_cross_school_muaradah(
+                mujib_ir, SalafiUsul(), tokens, deps, sail_usul, morph
+            )
+
+        self.assertEqual(result["status"], "MUARADAH_FAILED", result.get("message"))
 
     def test_tahsil_i_hasil_rejection(self):
         """[Faz 4] Tautoloji içeren (Z3'te kendi içinde ispatlı) aksiyomların Da'vâ olarak reddi."""
