@@ -42,6 +42,9 @@ class EntityMention(BaseModel):
     gender: Optional[str] = None
     number: Optional[str] = None
     is_virtual: bool = False  # [FAZ 1.4] DRT (Discourse Representation Theory) Varoluşsal Düğüm Bayrağı
+    # Anlamın sözlükte bulunduğu uzay: "Base" = müsellem ortak anlam. None: kaynağı bilinmeyen
+    # veya söylemde tanıtılmış varlık. Leksikal zehirlenme denetimi bu alanı kullanır.
+    sense_namespace: Optional[str] = None
 
 class DiscourseRegister:
     """
@@ -143,7 +146,7 @@ class DiscourseRegister:
         else:
             raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} için Global söylem çerçevesi (Frame 0 - Müsellemât) imha edilemez. Stack underflow.")
 
-    def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None, is_virtual: bool = False) -> None:
+    def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None, is_virtual: bool = False, sense_namespace: Optional[str] = None) -> None:
         """
         .. mantik_kurali:: Ortak Kabul ve Hususi İddia
         Müsellemât uzayındaki (Base) kavramları her iki aktörün de kök zihnine atar; 
@@ -159,7 +162,8 @@ class DiscourseRegister:
             sealed_namespace=active_namespace,
             gender=gender,
             number=number,
-            is_virtual=is_virtual
+            is_virtual=is_virtual,
+            sense_namespace=sense_namespace
         )
         
         if active_namespace == "Base":

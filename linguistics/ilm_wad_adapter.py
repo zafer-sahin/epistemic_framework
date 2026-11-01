@@ -528,23 +528,24 @@ class IlmWadAdapter:
         if search_key.lower() in known_particles:
             return f"GrammarNode_{search_key.capitalize()}"
 
-        base_ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch, allow_tevil, conflicting_node)
-        
+        base_ontologic_id, sense_namespace = self.lexicon.resolve_sense(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch, allow_tevil, conflicting_node)
+
         # Otonom Düğüm Taşınması (Bila-Kayf Relocation Logic)
         if base_ontologic_id in getattr(self, 'current_tevil_targets', []):
             try:
-                ontologic_id = self.lexicon.resolve_id(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch, allow_tevil, conflicting_node)
+                ontologic_id, sense_namespace = self.lexicon.resolve_sense(search_key, active_namespace, "Metaphor_Fallback", self.discourse, dependencies, epoch, allow_tevil, conflicting_node)
             except (ValueError, DiachronicViolationError):
                 ontologic_id = base_ontologic_id
         else:
             ontologic_id = base_ontologic_id
-        
+
         StrictAirGapValidator.validate_provenance(ontologic_id)
 
         # DRT (Discourse Representation Theory) Kaydı
+        # Anma, konuşanın usûl uzayında mühürlenir; anlamın kaynağı (Base/ekol) zehirlenme denetimi için ayrıca taşınır.
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
             gender = getattr(morph_data, 'gender', None) if morph_data else None
             number = getattr(morph_data, 'number', None) if morph_data else None
-            self.discourse.add_mention(word, ontologic_id, active_namespace, gender=gender, number=number)
+            self.discourse.add_mention(word, ontologic_id, active_namespace, gender=gender, number=number, sense_namespace=sense_namespace)
             
         return ontologic_id

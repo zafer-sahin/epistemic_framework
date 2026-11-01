@@ -289,6 +289,8 @@ class ContextualLexicon:
         """
         .. pedagojik_anlati:: Leksikal Zehirlenme (Lexical Poisoning) Zırhı
         Mu'aradah (Çapraz İtiraz) esnasında, Sâil'in arka kapıdan eşdeğerlik kurmasını engeller.
+        Rakibin ortak (Base / müsellem) bir anlam olarak andığı kavramlar mühürlenmiş sayılmaz:
+        iki taraf aynı konudan söz etmeden mu'âraza kurulamaz.
         """
         if not discourse or active_namespace == "Base":
             return
@@ -302,10 +304,13 @@ class ContextualLexicon:
             for agent_key, actor_scopes in discourse.scopes.items():
                 for frame in actor_scopes:
                     for mention in frame:
+                        if getattr(mention, 'sense_namespace', None) == "Base":
+                            continue
+
                         m_ont_id = getattr(mention, 'ontologic_id', None)
                         m_agent = getattr(mention, 'agent', None)
                         m_namespace = getattr(mention, 'sealed_namespace', None)
-                        
+
                         if m_ont_id == ontologic_id and m_agent != current_agent and m_namespace != "Base":
                             if m_namespace != active_namespace:
                                 raise ContextPoisoningError(
@@ -317,6 +322,9 @@ class ContextualLexicon:
         elif hasattr(discourse, 'scopes') and isinstance(discourse.scopes, list):
             for frame in discourse.scopes:
                 for mention in frame:
+                    if getattr(mention, 'sense_namespace', None) == "Base":
+                        continue
+
                     m_ont_id = getattr(mention, 'ontologic_id', None)
                     m_agent = getattr(mention, 'agent', None)
                     m_namespace = getattr(mention, 'sealed_namespace', None)
@@ -333,14 +341,21 @@ class ContextualLexicon:
         .. pedagojik_anlati:: Orkestrasyon ve Ontolojik Mühürleme
         Lafzın hangi ID ile Kripke uzayına (Z3) geçeceğine karar veren son filtredir.
         """
+        return self.resolve_sense(word, active_namespace, proposition_type, discourse, dependencies, epoch, allow_tevil, conflicting_node)[0]
+
+    def resolve_sense(self, word: str, active_namespace: str, proposition_type: str = "Kadiyye-i_Hamliyye", discourse: Optional[DiscourseRegister] = None, dependencies: Optional[List[Tuple[str, str, str, str]]] = None, epoch: str = "Classical", allow_tevil: bool = True, conflicting_node: str = "Wajib_al_Wujud") -> Tuple[str, str]:
+        """
+        `resolve_id` ile aynı çözümlemeyi yapar; ek olarak anlamın bulunduğu uzayı döndürür
+        ("Base" = müsellem ortak anlam, aksi halde ekole özgü anlam).
+        """
         StrictAirGapValidator.validate_epoch(epoch)
         StrictAirGapValidator.validate_namespace(active_namespace)
-        
+
         word_lower = word.lower()
 
         # Edât-ı Kasr ve Hasr operatörleri mutlak ve evrensel olduğu için tensör dışı çözülür
         if word_lower in self.kasr_operators:
-            return f"Harf_{self.kasr_operators[word_lower]}"
+            return f"Harf_{self.kasr_operators[word_lower]}", "Base"
 
         # Leksikon Tensör Taraması
         if word_lower in self._tensor:
@@ -352,12 +367,12 @@ class ContextualLexicon:
             resolved = self._get_from_namespace(namespace_map, active_namespace, proposition_type, word, dependencies)
             if resolved:
                 self._prevent_lexical_poisoning(word, resolved, active_namespace, discourse)
-                return resolved
-            
+                return resolved, active_namespace
+
             resolved_base = self._get_from_namespace(namespace_map, "Base", proposition_type, word, dependencies)
             if resolved_base:
                 self._prevent_lexical_poisoning(word, resolved_base, active_namespace, discourse)
-                return resolved_base
+                return resolved_base, "Base"
 
         # OntoLex Semantik Graf Taraması
         base_fallback_id = self.semantic_client.get_base_concept_id(word_lower, epoch)
@@ -367,11 +382,11 @@ class ContextualLexicon:
             inferred_id = self.mana_graph.infer_node_relocation(base_fallback_id, conflicting_node, allow_tevil)
             if inferred_id:
                 self._prevent_lexical_poisoning(word, inferred_id, active_namespace, discourse)
-                return inferred_id
+                return inferred_id, active_namespace
 
         if base_fallback_id:
             self._prevent_lexical_poisoning(word, base_fallback_id, active_namespace, discourse)
-            return base_fallback_id
+            return base_fallback_id, "Base"
 
         if word_lower not in self._tensor:
             raise ValueError(f"[UNKNOWN_VARIABLE] Leksikon Hatası: '{word}' ne yerel tensörde ne de dışsal OntoLex semantik grafında kayıtlı değil. Tahmin (inference) yapılmayacaktır.")
