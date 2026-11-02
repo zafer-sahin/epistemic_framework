@@ -2,6 +2,12 @@ from typing import Dict, Any, Optional, List, Tuple
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 from core.models import BaseOntology, EpistemicEntity
 
+# Bir terimi ötekine mahmul, nitelik, cüz' ya da mekân olarak yükleyen bağlar (isnâd-ı vasfî).
+ATTRIBUTIVE_RELATIONS = {
+    "Rel_Rabita_Predication", "Rel_Rabita_Identity", "Rel_Mubteda_Haber", "Rel_Bedel_Identity",
+    "Rel_Mudaf_MudafIlayh", "Rel_Sifat_Mevsuf", "LocatedIn",
+}
+
 class Layer1HeuristicGraph:
     def __init__(self, ontology: BaseOntology):
         self.ontology = ontology
@@ -141,12 +147,34 @@ class Layer1HeuristicGraph:
 
         return {"is_found": False}
 
+    def _referent_concepts(self, pred_list: List[Any]) -> Dict[str, List[str]]:
+        """IR'nin tekli yüklemlerinden her ferdin ontolojik mâhiyetlerini (Porphyrios düğümlerini) toplar."""
+        concepts: Dict[str, List[str]] = {}
+        for item in pred_list:
+            if isinstance(item, tuple):
+                pred_id, arg_id, arity = item
+                if arity == 1 and pred_id in self.entity_map:
+                    concepts.setdefault(arg_id, []).append(pred_id)
+            elif isinstance(item, NestedPredicate):
+                for arg_id, ids in self._referent_concepts(item.args).items():
+                    concepts.setdefault(arg_id, []).extend(ids)
+        return concepts
+
     def analyze_ir(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
         if not ir_matrix.is_valid_for_z3:
             return {"status": "REJECTED", "metaphor_probability": 0.0, "reason": "İnşâî form"}
 
         max_conflict = 0.0
         flagged_predicates = []
+
+        # [HATA DÜZELTMESİ - P0-5] İkili yüklemler fertleri bağlar; modal çatışma fertlerin mâhiyetleri
+        # arasında ölçülür. Elle yazılmış IR'lerde sabit, kavramın kendisi olabilir.
+        referent_concepts = self._referent_concepts(ir_matrix.predicates)
+
+        def _concepts_of(arg: str) -> List[str]:
+            if arg in referent_concepts:
+                return referent_concepts[arg]
+            return [arg] if arg in self.entity_map else []
 
         # [FAZ 2 ENTEGRASYONU] NestedPredicate içeren Kasr/Deontik yapıları taramak için rekürsif tarayıcı
         def _scan_predicates(pred_list):
@@ -155,21 +183,21 @@ class Layer1HeuristicGraph:
                 if isinstance(item, tuple):
                     pred_id, arg_id, arity = item
                 
-                    if arity == 2 and '::' in arg_id:
-                        try:
-                            amil_str, mamul_str = arg_id.split('::', 1)
-                            amil_ent = self.entity_map.get(amil_str)
-                            mamul_ent = self.entity_map.get(mamul_str)
-                            
-                            if amil_ent and mamul_ent:
-                                conflict = self._evaluate_modal_conflict(amil_ent, mamul_ent)
+                    # [HATA DÜZELTMESİ - P0-10] Karîne-i mânia, zâhirin muhal olduğuna delâlettir ve ancak bir
+                    # terime Vâcib ile bağdaşmayan bir nitelik, cüz' ya da mekân yüklenirken doğar. Fâil/mef'ûl
+                    # bağları Allah'ı hakîkî fâil olarak anar ("Allah insanı yarattı" mecaz değildir).
+                    if arity == 2 and '::' in arg_id and pred_id in ATTRIBUTIVE_RELATIONS:
+                        amil_str, mamul_str = arg_id.split('::', 1)
+                        for amil_id in _concepts_of(amil_str):
+                            for mamul_id in _concepts_of(mamul_str):
+                                conflict = self._evaluate_modal_conflict(self.entity_map[amil_id], self.entity_map[mamul_id])
                                 
                                 if conflict >= 0.5:
                                     max_conflict = max(max_conflict, conflict)
-                                    flagged_predicates.append(arg_id)
-                        except ValueError:
-                            continue 
-                elif isinstance(item, NestedPredicate):
+                                    flagged_predicates.append(f"{amil_id}::{mamul_id}")
+                # [HATA DÜZELTMESİ - P0-6] Olumsuzlanan nisbet mecaz adayı değildir; te'vili gerektiren karîne-i
+                # mânia olumlu bir isnatta doğar ("Allah cisim değildir" tenzihin kendisidir).
+                elif isinstance(item, NestedPredicate) and item.operator != "Nefy":
                     _scan_predicates(item.args)
 
         _scan_predicates(ir_matrix.predicates)

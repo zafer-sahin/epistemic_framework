@@ -45,8 +45,11 @@ class TestVazNeviPipeline(unittest.TestCase):
         
         ir_matrix = self.adapter.generate_ir(tokens, dependencies, "Base", morph_lexicon, epoch="Classical")
         
+        # Rol, mâhiyeti Kavram_Vuran olan ferde yüklenir (IR sabitleri kavram değil fert taşır).
+        vuran_fertler = {pred[1] for pred in ir_matrix.predicates
+                         if isinstance(pred, tuple) and pred[0] == "Kavram_Vuran" and pred[2] == 1}
         has_agent_role = any(
-            isinstance(pred, tuple) and pred[0] == "Role_Agent" and pred[1] == "Kavram_Vuran" 
+            isinstance(pred, tuple) and pred[0] == "Role_Agent" and pred[1] in vuran_fertler
             for pred in ir_matrix.predicates
         )
         self.assertTrue(has_agent_role, "[BELLEK HATASI] Role_Agent yüklemi IR matrisine zerk edilemedi.")

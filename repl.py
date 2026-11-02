@@ -8,7 +8,7 @@ from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
 from core.layer3_smt import Layer3SMTCircuitBreaker
-from core.epistemic_orchestrator import EpistemicOrchestrator
+from core.epistemic_orchestrator import EpistemicOrchestrator, CONSISTENT_STATUSES
 
 from linguistics.tokenizer import EpistemicTokenizer
 from linguistics.sarf_parser import SarfEngine
@@ -29,7 +29,7 @@ class EpistemicShell(cmd.Cmd):
 [AKTİF] N-TIER EPİSTEMİK ÇIKARIM MOTORU VE DİYALEKTİK REPL
 Durum: 0 Entropi | Rejim: Asenkron Çoklu-Ekol (Polymorphic Multi-Agent)
 Varsayılan Ekol: Eş'arî (AshariUsul)
-Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, clear
+Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, teslim, clear
 Çıkmak için 'exit'.
 =============================================================================
 """
@@ -73,11 +73,11 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             self.lexicon.register_word("tekvin", "Maturidi", "Tekvin")
             self.lexicon.register_word("nam", "Base", "Nami")
             self.lexicon.register_word("cemad", "Base", "Cemad")
-            self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
+            # Şahıslar (cüz'î) Porphyrios Ağacının düğümü değildir; 'Zeyd' nev'i olan İnsan ile temsil edilir.
+            self.lexicon.register_word("zeyd", "Base", "Insan")
 
-            # [FAZ 1 TESTİ] Seküler kavram kirliliği (MSA Sızıntısı) örneği
-            self.lexicon.register_word("demokrasi", "Base", "Sekuler_Otorite", epoch="Modern")
-            
+            # [FAZ 1 TESTİ] 'Modern' dönem kaydının reddi açılışta değil, tests/regression/test_p0_regressions.py içinde sınanır.
+
             self.adapter = IlmWadAdapter(self.lexicon, self.discourse)
 
             self.l1 = Layer1HeuristicGraph(self.ontology)
@@ -87,7 +87,9 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             self.orchestrator = EpistemicOrchestrator(self.adapter, self.l1, self.l2, self.l3)
             
             # [FAZ 5] Diyalektik FSM Motoru
-            self.fsm = AdabAlBahthEngine(self.solver, self.discourse)
+            # [HATA DÜZELTMESİ - P0-4]: FSM kendi çözücüsünü kullanır; münazara kapsamları (push/pop)
+            # L3'ün cümle hükümlerine karışmaz.
+            self.fsm = AdabAlBahthEngine(AristotelianSolver(self.ontology), self.discourse)
 
             print("[SİSTEM] N-Tier Boru Hattı ve Âdâb-ı Bahs FSM başarıyla başlatıldı.")
         except Exception as e:
@@ -118,15 +120,20 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             print("[HATA] Analiz edilecek cümleyi girin.")
             return
 
+        # Mucîb'in iddiası her zaman son sunulan cümledir; değerlendirilemeyen cümle eski iddiayı geçerli bırakmaz.
+        self.last_ir = None
+
         try:
             tokens = self.tokenizer.tokenize(arg)
             auto_lexicon = self.sarf.derive_lexicon(tokens)
             ast_dependencies = self.nahiv.suggest_dependencies(tokens, auto_lexicon)
-            
+
             print(f"\n[SENTAKS] AST: {ast_dependencies}")
-            
-            self.last_ir = self.adapter.generate_ir(tokens, ast_dependencies, self.active_usul.namespace, auto_lexicon, epoch="Classical")
-            result = self.orchestrator.process_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
+
+            result, evaluated_ir = self.orchestrator.evaluate_statement(tokens, ast_dependencies, self.active_usul, auto_lexicon)
+            # Mu'ârazada Mucîb'i, usûlünün tutarlı bulduğu (te'vil uygulandıysa te'vil sonrası) okuma temsil eder.
+            if result.get("status") in CONSISTENT_STATUSES:
+                self.last_ir = evaluated_ir
 
             if result.get("status") == "EPISTEMIC_BREACH":
                 print(f"\n[SİSTEMİK RED] Epistemik Kopuş / Sızıntı Tespit Edildi:")
@@ -168,7 +175,7 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             sail_lexicon = self.sarf.derive_lexicon(sail_tokens)
             sail_ast = self.nahiv.suggest_dependencies(sail_tokens, sail_lexicon)
             
-            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) z3.Optimize çapraz saldırı protokolü başlatıldı...")
+            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) okuması, Mucîb'inkiyle ortak ontolojide karşılaştırılıyor...")
             
             result = self.orchestrator.execute_cross_school_muaradah(
                 self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon, fsm_engine=self.fsm
@@ -180,7 +187,13 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
                 return
 
             print(f"[{result.get('status', 'BİLİNMİYOR')}] -> {result.get('message')}")
-            
+            if "sail_reading" in result:
+                print(f"Mucîb Okuması (karşılaştırmaya giren): {self.last_ir.predicates}")
+                print(f"Sâil Okuması (karşılaştırmaya giren): {result['sail_reading']}")
+            if "conflict" in result:
+                conflict = result["conflict"]
+                print(f"Çatışma: Mucîb {conflict['Mujib']} | Sâil {conflict['Sail']} | Aksiyomlar {conflict['axioms']}")
+
         except Exception as e:
             print(f"\n[SİSTEM ÇÖKÜŞÜ] Mu'aradah İhlali:")
             traceback.print_exc()
@@ -246,6 +259,14 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             if "counter_model_extract" in res:
                 print("\n[KARŞI-MODEL (COUNTER-MODEL) BİLEŞENİ]:")
                 print(res["counter_model_extract"])
+        except Exception as e:
+            print(f"[FSM ÇÖKÜŞÜ] {e}")
+
+    def do_teslim(self, arg):
+        """[P0-8] Nöbeti tutan taraf teslim eder: itiraz nöbetinde Sâil (ilzâm), delil nöbetinde Mucîb (ifhâm)."""
+        try:
+            res = self.fsm.concede()
+            print(f"[{res['status']}] {res['message']}")
         except Exception as e:
             print(f"[FSM ÇÖKÜŞÜ] {e}")
 

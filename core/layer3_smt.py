@@ -1,7 +1,11 @@
 import z3
 from typing import Dict, Any, Tuple, Union, List
+from collections import OrderedDict
 from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
+
+# Mübteda ile haber arasındaki hükmî nisbet (haml) ilişkileri.
+HAML_RELATIONS = ("Rel_Rabita_Predication", "Rel_Rabita_Identity", "Rel_Mubteda_Haber")
 
 class Layer3SMTCircuitBreaker:
     """
@@ -12,21 +16,33 @@ class Layer3SMTCircuitBreaker:
     olarak engeller.
     [FAZ 3 ENTEGRASYONU]: 'İnne' ve kardeşlerinin ürettiği 'Epistemic_Necessity' operatörü 
     Zorunluluk Operatörü (□) olarak Kripke uzayına (z3.ForAll ile) işlenmiştir.
+    [FAZ 3.1 ENTEGRASYONU]: İsm-i Mevsûl (`SubClause_Sila`), Âid Zamiri (`Rel_Pointer_Alias`) ve
+    Cümle-i Fiiliye Haber (`Rel_Rabita_Action`) yapıları SMT çözümleyiciye tanıtılmıştır.
     [FAZ 4 ENTEGRASYONU]: Kripke Uzayına Mekânsal Boyut (SpaceSort) eklendi. Tüm Modal,
     Deontik ve Epistemik operatörler s_const (Space) düzleminde kısıtlanmıştır.
-    [FAZ 5 ENTEGRASYONU]: Mekân (Zarfiyye) ve Harf-i Cer müteallak bağları için Çift-Yönlü 
+    [FAZ 5 ENTEGRASYONU]: Mekân (Zarfiyye) ve Harf-i Cer müteallak bağları için Çift-Yönlü
     Zerk (Dual-Injection) ve Kasr (Hasr) döngülerinde Arity Mismatch koruması entegre edildi.
+    [HATA DÜZELTMESİ - P0-2/P0-3]: Te'vil köprüleri kalıcı (global) değildir; yalnızca verildikleri
+    kontrolün push/pop kapsamında, izlenerek (unsat core'da adlarıyla) yer alır. Önbellek anahtarı
+    IR'ye ek olarak köprüleri ve çözücü bağlamını içerir; önbellek boyutu hükmü değil, yalnızca
+    performansı etkiler.
+    [HATA DÜZELTMESİ - P0-7]: Çapraz-ekol mu'ârazada iki okuma bu çözücünün ontolojisiyle birlikte
+    sınanır (`execute_joint_sat_check`); karşılaştırma ontolojisiz bir Optimize örneğinde yapılmaz.
+    [HATA DÜZELTMESİ - P0-5]: IR'deki sabitler kavramlar değil, lafızların gösterdiği fertlerdir. Haml,
+    mübtedanın ferdinin haberle varlıkta birleşmesi (ittihâd) ya da haberin onda kâim olmasıdır. İzafet
+    özdeşlik değil nisbettir; bir arazın izafeti, onun muzâfun ileyhte kâim olmasıdır.
+    [HATA DÜZELTMESİ - P0-6]: Sâlibe önerme `Nefy` kapsülüyle derlenir: menfî yüklemin ferdi kapsamda
+    nicelenir ve nisbetin vukû'u olumsuzlanır. Böylece olumlu ve olumsuz okuma tenâkuz eder.
     """
-    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000):
+    def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000, max_cache_size: int = 1000):
         self.core_solver = solver
-        
+        self.max_cache_size = max_cache_size
+
         self.core_solver.solver.set("timeout", timeout_ms)
         self.core_solver.solver.set("smt.mbqi", True)
         self.core_solver.solver.set("smt.macro_finder", True)
-        
-        self._memoization_cache: Dict[Tuple, Dict[str, Any]] = {}
-        self._proven_bridges = set()
-        self._active_bridge_axioms = []
+
+        self._memoization_cache: Dict[Tuple, Dict[str, Any]] = OrderedDict()
 
     def _freeze_ir_matrix(self, predicates: list) -> Tuple:
         frozen_elements = []
@@ -34,7 +50,7 @@ class Layer3SMTCircuitBreaker:
             if isinstance(item, tuple):
                 frozen_elements.append(item)
             elif isinstance(item, NestedPredicate):
-                frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
+                frozen_elements.append((item.operator, tuple(item.bound_referents), self._freeze_ir_matrix(item.args)))
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
     def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, tz_const: z3.ExprRef, tv_const: z3.ExprRef, s_const: z3.ExprRef) -> z3.ExprRef:
@@ -49,8 +65,18 @@ class Layer3SMTCircuitBreaker:
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                 
-                if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                # [FAZ 3 ENTEGRASYONU] Rel_Pointer_Alias: Hafıza eşdeğerliği (âid zamiri merciinin ferdidir)
+                if pred_id == "Rel_Pointer_Alias":
                     return amil_const == mamul_const
+
+                # [HATA DÜZELTMESİ - P0-5] Haml: haber (amil) mübtedanın (mamul) ferdiyle ya varlıkta birleşir
+                # (haml-i hüve hüve: "Zeyd insandır") ya da onda kâim olur (haml-i iştikâk: "Zeyd dâribdir").
+                # Hangisinin mümkün olduğuna ontoloji karar verir: cevher başka bir şeyde kâim olmaz.
+                # [HATA DÜZELTMESİ - P0-6] Haml yalnızca bu içerikle derlenir. Yanına konan yorumlanmamış bir
+                # nisbet atomu, olumsuzlamada içeriği değil kendisini yanlışlatarak hükmü boşa çıkarırdı.
+                if pred_id in HAML_RELATIONS:
+                    kiyam = self.core_solver.builder.get_or_create_predicate("Rel_Kiyam", arity=2)
+                    return z3.Or(mamul_const == amil_const, kiyam(w_const, tz_const, tv_const, s_const, amil_const, mamul_const))
                 
                 # [FAZ 5 ENTEGRASYONU] Çift-Yönlü Mekân/Müteallak Zerk İşlemi
                 if pred_id == "LocatedIn":
@@ -61,6 +87,12 @@ class Layer3SMTCircuitBreaker:
                     rel_constraint = zarfiyye_pred(w_const, tz_const, tv_const, s_const, amil_const, mamul_const)
                     return z3.And(loc_constraint, rel_constraint)
 
+                # [FAZ 3 ENTEGRASYONU] Cümle-i Fiiliye Haber
+                # Özneyi doğrudan eylem mantığına birleştirir
+                if pred_id == "Rel_Rabita_Action":
+                    action_pred = self.core_solver.builder.get_or_create_predicate("Role_Action", arity=1)
+                    return action_pred(w_const, tz_const, tv_const, s_const, mamul_const)
+
                 predicate = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
                 return predicate(w_const, tz_const, tv_const, s_const, amil_const, mamul_const)
             else:
@@ -68,7 +100,11 @@ class Layer3SMTCircuitBreaker:
         else:
             args = [self._build_z3_expr(a, w_const, tz_const, tv_const, s_const) for a in item.args]
             
-            if item.operator == "Luzumi":
+            # [FAZ 3 ENTEGRASYONU] Sıla Cümlesi (İsm-i Mevsûl Lambda İzdüşümü)
+            # Sıla cümlesindeki tüm önermelerin, Mevsûl varlığıyla eş zamanlı (And) geçerli olmasını sağlar.
+            if item.operator == "SubClause_Sila":
+                return z3.And(args)
+            elif item.operator == "Luzumi":
                 if len(args) == 2:
                     return z3.Implies(args[0], args[1])
                 return z3.And(args) 
@@ -99,6 +135,18 @@ class Layer3SMTCircuitBreaker:
                 # [FAZ 3/4 ENTEGRASYONU] İnne ve Kardeşleri (Tahkik / Yakîn Makamı)
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, tz_const, tv_const, s_const], body)
+            elif item.operator == "Nefy":
+                # [HATA DÜZELTMESİ - P0-6] Sâlibe: Menfî yüklemin ferdi kapsamda nicelenir ve nisbet kaldırılır.
+                # "Zeyd vurmaz" -> ¬∃d (Darb(d) ∧ nisbet(d, zeyd) ∧ ...); mübtedanın mâhiyeti kapsam dışındadır.
+                body = args[0] if len(args) == 1 else z3.And(args)
+                bound = [z3.Const(name, self.core_solver.builder.EntitySort) for name in item.bound_referents]
+                return z3.Not(z3.Exists(bound, body)) if bound else z3.Not(body)
+            elif item.operator == "Exists_Virtual_Agent":
+                # [FAZ 2 ENTEGRASYONU] Edilgen Fiil/Mebnî lil-Meçhul Ontolojik Zırhı
+                # Unknown_Agent_Virtual Skolem sabiti olmaktan çıkarılarak varoluşsal niceleyici (∃x) yapılır.
+                body = args[0] if len(args) == 1 else z3.And(args)
+                virtual_agent_const = z3.Const("Unknown_Agent_Virtual", self.core_solver.builder.EntitySort)
+                return z3.Exists([virtual_agent_const], body)
             elif item.operator == "Kasr_Sifat_to_Mevsuf":
                 base_truth = args[0] if len(args) == 1 else z3.And(args)
                 exclusion_axioms = []
@@ -109,7 +157,7 @@ class Layer3SMTCircuitBreaker:
                         amil_str, mamul_str = arg_id.split('::', 1)
                         
                         # [FAZ 5 YAMASI] Arity Mismatch Koruması ve System Constraints Baypası
-                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber", "Rel_Pointer_Alias"]:
                             continue
                             
                         target_pred_id = "Rel_Zarfiyye" if pred_id == "LocatedIn" else pred_id
@@ -140,7 +188,7 @@ class Layer3SMTCircuitBreaker:
                         amil_str, mamul_str = arg_id.split('::', 1)
                         
                         # [FAZ 5 YAMASI] Arity Mismatch Koruması ve System Constraints Baypası
-                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber"]:
+                        if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber", "Rel_Pointer_Alias"]:
                             continue
                             
                         target_pred_id = "Rel_Zarfiyye" if pred_id == "LocatedIn" else pred_id
@@ -194,18 +242,35 @@ class Layer3SMTCircuitBreaker:
         )
         self.core_solver.solver.add(patient_axiom)
 
-    def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> bool:
+        # [HATA DÜZELTMESİ - P0-5] İzafet özdeşlik değil nisbettir. Muzâf bir araz ise ("Zeyd'in eli")
+        # nisbet, onun muzâfun ileyhte kâim olmasıdır; cevherin izafeti ("Beytullah") kıyâm doğurmaz.
+        izafet = self.core_solver.builder.get_or_create_predicate("Rel_Mudaf_MudafIlayh", arity=2)
+        kiyam = self.core_solver.builder.get_or_create_predicate("Rel_Kiyam", arity=2)
+        araz = self.core_solver.builder.get_or_create_predicate("Araz", arity=1)
+        izafet_axiom = z3.ForAll(
+            [w_var, tz_var, tv_var, s_var, x_var, y_var],
+            z3.Implies(
+                z3.And(izafet(w_var, tz_var, tv_var, s_var, x_var, y_var), araz(w_var, tz_var, tv_var, s_var, x_var)),
+                kiyam(w_var, tz_var, tv_var, s_var, x_var, y_var)
+            )
+        )
+        self.core_solver.solver.assert_and_track(izafet_axiom, "AXIOM_IZAFET_ARAZ_KIYAM")
+
+    def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> List[Tuple[str, z3.ExprRef]]:
         """
         [FAZ 3/4 ENTEGRASYONU] İlm-i Beyân Ma'nâ el-Ma'nâ İspatı.
-        L1'den gelen İlm-i Beyân analiz paketini, 4 Boyutlu Kripke Semantiğine (w, tz, tv, s) 
+        L1'den gelen İlm-i Beyân analiz paketini, 4 Boyutlu Kripke Semantiğine (w, tz, tv, s)
         uygun Z3 aksiyomlarına dönüştürür.
+        Köprüler saklanmaz: dönen (ad, aksiyom) çiftleri yalnızca `execute_sat_check(..., bridge_axioms=...)`
+        ile verildikleri kontrolde geçerlidir. Te'vil karîneye bağlıdır; bir cümlenin te'vili başka bir
+        cümlenin (veya başka bir ekolün) hükmüne sızmamalıdır.
         """
         if not chain_data or not chain_data.get("is_found"):
-            return False
+            return []
 
         path = chain_data.get("path", [])
         if not path or len(path) < 2:
-            return False
+            return []
 
         alaka_type = chain_data.get("alaka_type", "Unknown")
         luzum_derecesi = chain_data.get("luzum_derecesi", "Luzum_u_Zihni")
@@ -217,14 +282,12 @@ class Layer3SMTCircuitBreaker:
         s_var = z3.Const('s_beyan', self.core_solver.builder.SpaceSort)
         x_var = z3.Const('x_beyan', self.core_solver.builder.EntitySort)
 
+        bridges: List[Tuple[str, z3.ExprRef]] = []
         for i in range(len(path) - 1):
             source_id = path[i]
             target_id = path[i+1]
-            
+
             bridge_id = f"AXIOM_BEYAN_{alaka_type}_{source_id}_TO_{target_id}"
-            
-            if bridge_id in self._proven_bridges:
-                continue
 
             source_pred = self.core_solver.builder.get_or_create_predicate(source_id, arity=1)
             target_pred = self.core_solver.builder.get_or_create_predicate(target_id, arity=1)
@@ -235,7 +298,8 @@ class Layer3SMTCircuitBreaker:
                     trait_pred = self.core_solver.builder.get_or_create_predicate(trait, arity=1)
                     trait_axiom_src = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var], z3.Implies(source_pred(w_var, tz_var, tv_var, s_var, x_var), trait_pred(w_var, tz_var, tv_var, s_var, x_var)))
                     trait_axiom_tgt = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var], z3.Implies(target_pred(w_var, tz_var, tv_var, s_var, x_var), trait_pred(w_var, tz_var, tv_var, s_var, x_var)))
-                    self._active_bridge_axioms.extend([trait_axiom_src, trait_axiom_tgt])
+                    bridges.append((f"{bridge_id}_MUSHABEHAT_{trait}_SRC", trait_axiom_src))
+                    bridges.append((f"{bridge_id}_MUSHABEHAT_{trait}_TGT", trait_axiom_tgt))
 
             if luzum_derecesi == "Luzum_u_Harici":
                 w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
@@ -246,25 +310,40 @@ class Layer3SMTCircuitBreaker:
                 bridge_axiom = z3.ForAll([w_var, tz_var, tv_var, s_var, x_var],
                     z3.Implies(source_pred(w_var, tz_var, tv_var, s_var, x_var), target_pred(w_var, tz_var, tv_var, s_var, x_var))
                 )
-            
-            self._active_bridge_axioms.append(bridge_axiom)
-            self._proven_bridges.add(bridge_id)
-            
-        return True
 
-    def execute_sat_check(self, ir_matrix: SemanticStatementIR) -> Dict[str, Any]:
-        matrix_signature = self._freeze_ir_matrix(ir_matrix.predicates)
-        
+            bridges.append((bridge_id, bridge_axiom))
+
+        return bridges
+
+    def _context_fingerprint(self) -> Tuple[int, int]:
+        """
+        Önbellek anahtarına giren çözücü bağlamı: açık scope sayısı ve aksiyom sayısı.
+        Çözücüye dışarıdan push/add yapıldığında (ör. paylaşılan bir münazara oturumu),
+        eski bağlamda hesaplanmış bir sonuç yeniden kullanılmaz.
+        """
+        solver = self.core_solver.solver
+        return solver.num_scopes(), len(solver.assertions())
+
+    def execute_sat_check(self, ir_matrix: SemanticStatementIR, bridge_axioms: List[Tuple[str, z3.ExprRef]] = None) -> Dict[str, Any]:
+        bridge_axioms = list(bridge_axioms or [])
+        matrix_signature = (
+            self._freeze_ir_matrix(ir_matrix.predicates),
+            tuple(sorted((name, axiom.sexpr()) for name, axiom in bridge_axioms)),
+            self._context_fingerprint(),
+        )
+
         if matrix_signature in self._memoization_cache:
+            self._memoization_cache.move_to_end(matrix_signature)
             return self._memoization_cache[matrix_signature]
 
         self.core_solver.solver.push()
-        
+
         try:
             self._inject_structural_axioms()
-            
-            for b_axiom in self._active_bridge_axioms:
-                self.core_solver.solver.add(b_axiom)
+
+            # Köprüler izlenerek eklenir: çelişkiye katılırlarsa unsat core'da adlarıyla görünürler.
+            for name, axiom in bridge_axioms:
+                self.core_solver.solver.assert_and_track(axiom, name)
 
             w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
             tz_base = z3.Const('tz_base', self.core_solver.builder.TimeSortZati)
@@ -285,9 +364,54 @@ class Layer3SMTCircuitBreaker:
             else:
                 response = {"status": "UNKNOWN", "message": f"Devre Kesici Tetiklendi veya Kararsız Durum: {self.core_solver.solver.reason_unknown()}"}
                 
+            if len(self._memoization_cache) >= self.max_cache_size:
+                self._memoization_cache.popitem(last=False)
+                
             self._memoization_cache[matrix_signature] = response
             return response
             
+        except Exception as e:
+            return {"status": "ERROR", "message": f"L3 SMT Derleme Çöküşü: {e}"}
+        finally:
+            self.core_solver.solver.pop()
+
+    def execute_joint_sat_check(self, readings: Dict[str, SemanticStatementIR]) -> Dict[str, Any]:
+        """
+        [HATA DÜZELTMESİ - P0-7]: Mu'ârazada tarafların okumalarını aynı ontoloji ve yapısal aksiyomlarla
+        birlikte sınar. Her yüklem kendi okumasının etiketiyle izlenir; çelişkide unsat core, hangi okumanın
+        hangi yüklemlerinin hangi aksiyomlarla çatıştığını gösterir. Te'vil köprüleri bir tarafın kendi
+        muhakemesidir; ortak karşılaştırmaya girmez.
+        """
+        self.core_solver.solver.push()
+
+        try:
+            self._inject_structural_axioms()
+
+            w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
+            tz_base = z3.Const('tz_base', self.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.core_solver.builder.TimeSortVasfi)
+            s_base = z3.Const('s_base', self.core_solver.builder.SpaceSort)
+
+            tracked_items: Dict[str, Tuple[str, Any]] = {}
+            for label, ir_matrix in readings.items():
+                for index, item in enumerate(ir_matrix.predicates):
+                    track_name = f"READING_{label}_{index}"
+                    tracked_items[track_name] = (label, item)
+                    z3_expr = self._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
+                    self.core_solver.solver.assert_and_track(z3_expr, track_name)
+
+            result = self.core_solver.solver.check()
+
+            if result == z3.sat:
+                return {"status": "SAT", "message": "Okumalar ortak ontolojide bağdaşıyor."}
+            if result == z3.unsat:
+                core_names = {str(c) for c in self.core_solver.solver.unsat_core()}
+                conflict: Dict[str, List[Any]] = {"axioms": sorted(core_names - tracked_items.keys())}
+                for label in readings:
+                    conflict[label] = [item for name, (owner, item) in tracked_items.items() if owner == label and name in core_names]
+                return {"status": "UNSAT", "message": f"Ontolojik Çelişki: {conflict['axioms']}", "conflict": conflict}
+            return {"status": "UNKNOWN", "message": f"Devre Kesici Tetiklendi veya Kararsız Durum: {self.core_solver.solver.reason_unknown()}"}
+
         except Exception as e:
             return {"status": "ERROR", "message": f"L3 SMT Derleme Çöküşü: {e}"}
         finally:

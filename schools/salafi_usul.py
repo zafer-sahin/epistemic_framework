@@ -46,19 +46,9 @@ class SalafiUsul(AbstractSchoolUsul):
             current_attempt=current_attempt
         )
         
-        if l2_decision["action"] == "BLOCK":
-            return {
-                "status": "REJECTED_BY_USUL", 
-                "reason": f"[Selefî Usûlü İhlali] {l2_decision['reason']}"
-            }
-        
+        # [HATA DÜZELTMESİ - P0-10] Te'vil yasağı ancak zâhir muhalken bağlar. Zâhiri tutarlı bir cümlede
+        # te'vile gerek yoktur; Selefî usûl onu zâhiriyle kabul eder ("Allah insanı yarattı", "Beytullah").
         l3_result = l3_engine.execute_sat_check(ir_matrix)
-        
-        if l3_result["status"] == "UNSAT":
-            return {
-                "status": "NAKZ",
-                "message": f"Z3 Çelişkisi kesin çürütme (Nakz) kabul edildi. Gerekçe: Usûl kuralları te'vili mutlak reddeder. {l3_result['message']}"
-            }
             
         if l3_result["status"] == "SAT" and is_bila_kayf:
             return {
@@ -67,4 +57,19 @@ class SalafiUsul(AbstractSchoolUsul):
                 "l2_context": "BILA_KAYF_NODE_RELOCATION"
             }
             
+        if l3_result["status"] == "SAT":
+            return {**l3_result, "l2_context": "PROCEED_LITERAL"}
+
+        if l2_decision["action"] == "BLOCK":
+            return {
+                "status": "REJECTED_BY_USUL",
+                "reason": f"[Selefî Usûlü İhlali] {l2_decision['reason']}"
+            }
+
+        if l3_result["status"] == "UNSAT":
+            return {
+                "status": "NAKZ",
+                "message": f"Z3 Çelişkisi kesin çürütme (Nakz) kabul edildi. Gerekçe: Usûl kuralları te'vili mutlak reddeder. {l3_result['message']}"
+            }
+
         return {**l3_result, "l2_context": l2_decision["action"]}

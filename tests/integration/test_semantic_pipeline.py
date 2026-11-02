@@ -125,9 +125,12 @@ class TestSemanticPipeline(unittest.TestCase):
         self.assertTrue(ir_matrix.is_valid_for_z3)
         self.assertEqual(ir_matrix.active_namespace, "Base")
         
+        # Fail bağı iki ferdi (lafızların sözlük anahtarları) bağlar; fertlerin mâhiyetleri tekli yüklemlerdedir.
         predicates = ir_matrix.predicates
         self.assertEqual(predicates[0][0], "Rel_Fail")
-        self.assertEqual(predicates[0][1], "Fiil_Daraba::Zeyd_Entity")
+        self.assertEqual(predicates[0][1], "Daraba::Zeydun")
+        self.assertIn(("Fiil_Daraba", "Daraba", 1), predicates)
+        self.assertIn(("Zeyd_Entity", "Zeydun", 1), predicates)
         
     def test_ast_based_sibak_trigger(self):
         """[Faz 6] İbn Teymiyye Node Relocation'ın AST yapısal doğrulaması."""

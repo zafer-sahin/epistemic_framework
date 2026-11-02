@@ -6,7 +6,7 @@ from core.exceptions import ContextPoisoningError
 from core.models import BaseOntology, EpistemicEntity, PorphyrianTree, TermModel
 from core.logic_engine import AristotelianSolver
 from linguistics.nahiv_ast import NahivDependencyCompiler
-from linguistics.sarf_parser import MorphologicalAnalysis
+from linguistics.sarf_parser import MorphologicalAnalysis, HPSGFeatureMatrix, IrabState, Gender, GrammaticalNumber, OntologicType
 from core.layer3_smt import Layer3SMTCircuitBreaker
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
@@ -102,14 +102,25 @@ class TestTemporalModalIsolation(unittest.TestCase):
     def test_nahiv_temporal_trigger_extraction(self):
         """Nahiv AST üzerinden Vasfî Zaman (Meşrûta-i Âmme) tetikleyicisi 'Rel_Hal' bağımlılığının tespiti"""
         tokens = ["jaa", "zeydun", "rakiban"]
+        
+        # [FAZ 1 GÜNCELLEMESİ]: Eski zayıf mock'lama yerine HPSGFeatureMatrix üzerinden katı tip güvenli mock'lama yapıldı.
         lexicon = {
-            "jaa": MorphologicalAnalysis(original_word="jaa", root="cyy", pattern="faala", ontologic_type="Fiil", thematic_role="Action"),
-            "zeydun": MorphologicalAnalysis(original_word="zeydun", root="zyd", pattern="faal", ontologic_type="Ism", thematic_role="Agent"),
-            "rakiban": MorphologicalAnalysis(original_word="rakiban", root="rkb", pattern="fail", ontologic_type="Ism", thematic_role="Patient")
+            "jaa": MorphologicalAnalysis(
+                original_word="jaa", root="cyy", pattern="faala", ontologic_type="Fiil", thematic_role="Action",
+                hpsg=HPSGFeatureMatrix(ontologic_type=OntologicType.FIIL)
+            ),
+            "zeydun": MorphologicalAnalysis(
+                original_word="zeydun", root="zyd", pattern="faal", ontologic_type="Ism", thematic_role="Agent",
+                hpsg=HPSGFeatureMatrix(irab=IrabState.MARFU, number=GrammaticalNumber.MUFRED, gender=Gender.MUZEKKER, ontologic_type=OntologicType.ISM)
+            ),
+            "rakiban": MorphologicalAnalysis(
+                original_word="rakiban", root="rkb", pattern="Fâ'ilun", ontologic_type="Ism", thematic_role="Patient",
+                hpsg=HPSGFeatureMatrix(irab=IrabState.MANSUB, number=GrammaticalNumber.MUFRED, gender=Gender.MUZEKKER, ontologic_type=OntologicType.ISM)
+            )
         }
         
         deps = self.nahiv.suggest_dependencies(tokens, lexicon)
-        ast_graph = self.nahiv.build_ast(tokens, deps)
+        ast_graph = self.nahiv.build_ast(tokens, deps, lexicon)
         
         conditions = self.nahiv.extract_temporal_conditions(ast_graph)
         
@@ -122,6 +133,7 @@ class TestTemporalModalIsolation(unittest.TestCase):
         
         ir_matrix = SemanticStatementIR(
             active_namespace="Base",
+            active_agent="Mujib",  # [FAZ 12 YAMASI] Aktör mührü eklendi
             is_valid_for_z3=True,
             predicates=[
                 NestedPredicate(

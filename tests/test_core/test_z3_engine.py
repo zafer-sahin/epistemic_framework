@@ -50,6 +50,10 @@ class TestZ3Engine(unittest.TestCase):
         finally:
             self.solver.solver.pop()
 
+        # Asıl özellik: çelişkili öncüllerden keyfî bir netice "geçerli" diye türetilmemeli (P0-9).
+        self.assertFalse(self.solver.verify_syllogism(premises, "Forall([x], Feres(x))"),
+                         "[ZAFİYET] Çelişkili öncüllerden 'her şey attır' geçerli sayıldı (Ex Falso Quodlibet).")
+
     def test_ast_sandbox_recursion_limit(self):
         """Faz 1.1'deki Güvenlik Duvarı: AST Parse limitinin derinlik saldırılarına (Stack Overflow) karşı testi."""
         builder = Z3ExpressionBuilder(max_depth=3)
