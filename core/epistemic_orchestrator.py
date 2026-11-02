@@ -19,6 +19,9 @@ class EpistemicOrchestrator:
         self.l2 = l2
         self.l3 = l3_circuit_breaker
 
+        # Air-gap'in sınırı olan ortak ontoloji, leksikal zehirlenme denetiminin de ortak zeminidir.
+        self.adapter.lexicon.bind_shared_ontology(self.l1.entity_map.keys())
+
     def _extract_conflict_nodes_from_core(self, unsat_core: str) -> List[str]:
         conflict_nodes = set()
         matches = re.findall(r'AXIOM_[A-Z]+_([A-Za-z0-9_]+)', unsat_core)

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union, Tuple, Protocol, Any
+from typing import Dict, FrozenSet, Iterable, List, Optional, Union, Tuple, Protocol, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 # [ONARIM]: DiscourseRegister ve ContextPoisoningError dışa bağımlılıkları eklendi.
@@ -200,6 +200,19 @@ class ContextualLexicon:
         self.kasr_operators = {"innema": "Kasr_Innema", "illa": "Kasr_Illa"}
         self.semantic_client = semantic_client or LocalOntoLexSemanticClient()
         self.mana_graph = ManaElManaGraph(self.semantic_client)
+        # Ortak ontolojinin (Porphyrios Ağacı) kavramları; bkz. bind_shared_ontology.
+        self._shared_concepts: FrozenSet[str] = frozenset()
+
+    def bind_shared_ontology(self, concept_ids: Iterable[str]) -> None:
+        """
+        .. felsefe_notu:: Ortak Ontoloji ve Ekol Sözlükleri
+        Porphyrios Ağacı'ndaki kavramlar bütün ekollerin ortak zeminidir. İki ekolün sözlüğü bir lafzı
+        aynı ortak kavrama bağlıyorsa (Örn: Eş'arî ve Mâtürîdî için 'yed' -> Sifat_Yed_Literal), rakibin
+        o kavramı anması zehirlenme değildir. Ortak ağaçta bulunmak kavramın müsellem olduğu anlamına
+        gelmez; yalnızca iki tarafın da onu anabileceği anlamına gelir. Zehirlenme koruması ağaçta
+        bulunmayan, ekole özgü veya söylemde tanıtılmış kimlikler için sürer.
+        """
+        self._shared_concepts = frozenset(concept_ids)
 
     def register_word(self, word: str, namespace: str, ontologic_id: str, proposition_type: str = "Kadiyye-i_Hamliyye", sibak_trigger: str = None, epoch: str = "Classical") -> None:
         """
@@ -289,12 +302,15 @@ class ContextualLexicon:
         """
         .. pedagojik_anlati:: Leksikal Zehirlenme (Lexical Poisoning) Zırhı
         Mu'aradah (Çapraz İtiraz) esnasında, Sâil'in arka kapıdan eşdeğerlik kurmasını engeller.
-        Rakibin ortak (Base / müsellem) bir anlam olarak andığı kavramlar mühürlenmiş sayılmaz:
-        iki taraf aynı konudan söz etmeden mu'âraza kurulamaz.
+        Rakibin ortak (Base / müsellem) bir anlam olarak andığı kavramlar ve ortak ontolojinin
+        kavramları mühürlenmiş sayılmaz: iki taraf aynı konudan söz etmeden mu'âraza kurulamaz.
         """
         if not discourse or active_namespace == "Base":
             return
-            
+
+        if ontologic_id in self._shared_concepts:
+            return
+
         current_agent = getattr(discourse, 'active_agent', None)
         if not current_agent:
             return
