@@ -4,6 +4,9 @@ from collections import OrderedDict
 from core.logic_engine import AristotelianSolver
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 
+# Mübteda ile haber arasındaki hükmî nisbet (haml) ilişkileri.
+HAML_RELATIONS = ("Rel_Rabita_Predication", "Rel_Rabita_Identity", "Rel_Mubteda_Haber")
+
 class Layer3SMTCircuitBreaker:
     """
     Z3 Birinci Dereceden Mantık (FOL) Derleyicisi ve Devre Kesici.
@@ -25,6 +28,9 @@ class Layer3SMTCircuitBreaker:
     performansı etkiler.
     [HATA DÜZELTMESİ - P0-7]: Çapraz-ekol mu'ârazada iki okuma bu çözücünün ontolojisiyle birlikte
     sınanır (`execute_joint_sat_check`); karşılaştırma ontolojisiz bir Optimize örneğinde yapılmaz.
+    [HATA DÜZELTMESİ - P0-5]: IR'deki sabitler kavramlar değil, lafızların gösterdiği fertlerdir. Haml,
+    mübtedanın ferdinin haberle varlıkta birleşmesi (ittihâd) ya da haberin onda kâim olmasıdır. İzafet
+    özdeşlik değil nisbettir; bir arazın izafeti, onun muzâfun ileyhte kâim olmasıdır.
     """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000, max_cache_size: int = 1000):
         self.core_solver = solver
@@ -57,9 +63,20 @@ class Layer3SMTCircuitBreaker:
                 amil_const = z3.Const(amil_str, self.core_solver.builder.EntitySort)
                 mamul_const = z3.Const(mamul_str, self.core_solver.builder.EntitySort)
                 
-                # [FAZ 3 ENTEGRASYONU] Rel_Pointer_Alias: Hafıza eşdeğerliği
-                if pred_id in ["Rel_Mudaf_MudafIlayh", "Rel_Mubteda_Haber", "Rel_Pointer_Alias"]:
+                # [FAZ 3 ENTEGRASYONU] Rel_Pointer_Alias: Hafıza eşdeğerliği (âid zamiri merciinin ferdidir)
+                if pred_id == "Rel_Pointer_Alias":
                     return amil_const == mamul_const
+
+                # [HATA DÜZELTMESİ - P0-5] Haml: haber (amil) mübtedanın (mamul) ferdiyle ya varlıkta birleşir
+                # (haml-i hüve hüve: "Zeyd insandır") ya da onda kâim olur (haml-i iştikâk: "Zeyd dâribdir").
+                # Hangisinin mümkün olduğuna ontoloji karar verir: cevher başka bir şeyde kâim olmaz.
+                if pred_id in HAML_RELATIONS:
+                    nisbet = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
+                    kiyam = self.core_solver.builder.get_or_create_predicate("Rel_Kiyam", arity=2)
+                    return z3.And(
+                        nisbet(w_const, tz_const, tv_const, s_const, amil_const, mamul_const),
+                        z3.Or(mamul_const == amil_const, kiyam(w_const, tz_const, tv_const, s_const, amil_const, mamul_const))
+                    )
                 
                 # [FAZ 5 ENTEGRASYONU] Çift-Yönlü Mekân/Müteallak Zerk İşlemi
                 if pred_id == "LocatedIn":
@@ -218,6 +235,20 @@ class Layer3SMTCircuitBreaker:
             )
         )
         self.core_solver.solver.add(patient_axiom)
+
+        # [HATA DÜZELTMESİ - P0-5] İzafet özdeşlik değil nisbettir. Muzâf bir araz ise ("Zeyd'in eli")
+        # nisbet, onun muzâfun ileyhte kâim olmasıdır; cevherin izafeti ("Beytullah") kıyâm doğurmaz.
+        izafet = self.core_solver.builder.get_or_create_predicate("Rel_Mudaf_MudafIlayh", arity=2)
+        kiyam = self.core_solver.builder.get_or_create_predicate("Rel_Kiyam", arity=2)
+        araz = self.core_solver.builder.get_or_create_predicate("Araz", arity=1)
+        izafet_axiom = z3.ForAll(
+            [w_var, tz_var, tv_var, s_var, x_var, y_var],
+            z3.Implies(
+                z3.And(izafet(w_var, tz_var, tv_var, s_var, x_var, y_var), araz(w_var, tz_var, tv_var, s_var, x_var)),
+                kiyam(w_var, tz_var, tv_var, s_var, x_var, y_var)
+            )
+        )
+        self.core_solver.solver.assert_and_track(izafet_axiom, "AXIOM_IZAFET_ARAZ_KIYAM")
 
     def prove_metaphorical_bridge(self, chain_data: Dict[str, Any]) -> List[Tuple[str, z3.ExprRef]]:
         """

@@ -115,16 +115,20 @@ class TestGrammarEngine(unittest.TestCase):
         ir_matrix = adapter.generate_ir(tokens, deps, active_namespace="Base", auto_lexicon=auto_lexicon, epoch="Classical")
         
         # 4. Red-Teaming Denetimleri
+        # Roller, mâhiyeti Zeyd_Entity olan ferde yüklenir (IR sabitleri kavram değil fert taşır).
+        zeyd_fertleri = {p[1] for p in ir_matrix.predicates
+                         if isinstance(p, tuple) and p[0] == "Zeyd_Entity" and p[2] == 1}
+
         # a) Zeyd'in 'Role_Patient' (Edilgen/Meful) rolünü alıp almadığı kontrolü
         has_role_patient = any(
-            isinstance(p, tuple) and p[0] == "Role_Patient" and p[1] == "Zeyd_Entity"
+            isinstance(p, tuple) and p[0] == "Role_Patient" and p[1] in zeyd_fertleri
             for p in ir_matrix.predicates
         )
         self.assertTrue(has_role_patient, "[SEMANTİK ÇÖKÜŞ] Naib Fail (Zeyd) 'Role_Patient' (Eyleme maruz kalan) olarak Z3'e aktarılamadı.")
         
         # b) Zeyd'in yanlışlıkla 'Role_Agent' (Eyleyen) rolünü ALMADIĞI kontrolü (Semantic Shift Koruması)
         has_role_agent_zeyd = any(
-            isinstance(p, tuple) and p[0] == "Role_Agent" and p[1] == "Zeyd_Entity"
+            isinstance(p, tuple) and p[0] == "Role_Agent" and p[1] in zeyd_fertleri
             for p in ir_matrix.predicates
         )
         self.assertFalse(has_role_agent_zeyd, "[SEMANTİK KAYMA İHLALİ] Naib Fail (Zeyd) yanlışlıkla eylemi yapan (Role_Agent) olarak işaretlendi!")

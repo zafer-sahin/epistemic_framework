@@ -22,6 +22,45 @@ class AristotelianSolver:
         self._traverse_and_assert(root_entity)
         self._inject_kalamic_causality()
         self._inject_tahayyuz_axioms()
+        self._inject_kiyam_axioms()
+
+    def _inject_kiyam_axioms(self) -> None:
+        """
+        .. felsefe_notu:: Kıyâm ve Mahall-i Havâdis
+            Cevher kendi başına kâimdir (kâim bi-zâtihî); araz ise bir mahalde kâim olur (kâim bi-gayrihî).
+            Haml-i iştikâkta ("Zeyd dâribdir") ve bir arazın izafetinde ("Zeyd'in eli") yüklenen şey
+            mahalle özdeş olmaz, onda kâim olur (`Rel_Kiyam(kâim, mahal)`). İki aksiyom kıyâmın sınırını çizer:
+            Cevher başka bir şeyde kâim olmaz; bu yüzden "Zeyd attır" kıyâmla kurtarılamaz.
+            Mümkin (hâdis) olan Vâcib'de kâim olmaz; Kadîm havâdisin mahalli değildir.
+        """
+        try:
+            kiyam = self.builder.get_or_create_predicate("Rel_Kiyam", arity=2)
+            cevher_pred = self.builder.get_or_create_predicate("Cevher", arity=1)
+            mumkin_pred = self.builder.get_or_create_predicate("Mumkin_al_Wujud", arity=1)
+            wajib_pred = self.builder.get_or_create_predicate("Wajib_al_Wujud", arity=1)
+
+            w = z3.Const('w_kiyam', self.builder.WorldSort)
+            tz = z3.Const('tz_kiyam', self.builder.TimeSortZati)
+            tv = z3.Const('tv_kiyam', self.builder.TimeSortVasfi)
+            s = z3.Const('s_kiyam', self.builder.SpaceSort)
+            kaim = z3.Const('x_kaim', self.builder.EntitySort)
+            mahal = z3.Const('y_mahal', self.builder.EntitySort)
+
+            kaim_bi_zatihi_axiom = z3.ForAll([w, tz, tv, s, kaim, mahal],
+                z3.Implies(kiyam(w, tz, tv, s, kaim, mahal), z3.Not(cevher_pred(w, tz, tv, s, kaim)))
+            )
+            self.solver.assert_and_track(kaim_bi_zatihi_axiom, "AXIOM_KIYAM_CEVHER_KAIM_BI_ZATIHI")
+
+            mahall_i_havadis_axiom = z3.ForAll([w, tz, tv, s, kaim, mahal],
+                z3.Implies(
+                    z3.And(kiyam(w, tz, tv, s, kaim, mahal), mumkin_pred(w, tz, tv, s, kaim)),
+                    z3.Not(wajib_pred(w, tz, tv, s, mahal))
+                )
+            )
+            self.solver.assert_and_track(mahall_i_havadis_axiom, "AXIOM_TENZIH_MAHALL_I_HAVADIS")
+
+        except ValueError:
+            pass # Test ortamında veya daraltılmış ontolojide bu düğümler yoksa yoksay
 
     def _inject_tahayyuz_axioms(self) -> None:
         """

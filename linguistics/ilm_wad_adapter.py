@@ -48,6 +48,11 @@ class SemanticStatementIR(BaseModel):
     donanımsal olarak üzerinde taşır (`active_namespace`, `active_agent`). Böylece Kripke 
     ispatlarında tarafların birbirlerinin kabullerine (Müsellemât) sızması (Context Poisoning) 
     matematiksel düzeyde engellenir.
+
+    [HATA DÜZELTMESİ - P0-5]: Sabitler kavramlar değil, lafızların gösterdiği fertlerdir. Tekli yüklem
+    `(mâhiyet, fert, 1)` ferdin ne olduğunu, ikili yüklem `(ilişki, "fert::fert", 2)` fertler arasındaki
+    nisbeti yazar (Ör: "Zeyd attır" -> ("Insan", "zeyd", 1), ("Feres", "feres", 1),
+    ("Rel_Rabita_Predication", "feres::zeyd", 2)).
     """
     model_config = ConfigDict(extra="forbid")
     active_namespace: str
@@ -81,7 +86,7 @@ class StructuralPositingEngine:
             "Istif'al": "Role_Seeker"              # Talep (Örn: İstiğfar) - Deontik yönelim
         }
 
-    def extract_structural_roles(self, word: str, ontologic_id: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, int]]:
+    def extract_structural_roles(self, word: str, referent: str, auto_lexicon: Dict[str, MorphologicalAnalysis]) -> List[Tuple[str, str, int]]:
         predicates = []
         morph_data = auto_lexicon.get(word)
         
@@ -92,16 +97,16 @@ class StructuralPositingEngine:
         vezin = getattr(morph_data, 'pattern', None)
         if vezin and vezin in self.vaz_nevi_matrix:
             role_predicate = self.vaz_nevi_matrix[vezin]
-            predicates.append((role_predicate, ontologic_id, 1))
+            predicates.append((role_predicate, referent, 1))
             
         # 2. Geri çekilme (Fallback): Eğer klasik vezin bulunamaz ancak leksikonda statik bir rol atanmışsa
         elif getattr(morph_data, 'thematic_role', None):
             role_predicate = f"Role_{morph_data.thematic_role}"
-            predicates.append((role_predicate, ontologic_id, 1))
+            predicates.append((role_predicate, referent, 1))
             
         return predicates
 
-    def extract_syntactic_roles(self, rel_type: str, ontologic_id: str) -> List[Tuple[str, str, int]]:
+    def extract_syntactic_roles(self, rel_type: str, referent: str) -> List[Tuple[str, str, int]]:
         """
         [FAZ 2 ENTEGRASYONU] Mebnî lil-Meçhul ve Tematik Rol İntikali
         Nahiv_AST üzerinden gelen sentaktik ilişki tiplerini, Z3 FOL motoru için 
@@ -109,9 +114,9 @@ class StructuralPositingEngine:
         """
         predicates = []
         if rel_type in ['Naib_Fail', 'Meful']:
-            predicates.append(("Role_Patient", ontologic_id, 1))
+            predicates.append(("Role_Patient", referent, 1))
         elif rel_type == 'Fail':
-            predicates.append(("Role_Agent", ontologic_id, 1))
+            predicates.append(("Role_Agent", referent, 1))
         return predicates
 
 class IlmWadAdapter:
@@ -160,13 +165,13 @@ class IlmWadAdapter:
 
         for inne_token, rels in inne_relations.items():
             if 'ism' in rels and 'haber' in rels:
-                ism_id = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
-                haber_id = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                ism_id, ism_ref = self._resolve_entity(rels['ism'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                haber_id, haber_ref = self._resolve_entity(rels['haber'], active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
                 
                 # İnne matrisinde İsmin Haber'e ontolojik olarak raptedilmesi (Predication)
-                atomic_predicates.append(("Rel_Rabita_Predication", f"{haber_id}::{ism_id}", 2))
-                atomic_predicates.append((ism_id, ism_id, 1))
-                atomic_predicates.append((haber_id, haber_id, 1))
+                atomic_predicates.append(("Rel_Rabita_Predication", f"{haber_ref}::{ism_ref}", 2))
+                atomic_predicates.append((ism_id, ism_ref, 1))
+                atomic_predicates.append((haber_id, haber_ref, 1))
 
     def _resolve_subclauses_and_pointers(self, amil: str, mamul: str, rel_type: str, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> bool:
         """
@@ -176,19 +181,19 @@ class IlmWadAdapter:
         Âid zamiri ise FOL'da iki değişkenin hafıza eşitlemesi ($x = y$) olarak raptedilir.
         """
         if rel_type == 'Rel_Sila':
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            amil_id, amil_ref = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id, mamul_ref = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             
             # Sıla cümlesi ana entity'ye NestedPredicate (Alt Kapsül) olarak bağlanır
-            atomic_predicates.append(NestedPredicate(operator="SubClause_Sila", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
-            atomic_predicates.append((amil_id, amil_id, 1))
-            atomic_predicates.append((mamul_id, mamul_id, 1))
+            atomic_predicates.append(NestedPredicate(operator="SubClause_Sila", args=[(amil_id, amil_ref, 1), (mamul_id, mamul_ref, 1)]))
+            atomic_predicates.append((amil_id, amil_ref, 1))
+            atomic_predicates.append((mamul_id, mamul_ref, 1))
             return True
             
         if rel_type == 'Rel_Aid':
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            _, amil_ref = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             # Âid zamiri sanal olduğu için doğrudan pointer aliasing oluşturulur
-            atomic_predicates.append(("Rel_Pointer_Alias", f"{amil_id}::{mamul}", 2))
+            atomic_predicates.append(("Rel_Pointer_Alias", f"{amil_ref}::{mamul}", 2))
             return True
             
         return False
@@ -211,42 +216,42 @@ class IlmWadAdapter:
             return True
 
         if rel_type in ['Rabita_Identity', 'Rabita_Predication', 'Mubteda_Haber', 'Rabita_Cümle_Fiiliye']: 
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            amil_id, amil_ref = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id, mamul_ref = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             
             if rel_type == 'Rabita_Identity':
-                atomic_predicates.append(("Rel_Rabita_Identity", f"{amil_id}::{mamul_id}", 2))
+                atomic_predicates.append(("Rel_Rabita_Identity", f"{amil_ref}::{mamul_ref}", 2))
             elif rel_type == 'Rabita_Cümle_Fiiliye':
                 # [FAZ 3]: Cümle-i Fiiliye Haber
-                atomic_predicates.append(("Rel_Rabita_Action", f"{amil_id}::{mamul_id}", 2))
+                atomic_predicates.append(("Rel_Rabita_Action", f"{amil_ref}::{mamul_ref}", 2))
             else:
-                atomic_predicates.append(("Rel_Rabita_Predication", f"{amil_id}::{mamul_id}", 2))
+                atomic_predicates.append(("Rel_Rabita_Predication", f"{amil_ref}::{mamul_ref}", 2))
             
-            atomic_predicates.append((amil_id, amil_id, 1))
-            atomic_predicates.append((mamul_id, mamul_id, 1))
+            atomic_predicates.append((amil_id, amil_ref, 1))
+            atomic_predicates.append((mamul_id, mamul_ref, 1))
             return True
 
         if rel_type in ['Rel_Fa_Sebebiyye', 'Rel_Fa_Fuzaiyye']:
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            amil_id, amil_ref = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id, mamul_ref = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             op = "Luzumi_Dynamic" if rel_type == 'Rel_Fa_Sebebiyye' else "Dynamic_Transition"
-            atomic_predicates.append(NestedPredicate(operator=op, args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
-            atomic_predicates.append((amil_id, amil_id, 1))
-            atomic_predicates.append((mamul_id, mamul_id, 1))
+            atomic_predicates.append(NestedPredicate(operator=op, args=[(amil_id, amil_ref, 1), (mamul_id, mamul_ref, 1)]))
+            atomic_predicates.append((amil_id, amil_ref, 1))
+            atomic_predicates.append((mamul_id, mamul_ref, 1))
             return True
 
         if rel_type == 'Rel_Atif':
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            amil_id, amil_ref = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id, mamul_ref = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             particle = irab.lower()
             
             if particle in self.inadi_particles:
-                atomic_predicates.append(NestedPredicate(operator="Inadi_Hakikiyye", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
+                atomic_predicates.append(NestedPredicate(operator="Inadi_Hakikiyye", args=[(amil_id, amil_ref, 1), (mamul_id, mamul_ref, 1)]))
             else: 
-                atomic_predicates.append(NestedPredicate(operator="Luzumi", args=[(amil_id, amil_id, 1), (mamul_id, mamul_id, 1)]))
+                atomic_predicates.append(NestedPredicate(operator="Luzumi", args=[(amil_id, amil_ref, 1), (mamul_id, mamul_ref, 1)]))
             
-            atomic_predicates.append((amil_id, amil_id, 1))
-            atomic_predicates.append((mamul_id, mamul_id, 1))
+            atomic_predicates.append((amil_id, amil_ref, 1))
+            atomic_predicates.append((mamul_id, mamul_ref, 1))
             return True
             
         return False
@@ -264,21 +269,28 @@ class IlmWadAdapter:
             mecrur_target = next((m for a, m, r, _ in dependencies if r == 'Harf_Mecrur' and a == harf_node), None)
             
             if mecrur_target:
-                mecrur_id = self._resolve_entity(mecrur_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                mecrur_id, mecrur_ref = self._resolve_entity(mecrur_target, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                terms = [(mecrur_id, mecrur_ref)]
                 
                 if amil == 'Kainun_Virtual':
                     mubteda_token = next((m for a, m, r, _ in dependencies if r in ['Mubteda_Haber', 'Rabita_Predication'] and a == 'Kainun_Virtual'), None)
                     if mubteda_token:
-                        amil_id = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                        amil_id, amil_ref = self._resolve_entity(mubteda_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                        terms.append((amil_id, amil_ref))
                     else:
-                        amil_id = "Kainun_Virtual"
+                        amil_ref = "Kainun_Virtual"
                 else:
-                    amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                    amil_id, amil_ref = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+                    terms.append((amil_id, amil_ref))
                 
                 if rel_type == 'Muteallak_Mekan':
-                    atomic_predicates.append(("LocatedIn", f"{amil_id}::{mecrur_id}", 2))
+                    atomic_predicates.append(("LocatedIn", f"{amil_ref}::{mecrur_ref}", 2))
                 else:
-                    atomic_predicates.append(("Rel_Muteallak", f"{amil_id}::{mecrur_id}", 2))
+                    atomic_predicates.append(("Rel_Muteallak", f"{amil_ref}::{mecrur_ref}", 2))
+
+                # [HATA DÜZELTMESİ - P0-5] Sabit artık kavramı değil ferdi taşır; fertlerin mâhiyetleri ayrıca yazılır.
+                for term_id, term_ref in terms:
+                    atomic_predicates.append((term_id, term_ref, 1))
             return True
         return False
 
@@ -343,36 +355,36 @@ class IlmWadAdapter:
             if amil.lower() in self.mani_huluv_particles or mamul.lower() in self.mani_huluv_particles:
                 continue
 
-            amil_id = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
-            mamul_id = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            amil_id, amil_ref = self._resolve_entity(amil, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+            mamul_id, mamul_ref = self._resolve_entity(mamul, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
             
             rel_id = f"Rel_{rel_type}"
-            atomic_predicates.append((rel_id, f"{amil_id}::{mamul_id}", 2))
+            atomic_predicates.append((rel_id, f"{amil_ref}::{mamul_ref}", 2))
             
-            atomic_predicates.append((amil_id, amil_id, 1))
-            atomic_predicates.append((mamul_id, mamul_id, 1))
+            atomic_predicates.append((amil_id, amil_ref, 1))
+            atomic_predicates.append((mamul_id, mamul_ref, 1))
 
             # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] Rolleri IR matrisine katı aksiyomlar (1-Ary predicates) olarak ekle
-            amil_roles = self.positing_engine.extract_structural_roles(amil, amil_id, auto_lexicon)
+            amil_roles = self.positing_engine.extract_structural_roles(amil, amil_ref, auto_lexicon)
             for role in amil_roles:
                 if role not in processed_roles:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
                     
-            mamul_roles = self.positing_engine.extract_structural_roles(mamul, mamul_id, auto_lexicon)
+            mamul_roles = self.positing_engine.extract_structural_roles(mamul, mamul_ref, auto_lexicon)
             for role in mamul_roles:
                 if role not in processed_roles:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
                     
             # [FAZ 2 ENTEGRASYONU] Mebnî lil-Meçhul ve Tematik Rol İntikali (Syntactic Extractor)
-            amil_syn_roles = self.positing_engine.extract_syntactic_roles(rel_type, amil_id)
+            amil_syn_roles = self.positing_engine.extract_syntactic_roles(rel_type, amil_ref)
             for role in amil_syn_roles:
                 if role not in processed_roles:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
                     
-            mamul_syn_roles = self.positing_engine.extract_syntactic_roles(rel_type, mamul_id)
+            mamul_syn_roles = self.positing_engine.extract_syntactic_roles(rel_type, mamul_ref)
             for role in mamul_syn_roles:
                 if role not in processed_roles:
                     atomic_predicates.append(role)
@@ -450,8 +462,8 @@ class IlmWadAdapter:
         # [FAZ 3.1: VAZ' NEV'Î KÖPRÜSÜ] Yalıtılmış varlıklar için ekstra tematik rol taraması
         processed_roles = set(pred for pred in atomic_predicates if isinstance(pred, tuple) and str(pred[0]).startswith("Role_"))
         for word in tokens:
-             ontologic_id = self._resolve_entity(word, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
-             roles = self.positing_engine.extract_structural_roles(word, ontologic_id, auto_lexicon)
+             _, referent = self._resolve_entity(word, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+             roles = self.positing_engine.extract_structural_roles(word, referent, auto_lexicon)
              for role in roles:
                  if role not in processed_roles:
                      atomic_predicates.append(role)
@@ -485,7 +497,7 @@ class IlmWadAdapter:
             provenance_locked=True
         )
         
-    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str, allow_tevil: bool, conflicting_node: str) -> str:
+    def _resolve_entity(self, word: str, active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, dependencies: List[Tuple[str, str, str, str]], epoch: str, allow_tevil: bool, conflicting_node: str) -> Tuple[str, str]:
         """
         .. felsefe_notu:: Tahrîr-i Mahall-i Niza' (Kavramsal Senkronizasyon) ve Bila-Kayf
         Münazara adabında Sâil ve Mucîb'in kavramları aynı ontolojik uzaydan çektiğinden emin 
@@ -495,26 +507,33 @@ class IlmWadAdapter:
         uygun olarak, eğer sistem `allow_tevil=False` nedeniyle bir İlâhî Sıfat çelişkisi 
         (UNSAT/Nakz) yaşarsa; kelime literal uzayından koparılır ve `Metaphor_Fallback` üzerinden 
         bağımsız 'Bila-Kayf' (Mahiyeti Meçhul) düğümüne otonom olarak taşınır.
+
+        .. felsefe_notu:: Mâhiyet ve Fert (Küllî ve Cüz'î)
+        [HATA DÜZELTMESİ - P0-5]: Lafzın iki şeyi döner: mâhiyeti (ontolojik kimlik, ör. İnsan) ve
+        gösterdiği fert (Z3 sabiti). Fert, lafzın sözlükteki kökünden adlanır ('zeyd'); böylece aynı
+        nev'den iki fert tek sabite çökmez ve aynı lafzı farklı okuyan iki taraf, aynı ferdin ne olduğunda
+        ayrılır. Zamir, merciinin ferdine döner. Sanal düğümlerde ve edatlarda fert, kimliğin kendisidir.
         """
         # [FAZ 2 KORUMASI] Sanal varlıkların sözlük (lexicon) aramasına düşmesini engeller.
         if word in ["Unknown_Agent_Virtual", "Kainun_Virtual", "Rabita_Virtual"]:
-            return word
+            return word, word
             
         # [FAZ 3 KORUMASI] Âid zamirlerinin sanal pointerlarını yakalar
         if word.endswith("_Aid_Virtual"):
-            return word
+            return word, word
 
-        pronoun_res = self.discourse.resolve_pronoun(word, enforcement_namespace=active_namespace)
-        if pronoun_res:
-            StrictAirGapValidator.validate_provenance(pronoun_res)
-            return pronoun_res
+        antecedent = self.discourse.resolve_antecedent(word, enforcement_namespace=active_namespace)
+        if antecedent:
+            StrictAirGapValidator.validate_provenance(antecedent.ontologic_id)
+            return antecedent.ontologic_id, antecedent.referent or antecedent.ontologic_id
             
         known_particles = {"hal", "mata", "kayfa", "la", "ma", "wa", "fa", "aw", "am", "summe", "bal", "lakin", "in", "iza", "law", "amma", "imma", "inna", "anna"}
         
         # LOGIC FIX: Sarf motorunun "imma" gibi edatları "imm" köküne indirgemesinden (truncation) 
         # önce saf kelimenin edat olup olmadığını kontrol eder.
         if word.lower() in known_particles:
-            return f"GrammarNode_{word.capitalize()}"
+            grammar_node = f"GrammarNode_{word.capitalize()}"
+            return grammar_node, grammar_node
             
         search_key = word
         morph_data = auto_lexicon.get(word)
@@ -522,11 +541,13 @@ class IlmWadAdapter:
             search_key = morph_data.root
 
         if morph_data and str(morph_data.ontologic_type).startswith("Harf_"):
-            return f"GrammarNode_{search_key.capitalize()}"
+            grammar_node = f"GrammarNode_{search_key.capitalize()}"
+            return grammar_node, grammar_node
             
         # Fallback for remaining mapped particles
         if search_key.lower() in known_particles:
-            return f"GrammarNode_{search_key.capitalize()}"
+            grammar_node = f"GrammarNode_{search_key.capitalize()}"
+            return grammar_node, grammar_node
 
         base_ontologic_id, sense_namespace = self.lexicon.resolve_sense(search_key, active_namespace, proposition_type, self.discourse, dependencies, epoch, allow_tevil, conflicting_node)
 
@@ -546,6 +567,6 @@ class IlmWadAdapter:
         if not ontologic_id.startswith("Fiil_") and not ontologic_id.startswith("Harf_") and not ontologic_id.startswith("GrammarNode_"):
             gender = getattr(morph_data, 'gender', None) if morph_data else None
             number = getattr(morph_data, 'number', None) if morph_data else None
-            self.discourse.add_mention(word, ontologic_id, active_namespace, gender=gender, number=number, sense_namespace=sense_namespace)
+            self.discourse.add_mention(word, ontologic_id, active_namespace, gender=gender, number=number, sense_namespace=sense_namespace, referent=search_key)
             
-        return ontologic_id
+        return ontologic_id, search_key

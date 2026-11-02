@@ -260,7 +260,6 @@ class TestP0_4_MunazaraScopeDengesi(unittest.TestCase):
                          "FSM ile L3 aynı çözücüyü paylaşıyor; münazara kapsamları cümle hükümlerine karışır.")
 
 
-@unittest.expectedFailure
 class TestP0_5_Haml(unittest.TestCase):
     """[P0-5] Haml mantıksal içerik taşımalı; izafet özdeşlik sayılmamalıdır."""
 
@@ -269,10 +268,51 @@ class TestP0_5_Haml(unittest.TestCase):
         sonuc = p.l3.execute_sat_check(_ir(p, "zeydun feresun"))
         self.assertEqual(sonuc["status"], "UNSAT", "'Zeyd attır' ontolojideki İnsan/Feres ayrıklığıyla çelişmeli.")
 
+    def test_accident_is_predicated_by_subsistence(self):
+        """Haml-i iştikâk: 'Zeyd dâribdir'. Darb (araz) Zeyd'in kendisi değil, Zeyd'de kâim olandır."""
+        p = _boru_hatti_kur()
+        sonuc = p.l3.execute_sat_check(_ir(p, "zeydun daribun"))
+        self.assertEqual(sonuc["status"], "SAT", sonuc["message"])
+
+    def test_individual_is_not_the_species_constant(self):
+        """Zeyd İnsan'ın bir ferdidir; ferdin sabiti nev'in adı olursa aynı nev'in bütün fertleri tek sabite çöker."""
+        p = _boru_hatti_kur()
+        insan_fertleri = [item[1] for item in _ir(p, "zeydun feresun").predicates
+                          if isinstance(item, tuple) and item[0] == "Insan" and item[2] == 1]
+        self.assertTrue(insan_fertleri)
+        self.assertNotIn("Insan", insan_fertleri, "Zeyd, nev'i olan İnsan'ın sabitine çöktü.")
+
+    def test_spatial_relation_keeps_the_natures_of_its_terms(self):
+        """Mekân bağı fertleri bağlar; fertlerin mâhiyetleri IR'de yazılı kalmalı. Vâcib mekânda bulunmaz (tenzih)."""
+        p = _boru_hatti_kur()
+        sonuc = p.l3.execute_sat_check(_ir(p, "allahu fi semai"))
+        self.assertEqual(sonuc["status"], "UNSAT", sonuc["message"])
+        self.assertIn("AXIOM_TENZIH_WAJIB_AL_WUJUD", sonuc["message"])
+
+    def test_pronoun_refers_to_the_individual_of_its_antecedent(self):
+        """Zamir, merciinin nev'ine değil ferdine döner."""
+        discourse = DiscourseRegister()
+        discourse.add_mention("zeydun", "Insan", "Ashari", gender="Muzekker", number="Mufred", referent="zeyd")
+        merci = discourse.resolve_antecedent("huve")
+        self.assertEqual((merci.ontologic_id, merci.referent), ("Insan", "zeyd"))
+
     def test_izafet_is_not_identity(self):
         p = _boru_hatti_kur()
         ifadeler = _z3_ifadeleri(p, _ir(p, "yadu allahi", "Salafi"))
         self.assertFalse(any(z3.is_eq(e) for e in ifadeler), "İzafet (sıfat–zât) özdeşliğe çevrildi.")
+
+    def test_izafet_of_substance_to_wajib_is_consistent(self):
+        """İzafet-i teşrîf: 'Beytullah'. Ev Allah'a nisbet edilir; Allah'la özdeş sayılmaz, O'nda kâim de olmaz."""
+        p = _boru_hatti_kur()
+        sonuc = p.l3.execute_sat_check(_ir(p, "beytu allahi"))
+        self.assertEqual(sonuc["status"], "SAT", sonuc["message"])
+
+    def test_literal_hand_contradicts_tenzih_through_subsistence(self):
+        """Eş'arî lafzî okumada 'yed' bir arazdır ve izafetle Allah'ta kâim olur; Vâcib havâdisin mahalli olamaz."""
+        p = _boru_hatti_kur()
+        sonuc = p.l3.execute_sat_check(_ir(p, "yadu allahi", "Ashari"))
+        self.assertEqual(sonuc["status"], "UNSAT")
+        self.assertIn("AXIOM_TENZIH_MAHALL_I_HAVADIS", sonuc["message"])
 
 
 @unittest.expectedFailure
@@ -349,16 +389,15 @@ class TestP0_7_Muaraza(unittest.TestCase):
                          "Ontolojiyle çelişen Mucîb iddiası mu'ârazayı kazandı.")
 
     def test_readings_on_disjoint_nodes_conflict(self):
-        """Eş'arî te'vil okuması (Kudret) ile Selefî bilâ-keyf okuması, Vâcib altındaki ayrık düğümlere düşer.
-
-        Bugün iki okuma aynı varlığa, izafetin özdeşlik sayılması (P0-5) üzerinden bağlanıyor. P0-5
-        düzeltilirken iki okumanın aynı göndergeye ('yed') ait kalması korunmalıdır.
-        """
+        """Eş'arî te'vil okuması (Kudret) ile Selefî bilâ-keyf okuması, aynı 'yed' göndergesini Vâcib altındaki ayrık düğümlere koyar."""
         p = _boru_hatti_kur()
         mucib = self._okuma(p, "yadu allahi", AshariUsul())
         sonuc = self._capraz_muaraza(p, mucib, AshariUsul(), "yadu allahi", SalafiUsul())
         self.assertEqual(sonuc["status"], "MUARADAH_SUCCESS", sonuc["message"])
         self.assertIn("AXIOM_DISJOINT_Bila_Kayf_Sifat_AND_Kudret", sonuc["conflict"]["axioms"])
+        fertler = [{item[1] for item in sonuc["conflict"][taraf] if isinstance(item, tuple) and item[2] == 1}
+                   for taraf in ("Mujib", "Sail")]
+        self.assertTrue(fertler[0] & fertler[1], "Çatışma, aynı göndergenin iki okuması arasında kurulmadı.")
 
     def test_same_reading_in_both_schools_is_ineffective(self):
         """Yalnızca ortak (Base) kavramlarla kurulan cümleyi iki ekol aynı okuyorsa çatışma yoktur."""

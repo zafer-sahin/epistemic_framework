@@ -45,6 +45,9 @@ class EntityMention(BaseModel):
     # Anlamın sözlükte bulunduğu uzay: "Base" = müsellem ortak anlam. None: kaynağı bilinmeyen
     # veya söylemde tanıtılmış varlık. Leksikal zehirlenme denetimi bu alanı kullanır.
     sense_namespace: Optional[str] = None
+    # Lafzın göstergesi olan fert (Z3 sabiti). `ontologic_id` ferdin mâhiyetidir (nev'i);
+    # zamir merciinin ferdine döner. None: fert, mâhiyetin kimliğiyle anılır (sanal düğümler).
+    referent: Optional[str] = None
 
 class DiscourseRegister:
     """
@@ -146,7 +149,7 @@ class DiscourseRegister:
         else:
             raise RuntimeError(f"[BELLEK HATASI] {self.active_agent} için Global söylem çerçevesi (Frame 0 - Müsellemât) imha edilemez. Stack underflow.")
 
-    def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None, is_virtual: bool = False, sense_namespace: Optional[str] = None) -> None:
+    def add_mention(self, word: str, ontologic_id: str, active_namespace: str, gender: Optional[str] = None, number: Optional[str] = None, is_virtual: bool = False, sense_namespace: Optional[str] = None, referent: Optional[str] = None) -> None:
         """
         .. mantik_kurali:: Ortak Kabul ve Hususi İddia
         Müsellemât uzayındaki (Base) kavramları her iki aktörün de kök zihnine atar; 
@@ -163,7 +166,8 @@ class DiscourseRegister:
             gender=gender,
             number=number,
             is_virtual=is_virtual,
-            sense_namespace=sense_namespace
+            sense_namespace=sense_namespace,
+            referent=referent
         )
         
         if active_namespace == "Base":
@@ -253,6 +257,15 @@ class DiscourseRegister:
         önce HPSG yapısal doğrulaması yapar, ardından Context Sealing kontrolü uygular.
         Bulunan ilk meşru merci (gerçek veya müstatir), Z3 SMT'ye gönderilecek kesin mantıksal değişken 
         (EntitySort Variable) eşdeğerliği (Pointer Aliasing) olur.
+        Merciin mâhiyetini (ontolojik kimliğini) döndürür; ferdi için `resolve_antecedent` kullanılır.
+        """
+        antecedent = self.resolve_antecedent(pronoun, enforcement_namespace)
+        return antecedent.ontologic_id if antecedent else None
+
+    def resolve_antecedent(self, pronoun: str, enforcement_namespace: Optional[str] = None) -> Optional[EntityMention]:
+        """
+        `resolve_pronoun` ile aynı arama; merciin anılışını (mâhiyeti ve ferdiyle) döndürür.
+        Zamir olmayan kelimelerde None döner.
         """
         pronoun_lower = pronoun.lower()
         if pronoun_lower not in self.pronouns:
@@ -275,7 +288,7 @@ class DiscourseRegister:
                         continue
                     
                     # İlk meşru varlık Z3 matrisi için döndürülür
-                    return resolved_mention.ontologic_id
+                    return resolved_mention
                 
         raise ValueError(f"LOGIC_FAILURE_PROBABILITY: HIGH - '{pronoun}' zamiri için {self.active_agent} uzayında ontolojik kısıtları (HPSG) uyan ve erişilebilir bir referans (Antecedent) bulunamadı.")
         

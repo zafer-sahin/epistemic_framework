@@ -22,6 +22,7 @@ class TestFaz5VazAndMaani(unittest.TestCase):
         self.discourse.active_agent = "Sail"
         self.discourse.get_opponent_epistemic_state.return_value = DenialLevel.MUNKIR
         self.discourse.resolve_pronoun.return_value = None
+        self.discourse.resolve_antecedent.return_value = None
         
         # Bipartite DRT Çift Yığıtlı Bellek (Scopes) Mimarisi
         self.discourse.scopes = {
