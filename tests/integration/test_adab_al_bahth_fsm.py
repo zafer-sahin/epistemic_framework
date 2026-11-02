@@ -103,21 +103,21 @@ class TestDialecticsFSM(unittest.TestCase):
 
     def test_fsm_muaradah_stalemate_generation(self):
         """
-        [Faz 4.3] Z3 Optimize ile Çapraz-Ekol Kilitlenmesi (Tevcîh) Testi.
-        Mu'aradah saldırısının Soft Constraints kullanarak bir Stalemate üretip üretemediği sınanır.
+        [Faz 4.3] Mu'aradah saldırısı testi.
+        Karşı-iddia müsellemât, delil ve ontolojiyle birlikte sınanır; saldırı münazarayı sonuçlandırır.
         """
         self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
         self.engine.tahrir_i_niza(musellemat=["S"], niza_terms=["P"])
         self.engine.submit_evidence(["Forall([x], Implies(S(x), M(x)))", "Forall([x], Implies(M(x), P(x)))"])
-        
-        # Sâil Mu'aradah yapar: Kendi usûlünden esnek bir kısıt (Soft Constraint) getirir
+
+        # Sâil Mu'aradah yapar: delili men' etmeden iddianın hilâfını ileri sürer
         result = self.engine.attack_evidence("Muaradah", target_premise="Forall([x], Implies(S(x), Not(P(x))))")
         
         self.assertIn(result["status"], ["STALEMATE", "MUARADAH_FAILED"])
         self.assertEqual(self.engine.current_state, "RESOLVED")
 
-    def test_cross_school_muaradah_dynamic_weight_optimization(self):
-        """[Faz 5] Orkestratör üzerinden Mu'aradah çapraz-ekol çarpışmasında ontolojik ağırlık cezası ölçümü."""
+    def test_cross_school_muaradah_reports_conflict_reason(self):
+        """[Faz 5] Orkestratör üzerinden Mu'aradah: çapraz-ekol çarpışmasında çatışmanın gerekçesi raporlanır."""
         self.lexicon.register_word("cevher", "Base", "Cevher")
         self.lexicon.register_word("cism", "Base", "Cism")
         self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
@@ -140,7 +140,7 @@ class TestDialecticsFSM(unittest.TestCase):
         
         self.assertIn(result["status"], ["MUARADAH_SUCCESS", "MUARADAH_INEFFECTIVE"])
         if result["status"] == "MUARADAH_SUCCESS":
-            self.assertIn("ontolojik ağırlık maliyetiyle", result["message"])
+            self.assertTrue(result["conflict"]["axioms"], "Çatışmanın dayandığı aksiyomlar raporlanmadı.")
 
     def _yed_okumalarini_kaydet(self):
         """REPL ile aynı 'yad' kayıtları: Selefî bilâ-keyf, Eş'arî literal ve mecaz okumaları."""

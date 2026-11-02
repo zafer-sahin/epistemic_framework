@@ -3,6 +3,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import z3
 
@@ -12,7 +13,7 @@ from core.logic_engine import AristotelianSolver
 from core.layer1_graph import Layer1HeuristicGraph
 from core.layer2_rules import Layer2RuleEngine
 from core.layer3_smt import Layer3SMTCircuitBreaker
-from core.epistemic_orchestrator import EpistemicOrchestrator
+from core.epistemic_orchestrator import EpistemicOrchestrator, CONSISTENT_STATUSES
 from core.syllogism_builder import SyllogismEngine
 from linguistics.tokenizer import EpistemicTokenizer
 from linguistics.sarf_parser import SarfEngine, LocalOntoLexGraphClient
@@ -289,16 +290,53 @@ class TestP0_6_Olumsuzluk(unittest.TestCase):
         self.assertTrue(any(_olumsuzluk_icerir(e) for e in _z3_ifadeleri(p, ir)), "IR'de olumsuzluk yok.")
 
 
-@unittest.expectedFailure
 class TestP0_7_Muaraza(unittest.TestCase):
     """[P0-7] Mu'âraza aynı ontolojiyle değerlendirilmeli; içerikten bağımsız sonuç üretmemelidir."""
+
+    def _okuma(self, p: SimpleNamespace, cumle: str, usul) -> SemanticStatementIR:
+        """Cümlenin, usûlün tutarlı bulduğu (te'vil uygulandıysa te'vil sonrası) okuması."""
+        tokens, morph, deps = _cozumle(p, cumle)
+        p.discourse.clear_memory()
+        sonuc, okuma = p.orchestrator.evaluate_statement(tokens, deps, usul, morph)
+        self.assertIn(sonuc["status"], CONSISTENT_STATUSES, sonuc.get("message"))
+        return okuma
+
+    def _capraz_muaraza(self, p: SimpleNamespace, mucib_okumasi, mucib_usul, cumle: str, sail_usul) -> dict:
+        tokens, morph, deps = _cozumle(p, cumle)
+        p.discourse.set_agent("Sail")
+        return p.orchestrator.execute_cross_school_muaradah(mucib_okumasi, mucib_usul, tokens, deps, sail_usul, morph)
 
     def test_counter_claim_refuted_by_premise_is_not_stalemate(self):
         ontology = OntologyLoader().load(ONTOLOGY_PATH)
         fsm = _munazara_delile_kadar(AristotelianSolver(ontology), DiscourseRegister())
         sonuc = fsm.attack_evidence("Muaradah", "Forall([x], Not(Cism(x)))")
-        self.assertNotEqual(sonuc["status"], "STALEMATE",
-                            "Kabul edilmiş öncülle (∃Cemad ⊆ Cism) çelişen karşı-iddia kilitlenme sayıldı.")
+        self.assertEqual(sonuc["status"], "MUARADAH_FAILED",
+                         "Kabul edilmiş öncülle (∃Cemad ⊆ Cism) çelişen karşı-iddia kilitlenme sayıldı.")
+
+    def test_counter_claim_not_against_the_claim_is_not_stalemate(self):
+        """Delille bağdaşan ama iddianın hilâfını gerektirmeyen karşı-iddia, iddiaya yöneltilmiş bir mu'âraza değildir."""
+        ontology = OntologyLoader().load(ONTOLOGY_PATH)
+        fsm = _munazara_delile_kadar(AristotelianSolver(ontology), DiscourseRegister())
+        sonuc = fsm.attack_evidence("Muaradah", "Exists([x], Insan(x))")
+        self.assertEqual(sonuc["status"], "MUARADAH_FAILED", sonuc["message"])
+
+    def test_counter_claim_not_excluded_by_evidence_is_stalemate(self):
+        """Delil iddiayı karşı-iddiaya karşı ispatlamıyorsa (∃Cevher, ∃Cism'i gerektirmez) kilitlenme çıkabilmeli."""
+        fsm = AdabAlBahthEngine(AristotelianSolver(OntologyLoader().load(ONTOLOGY_PATH)), DiscourseRegister())
+        fsm.submit_claim("Exists([x], Cism(x))")
+        fsm.tahrir_i_niza(["Cevher"], ["Cism"])
+        fsm.submit_evidence(["Exists([x], Cevher(x))"])
+        sonuc = fsm.attack_evidence("Muaradah", "Forall([x], Not(Cism(x)))")
+        self.assertEqual(sonuc["status"], "STALEMATE", sonuc["message"])
+
+    def test_undecided_solver_is_not_a_verdict_in_fsm(self):
+        """Çözücü karar veremezse (UNKNOWN) mu'âraza bir hükümle bitmemeli; münazara açık kalmalı."""
+        solver = AristotelianSolver(OntologyLoader().load(ONTOLOGY_PATH))
+        fsm = _munazara_delile_kadar(solver, DiscourseRegister())
+        with mock.patch.object(solver.solver, "check", return_value=z3.unknown):
+            sonuc = fsm.attack_evidence("Muaradah", "Forall([x], Not(Cism(x)))")
+        self.assertEqual(sonuc["status"], "MUARADAH_UNDECIDED", sonuc["message"])
+        self.assertEqual(fsm.current_state, "AWAITING_ATTACK")
 
     def test_self_contradictory_mujib_claim_does_not_win(self):
         p = _boru_hatti_kur()
@@ -307,8 +345,40 @@ class TestP0_7_Muaraza(unittest.TestCase):
 
         tokens, morph, deps = _cozumle(p, "nami zeydun")
         sonuc = p.orchestrator.execute_cross_school_muaradah(iddia, AshariUsul(), tokens, deps, SalafiUsul(), morph)
-        self.assertNotEqual(sonuc["status"], "MUARADAH_INEFFECTIVE",
-                            "Ontolojiyle çelişen Mucîb iddiası mu'ârazayı kazandı.")
+        self.assertEqual(sonuc["status"], "MUJIB_INVALID",
+                         "Ontolojiyle çelişen Mucîb iddiası mu'ârazayı kazandı.")
+
+    def test_readings_on_disjoint_nodes_conflict(self):
+        """Eş'arî te'vil okuması (Kudret) ile Selefî bilâ-keyf okuması, Vâcib altındaki ayrık düğümlere düşer.
+
+        Bugün iki okuma aynı varlığa, izafetin özdeşlik sayılması (P0-5) üzerinden bağlanıyor. P0-5
+        düzeltilirken iki okumanın aynı göndergeye ('yed') ait kalması korunmalıdır.
+        """
+        p = _boru_hatti_kur()
+        mucib = self._okuma(p, "yadu allahi", AshariUsul())
+        sonuc = self._capraz_muaraza(p, mucib, AshariUsul(), "yadu allahi", SalafiUsul())
+        self.assertEqual(sonuc["status"], "MUARADAH_SUCCESS", sonuc["message"])
+        self.assertIn("AXIOM_DISJOINT_Bila_Kayf_Sifat_AND_Kudret", sonuc["conflict"]["axioms"])
+
+    def test_same_reading_in_both_schools_is_ineffective(self):
+        """Yalnızca ortak (Base) kavramlarla kurulan cümleyi iki ekol aynı okuyorsa çatışma yoktur."""
+        p = _boru_hatti_kur()
+        mucib = self._okuma(p, "nami zeydun", AshariUsul())
+        sonuc = self._capraz_muaraza(p, mucib, AshariUsul(), "nami zeydun", SalafiUsul())
+        self.assertEqual(sonuc["status"], "MUARADAH_INEFFECTIVE", sonuc["message"])
+
+    def test_undecided_solver_is_not_a_verdict_in_cross_school(self):
+        """Ortak karşılaştırma karara bağlanamazsa (UNKNOWN) mu'âraza hükümle bitmemeli; münazara açık kalmalı."""
+        p = _boru_hatti_kur()
+        mucib = self._okuma(p, "yadu allahi", AshariUsul())
+        fsm = _munazara_delile_kadar(AristotelianSolver(p.ontology), p.discourse)
+        tokens, morph, deps = _cozumle(p, "yadu allahi")
+        karar_yok = {"status": "UNKNOWN", "message": "Devre Kesici Tetiklendi veya Kararsız Durum: timeout"}
+        with mock.patch.object(p.l3, "execute_joint_sat_check", return_value=karar_yok):
+            sonuc = p.orchestrator.execute_cross_school_muaradah(
+                mucib, AshariUsul(), tokens, deps, SalafiUsul(), morph, fsm_engine=fsm)
+        self.assertEqual(sonuc["status"], "MUARADAH_UNDECIDED", sonuc["message"])
+        self.assertEqual(fsm.current_state, "AWAITING_ATTACK")
 
 
 @unittest.expectedFailure

@@ -9,8 +9,8 @@ class AdabAlBahthEngine:
     .. pedagojik_anlati:: Cürcânî Diyalektiği ve Z3 Otomatı
     Taftâzânî, Cürcânî ve Gelenbevî temelli Münazara Sonlu Durum Makinesi (FSM).
     Faz 4 ve Faz 5 entegrasyonuyla: Rekürsif Men' (İç içe İspat Yükümlülüğü), Mülâzama 
-    Counter-Model Çözümlemesi, Tahrîr-i Mahall-i Niza' (Kavramsal İzolasyon) ve 
-    z3.Optimize tabanlı Mu'aradah (Çapraz-Ekol Kilitlenmesi / Tevcîh) mekanizmalarını barındırır.
+    Counter-Model Çözümlemesi, Tahrîr-i Mahall-i Niza' (Kavramsal İzolasyon) ve ortak ontolojide
+    sınanan Mu'aradah (karşı-iddia) mekanizmalarını barındırır.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
@@ -252,59 +252,61 @@ class AdabAlBahthEngine:
                 
         elif attack_type == "Muaradah":
             """
-            .. felsefe_notu:: Mu'aradah ve Z3 Optimize (Tevcîh Kilitlenmesi)
-            Çapraz ekol çarpışmalarında (Örn: Eş'arî vs. Selefî), Z3'ün deterministik Push/Pop yalıtımı 
-            tek başına yeterli değildir. Rakibin ontolojik ağacı "ödünç alınıp" kendi silahıyla vurulmak 
-            istendiğinde (Tevcîh), 'z3.Optimize()' ve 'Soft Constraints' kullanılarak deterministik kilitlenme 
-            (Stalemate) üretilir. Bu, iki zıt doğrunun aynı anda geçerli olduğu diyalektik bir düğümdür.
+            .. felsefe_notu:: Mu'aradah ve Ortak Ontoloji
+            Sâil, Mucîb'in delilini men' etmeden iddianın hilâfını ileri sürer. Karşı-iddia, açık delil
+            kapsamında sınanır: ontoloji, müsellemât ve Sâil'in men' etmediği öncüller.
+            - Karşı-iddia bu kapsamla çelişiyorsa mu'âraza düşer (MUARADAH_FAILED).
+            - Kapsamla bağdaşıyor ama kapsam, karşı-iddiaya rağmen iddiayı gerektiriyorsa karşı-iddia
+              iddianın hilâfı değildir; mu'âraza iddiaya yöneltilmemiştir (MUARADAH_FAILED).
+            - Kapsamın, karşı-iddia doğruyken iddianın yanlış olduğu bir modeli varsa delil, iddiayı
+              karşı-iddiaya karşı ispatlamıyor demektir; argüman askıya alınır (STALEMATE).
+            Karşı delil (Sâil'in kendi öncülleri) ve rollerin değişmesi henüz modellenmediği için,
+            geçerli bir delile karşı yalın bir karşı-iddia kilitlenme üretemez.
             """
             if not target_premise:
                 return {"status": "INVALID_ATTACK", "message": "Mu'aradah için bir karşı-iddia (Counter-Claim) sunulmalıdır."}
-                
-            opt = z3.Optimize()
-            
-            w_env = z3.Const('w_env', self.solver.builder.WorldSort)
-            tz_env = z3.Const('tz_env', self.solver.builder.TimeSortZati)
-            tv_env = z3.Const('tv_env', self.solver.builder.TimeSortVasfi)
-            s_env = z3.Const('s_env', self.solver.builder.SpaceSort)
-            x_env = z3.Const('x_env', self.solver.builder.EntitySort)
-            
-            # Müsellemâtı (Ortak Kabulleri) mutlak (Hard Constraint) olarak ekle
-            for m_term in self.musellemat:
-                if "(" in m_term and ")" in m_term:
-                    self._auto_register_predicates(m_term)
-                    opt.add(self.solver.builder.parse(m_term))
-                else:
-                    pred = self.solver.builder.get_or_create_predicate(m_term, arity=1)
-                    opt.add(z3.Exists([w_env, tz_env, tv_env, s_env, x_env], pred(w_env, tz_env, tv_env, s_env, x_env)))
-                    
-            # Mucîb'in asıl argüman öncüllerini mutlak (Hard Constraint) olarak ekle
-            for p in self.active_premises:
-                self._auto_register_predicates(p)
-                opt.add(self.solver.builder.parse(p))
-                
-            # Sâil'in Mu'aradah hedefini (karşı önermesini) Esnek Kısıt (Soft Constraint) olarak ekle
+
             self._auto_register_predicates(target_premise)
-            opt.add_soft(self.solver.builder.parse(target_premise), weight=10)
-            
-            # Kilitlenmeyi (Stalemate) simüle etmek için Mucîb'in iddiasının zıttını da Esnek Kısıt olarak ekle
-            opt.add_soft(z3.Not(self.solver.builder.parse(self.active_claim)), weight=10)
-            
-            check_opt = opt.check()
+            counter_claim = self.solver.builder.parse(target_premise)
+            claim = self.solver.builder.parse(self.active_claim)
+
+            # [HATA DÜZELTMESİ - P0-7]: Sınama, ontolojiyi taşıyan çözücünün açık delil kapsamında yapılır;
+            # karşı-iddia esnek kısıt değildir, çelişkisi sonucu belirler.
+            undermines_claim = None
+            self.solver.solver.push()
+            try:
+                self.solver.solver.add(counter_claim)
+                compatible = self.solver.solver.check()
+                if compatible == z3.sat:
+                    self.solver.solver.add(z3.Not(claim))
+                    undermines_claim = self.solver.solver.check()
+            finally:
+                self.solver.solver.pop()
+
+            if compatible == z3.unknown or undermines_claim == z3.unknown:
+                # Çözücünün karar verememesi bir hüküm değildir; münazara açık kalır.
+                return {
+                    "status": "MUARADAH_UNDECIDED",
+                    "message": "Mu'aradah karara bağlanamadı: karşı-iddianın delil ve ontolojiyle ilişkisi belirlenemedi. Sâil'in saldırısı bekleniyor."
+                }
 
             self._close_evidence_scope()
             self.current_state = "RESOLVED"
-            
-            if check_opt == z3.sat:
-                return {
-                    "status": "STALEMATE",
-                    "message": "Mu'aradah başarılı. Z3 Optimize motoru her iki ekolün de haklı olabileceği esnek bir kilitlenme (Stalemate / Tevcîh) buldu. Argüman askıya alındı."
-                }
-            else:
+
+            if compatible == z3.unsat:
                 return {
                     "status": "MUARADAH_FAILED",
-                    "message": "Sâil'in Mu'aradah girişimi ontolojik çelişki yarattı. Çapraz-ekol saldırısı başarısız. Mucîb haklıdır."
+                    "message": "Sâil'in karşı-iddiası, men' etmediği delil ve ortak ontolojiyle çelişiyor. Mu'aradah başarısız. Mucîb haklıdır."
                 }
+            if undermines_claim == z3.unsat:
+                return {
+                    "status": "MUARADAH_FAILED",
+                    "message": "Sâil'in karşı-iddiası delille bağdaşıyor, ancak delil karşı-iddiaya rağmen iddiayı gerektiriyor: karşı-iddia iddianın hilâfı değil. Mu'aradah başarısız. Mucîb haklıdır."
+                }
+            return {
+                "status": "STALEMATE",
+                "message": "Mu'aradah başarılı. Karşı-iddia delil ve ortak ontolojiyle bağdaşıyor; delil, iddiayı karşı-iddiaya karşı ispatlamıyor. Argüman askıya alındı (Stalemate)."
+            }
         else:
             return {"status": "ERROR", "message": "Geçersiz Âdâb-ı Bahs saldırı tipi."}
 

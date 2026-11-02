@@ -23,6 +23,8 @@ class Layer3SMTCircuitBreaker:
     kontrolün push/pop kapsamında, izlenerek (unsat core'da adlarıyla) yer alır. Önbellek anahtarı
     IR'ye ek olarak köprüleri ve çözücü bağlamını içerir; önbellek boyutu hükmü değil, yalnızca
     performansı etkiler.
+    [HATA DÜZELTMESİ - P0-7]: Çapraz-ekol mu'ârazada iki okuma bu çözücünün ontolojisiyle birlikte
+    sınanır (`execute_joint_sat_check`); karşılaştırma ontolojisiz bir Optimize örneğinde yapılmaz.
     """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000, max_cache_size: int = 1000):
         self.core_solver = solver
@@ -331,6 +333,48 @@ class Layer3SMTCircuitBreaker:
             self._memoization_cache[matrix_signature] = response
             return response
             
+        except Exception as e:
+            return {"status": "ERROR", "message": f"L3 SMT Derleme Çöküşü: {e}"}
+        finally:
+            self.core_solver.solver.pop()
+
+    def execute_joint_sat_check(self, readings: Dict[str, SemanticStatementIR]) -> Dict[str, Any]:
+        """
+        [HATA DÜZELTMESİ - P0-7]: Mu'ârazada tarafların okumalarını aynı ontoloji ve yapısal aksiyomlarla
+        birlikte sınar. Her yüklem kendi okumasının etiketiyle izlenir; çelişkide unsat core, hangi okumanın
+        hangi yüklemlerinin hangi aksiyomlarla çatıştığını gösterir. Te'vil köprüleri bir tarafın kendi
+        muhakemesidir; ortak karşılaştırmaya girmez.
+        """
+        self.core_solver.solver.push()
+
+        try:
+            self._inject_structural_axioms()
+
+            w_base = z3.Const('w_base', self.core_solver.builder.WorldSort)
+            tz_base = z3.Const('tz_base', self.core_solver.builder.TimeSortZati)
+            tv_base = z3.Const('tv_base', self.core_solver.builder.TimeSortVasfi)
+            s_base = z3.Const('s_base', self.core_solver.builder.SpaceSort)
+
+            tracked_items: Dict[str, Tuple[str, Any]] = {}
+            for label, ir_matrix in readings.items():
+                for index, item in enumerate(ir_matrix.predicates):
+                    track_name = f"READING_{label}_{index}"
+                    tracked_items[track_name] = (label, item)
+                    z3_expr = self._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
+                    self.core_solver.solver.assert_and_track(z3_expr, track_name)
+
+            result = self.core_solver.solver.check()
+
+            if result == z3.sat:
+                return {"status": "SAT", "message": "Okumalar ortak ontolojide bağdaşıyor."}
+            if result == z3.unsat:
+                core_names = {str(c) for c in self.core_solver.solver.unsat_core()}
+                conflict: Dict[str, List[Any]] = {"axioms": sorted(core_names - tracked_items.keys())}
+                for label in readings:
+                    conflict[label] = [item for name, (owner, item) in tracked_items.items() if owner == label and name in core_names]
+                return {"status": "UNSAT", "message": f"Ontolojik Çelişki: {conflict['axioms']}", "conflict": conflict}
+            return {"status": "UNKNOWN", "message": f"Devre Kesici Tetiklendi veya Kararsız Durum: {self.core_solver.solver.reason_unknown()}"}
+
         except Exception as e:
             return {"status": "ERROR", "message": f"L3 SMT Derleme Çöküşü: {e}"}
         finally:

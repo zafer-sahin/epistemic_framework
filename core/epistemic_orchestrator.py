@@ -1,4 +1,3 @@
-import z3
 import copy
 from typing import Dict, Any, List, Optional, Tuple
 import re
@@ -209,11 +208,15 @@ class EpistemicOrchestrator:
                                       fsm_engine: Any = None) -> Dict[str, Any]:
         """
         [FAZ 5 ENTEGRASYONU] FSM Asenkron Mu'aradah Tetikleyicisi.
-        Sâil'in 'AWAITING_ATTACK' durumunda gönderdiği karşı-argümanı (Anti-Tez) Z3 Optimize 
-        motorunda Mucîb'in argümanıyla çarpıştırır. Çapraz ekol kilitlenmesi FSM durumunu günceller.
+        Sâil'in 'AWAITING_ATTACK' durumunda gönderdiği karşı-argümanı (Anti-Tez) Mucîb'in argümanıyla
+        çarpıştırır. Çapraz ekol kilitlenmesi FSM durumunu günceller.
         [FAZ 4 YAMASI]: Kripke Uzayı (SpaceSort) eksik parametresi eklendi.
         [HATA DÜZELTMESİ]: Karşılaştırmaya Sâil'in kendi usûlündeki (te'vil dahil) okuması girer;
         cümlesi Mucîb'in sözlüğüyle yeniden okunmaz.
+        [HATA DÜZELTMESİ - P0-7]: Karşılaştırma ontolojisiz bir Optimize örneğinde değil, L3'ün ortak
+        ontolojisinde yapılır. Ontolojiyle kendi başına çelişen Mucîb iddiası MUJIB_INVALID, iki okuma
+        bağdaşmıyorsa MUARADAH_SUCCESS, bağdaşıyorsa MUARADAH_INEFFECTIVE döner. Çözücü karar veremezse
+        (MUARADAH_UNDECIDED) münazara açık kalır.
         """
         
         if fsm_engine and getattr(fsm_engine, "current_state", None) != "AWAITING_ATTACK":
@@ -235,55 +238,50 @@ class EpistemicOrchestrator:
                     "message": f"Sâil'in karşı delili kendi L2/L3 uzayında ({sail_usul.namespace}) geçersiz: {sail_result.get('reason', sail_result.get('message'))}"
                 }
 
-            optimizer = z3.Optimize()
-            # Performans iyileştirmesi: Modal mantık (ForAll/Exists) Optimizer'ı NP-Hard uzaya sürükler. 2 saniyede çözemezse kilitlenmeyi reddet.
-            optimizer.set("timeout", 2000)
-            
-            w_base = z3.Const('w_base', self.l3.core_solver.builder.WorldSort)
-            tz_base = z3.Const('tz_base', self.l3.core_solver.builder.TimeSortZati)
-            tv_base = z3.Const('tv_base', self.l3.core_solver.builder.TimeSortVasfi)
-            s_base = z3.Const('s_base', self.l3.core_solver.builder.SpaceSort) # [FAZ 4 YAMASI]
-            
-            for item in mujib_claim_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
-                optimizer.add_soft(z3_expr, weight=1)
-                
-            for item in sail_reading_ir.predicates:
-                z3_expr = self.l3._build_z3_expr(item, w_base, tz_base, tv_base, s_base)
-                optimizer.add(z3_expr)
-
-            cross_status = optimizer.check()
-
-            if cross_status == z3.sat:
-                model = optimizer.model()
-                penalty_score = optimizer.objectives()[0]
-                
-                if model.eval(penalty_score).as_long() == 0:
-                    if fsm_engine:
-                        fsm_engine.resolve_debate()
-                    return {
-                        "status": "MUARADAH_INEFFECTIVE",
-                        "message": "Mu'aradah Başarısız: Sâil'in karşı delili Mucîb'in argümanıyla ontolojik bir çelişki (Penalty=0) yaratmadı. (Paralel Gerçeklik). Mucîb kazandı (İlzam).",
-                        "sail_reading": sail_reading_ir.predicates
-                    }
-                else:
-                    if fsm_engine:
-                        # Çapraz kilitlenme sağlandı, FSM diyalektiği sonuçlandırır.
-                        fsm_engine.resolve_debate()
-
-                    return {
-                        "status": "MUARADAH_SUCCESS",
-                        "message": f"Mu'aradah Başarılı: Sâil ({sail_usul.namespace}), Mucîb'in uzayını kendi anti-teziyle {model.eval(penalty_score).as_long()} ontolojik ağırlık maliyetiyle kırdı. Diyalektik Kilitlenme (Stalemate).",
-                        "sail_reading": sail_reading_ir.predicates
-                    }
-            else:
+            # Ontolojiyle kendi başına çelişen bir Mucîb iddiası mu'ârazaya konu olamaz.
+            mujib_check = self.l3.execute_sat_check(mujib_claim_ir)
+            if mujib_check["status"] == "UNSAT":
                 if fsm_engine:
                     fsm_engine.resolve_debate()
                 return {
                     "status": "MUJIB_INVALID",
-                    "message": "Mucîb'in argümanları ile Sâil'in iddiaları yapısal olarak z3.Optimize düzleminde bile çözülemez bir kilitlenme yarattı.",
+                    "message": f"Mucîb'in iddiası ortak ontolojiyle kendi başına çelişiyor; mu'ârazaya konu olacak tutarlı bir iddia yok. {mujib_check['message']}",
                     "sail_reading": sail_reading_ir.predicates
                 }
+
+            joint_check = mujib_check
+            if mujib_check["status"] == "SAT":
+                joint_check = self.l3.execute_joint_sat_check({"Mujib": mujib_claim_ir, "Sail": sail_reading_ir})
+
+            if joint_check["status"] == "SAT":
+                if fsm_engine:
+                    fsm_engine.resolve_debate()
+                return {
+                    "status": "MUARADAH_INEFFECTIVE",
+                    "message": "Mu'aradah Başarısız: Sâil'in okuması Mucîb'inkiyle ortak ontolojide bağdaşıyor; ontolojik bir çelişki yaratmadı (Paralel Gerçeklik). Mucîb kazandı (İlzam).",
+                    "sail_reading": sail_reading_ir.predicates
+                }
+
+            if joint_check["status"] == "UNSAT":
+                if fsm_engine:
+                    # Çapraz kilitlenme sağlandı, FSM diyalektiği sonuçlandırır.
+                    fsm_engine.resolve_debate()
+                return {
+                    "status": "MUARADAH_SUCCESS",
+                    "message": f"Mu'aradah Başarılı: Sâil'in ({sail_usul.namespace}) okuması, Mucîb'in okumasıyla ortak ontolojide bağdaşmıyor {joint_check['conflict']['axioms']}. Diyalektik Kilitlenme (Stalemate).",
+                    "sail_reading": sail_reading_ir.predicates,
+                    "conflict": joint_check["conflict"]
+                }
+
+            if joint_check["status"] == "ERROR":
+                return {"status": "ERROR", "message": f"Mu'aradah SMT Çöküşü: {joint_check['message']}"}
+
+            # Çözücünün karar verememesi (UNKNOWN) bir hüküm değildir; münazara açık kalır.
+            return {
+                "status": "MUARADAH_UNDECIDED",
+                "message": f"Mu'aradah karara bağlanamadı: okumaların ortak ontolojide bağdaşıp bağdaşmadığı belirlenemedi. {joint_check['message']}",
+                "sail_reading": sail_reading_ir.predicates
+            }
         except (DiachronicViolationError, OutOfOntologyError) as e:
             return {"status": "EPISTEMIC_BREACH", "message": f"Sâil'in argümanı ontolojik sızıntı barındırıyor: {e}"}
         except Exception as e:

@@ -174,7 +174,7 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             sail_lexicon = self.sarf.derive_lexicon(sail_tokens)
             sail_ast = self.nahiv.suggest_dependencies(sail_tokens, sail_lexicon)
             
-            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) z3.Optimize çapraz saldırı protokolü başlatıldı...")
+            print(f"\n[MU'ARADAH] Sâil ({sail_usul.namespace}) okuması, Mucîb'inkiyle ortak ontolojide karşılaştırılıyor...")
             
             result = self.orchestrator.execute_cross_school_muaradah(
                 self.last_ir, self.active_usul, sail_tokens, sail_ast, sail_usul, sail_lexicon, fsm_engine=self.fsm
@@ -189,6 +189,9 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             if "sail_reading" in result:
                 print(f"Mucîb Okuması (karşılaştırmaya giren): {self.last_ir.predicates}")
                 print(f"Sâil Okuması (karşılaştırmaya giren): {result['sail_reading']}")
+            if "conflict" in result:
+                conflict = result["conflict"]
+                print(f"Çatışma: Mucîb {conflict['Mujib']} | Sâil {conflict['Sail']} | Aksiyomlar {conflict['axioms']}")
 
         except Exception as e:
             print(f"\n[SİSTEM ÇÖKÜŞÜ] Mu'aradah İhlali:")
