@@ -218,11 +218,21 @@ class AristotelianSolver:
             raise RuntimeError(f"Z3 Çözücü Kararsız Durumda (UNKNOWN). Neden: {self.solver.reason_unknown()}")
 
     def verify_syllogism(self, premises: List[str], conclusion: str) -> bool:
+        """
+        .. mantik_kurali:: Kıyasın Sıhhati
+            [HATA DÜZELTMESİ - P0-9]: Çelişkili öncüllerden her şey çıkar (ex falso quodlibet); bu kıyasın
+            sıhhati değil, mukaddimelerin fesadıdır. Geçerlilik iki şarttır: öncüller ontolojiyle birlikte
+            tutarlıdır (SAT) ve öncüller ile neticenin değili birlikte çelişiktir (UNSAT). Çözücü karar
+            veremezse geçerlilik ileri sürülmez.
+        """
         self.solver.push()
         try:
             for premise in premises:
                 z3_premise = self.builder.parse(premise)
                 self.solver.add(z3_premise)
+
+            if self.solver.check() != z3.sat:
+                return False
             
             z3_conclusion = self.builder.parse(conclusion)
             self.solver.add(z3.Not(z3_conclusion))

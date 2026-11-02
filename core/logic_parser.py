@@ -147,11 +147,11 @@ class Z3ExpressionBuilder:
             # 3. ŞARTLI VE AYRIK ÖNERMELER (ŞEMSİYYE DİYALEKTİĞİ)
             # ------------------------------------------------------------------
             elif func_name == 'Luzumi':
+                # [HATA DÜZELTMESİ - P0-9] Lüzûmiyye mukaddemin vukuunu iddia etmez; tâlînin mukaddeme lâzım
+                # olduğunu söyler. Mukaddemin varlığını eklemek ref'-i tâlîyi (Modus Tollens) çelişik kılardı:
+                # burhân-ı temânu' (21:22), mukaddemi muhal olan bir lüzûmiyye üzerine kurulur.
                 arg_a = self._eval_node(node.args[0], bound_vars, current_depth + 1)
                 arg_b = self._eval_node(node.args[1], bound_vars, current_depth + 1)
-                existential_vars = [v for k, v in bound_vars.items() if k not in ('__world__', '__time_zati__', '__time_vasfi__', '__space__')]
-                if existential_vars:
-                    return z3.And(z3.Implies(arg_a, arg_b), z3.Exists([existential_vars[0]], arg_a))
                 return z3.Implies(arg_a, arg_b)
 
             elif func_name == 'Inadi_Hakikiyye':

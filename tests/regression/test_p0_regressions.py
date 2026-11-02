@@ -587,7 +587,6 @@ class TestP0_8_Musadere(unittest.TestCase):
         self.assertNotIn("İlzam", sonuc["message"])
 
 
-@unittest.expectedFailure
 class TestP0_9_Gecerlilik(unittest.TestCase):
     """[P0-9] Geçerlilik ex falso ile üretilmemeli; istisnâî kıyasın ref' darbı tutarlı öncüllere dayanmalıdır."""
 
@@ -611,6 +610,23 @@ class TestP0_9_Gecerlilik(unittest.TestCase):
             self.solver.solver.pop()
         self.assertTrue(self.solver.verify_syllogism(onculler, netice))
         self.assertFalse(self.solver.verify_syllogism(onculler, "Forall([x], Feres(x))"))
+
+    def test_luzumi_does_not_assert_its_antecedent(self):
+        """'İnsan ise hayvandır' lüzûmiyyesi, insanın var olduğunu iddia etmez."""
+        self.assertFalse(self.solver.verify_syllogism(["Forall([x], Luzumi(Insan(x), Hayvan(x)))"], "Exists([x], Insan(x))"))
+
+    def test_ref_i_tali_with_an_impossible_antecedent_is_valid(self):
+        """Burhân-ı temânu' (21:22): 'Allah'tan başka ilâhlar olsaydı yer ve gök bozulurdu; bozulmadı, öyleyse
+        başka ilâh yoktur.' Mukaddemi muhal bir ref'-i tâlîdir; netice ex falso ile değil, tutarlı öncüllerden çıkar."""
+        onculler, netice = SyllogismEngine(self.solver.ontology).construct_syllogism(
+            "Sartiyye", "Modus_Tollens", {"A": "Teaddud_ul_Ilah", "C": "Fesad_ul_Alem"})
+        self.assertTrue(self.solver.verify_syllogism(onculler, netice))
+        self.assertFalse(self.solver.verify_syllogism(onculler, "Forall([x], Feres(x))"))
+
+    def test_barbara_with_consistent_premises_is_valid(self):
+        onculler, netice = SyllogismEngine(self.solver.ontology).construct_syllogism(
+            "Figure_1", "Barbara", {"S": "Insan", "M": "Hayvan", "P": "Nami"})
+        self.assertTrue(self.solver.verify_syllogism(onculler, netice))
 
 
 @unittest.expectedFailure
