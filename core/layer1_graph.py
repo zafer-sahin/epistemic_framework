@@ -186,7 +186,9 @@ class Layer1HeuristicGraph:
                                 if conflict >= 0.5:
                                     max_conflict = max(max_conflict, conflict)
                                     flagged_predicates.append(f"{amil_id}::{mamul_id}")
-                elif isinstance(item, NestedPredicate):
+                # [HATA DÜZELTMESİ - P0-6] Olumsuzlanan nisbet mecaz adayı değildir; te'vili gerektiren karîne-i
+                # mânia olumlu bir isnatta doğar ("Allah cisim değildir" tenzihin kendisidir).
+                elif isinstance(item, NestedPredicate) and item.operator != "Nefy":
                     _scan_predicates(item.args)
 
         _scan_predicates(ir_matrix.predicates)

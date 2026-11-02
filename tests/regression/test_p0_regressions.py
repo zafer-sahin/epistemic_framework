@@ -315,7 +315,6 @@ class TestP0_5_Haml(unittest.TestCase):
         self.assertIn("AXIOM_TENZIH_MAHALL_I_HAVADIS", sonuc["message"])
 
 
-@unittest.expectedFailure
 class TestP0_6_Olumsuzluk(unittest.TestCase):
     """[P0-6] Olumsuz önerme temsil edilebilmeli; 'lâ' tevkîd sayılmamalıdır."""
 
@@ -323,11 +322,66 @@ class TestP0_6_Olumsuzluk(unittest.TestCase):
         sinif = LocalOntoLexGraphClient().query_closed_set("la") or {}
         self.assertNotEqual(sinif.get("ontologic_type"), "Harf_Tevkid")
 
+    def test_attached_lam_remains_emphasis(self):
+        """Kelimeye bitişik 'la-' lâm-ı tevkîddir; tek başına yazılan nefy edatı 'lâ' ile karışmamalı."""
+        lam = EpistemicTokenizer().tokenize("lazeydun")[0]
+        self.assertEqual(LocalOntoLexGraphClient().query_closed_set(lam)["ontologic_type"], "Harf_Tevkid")
+
+    def test_laysa_is_a_negation_particle(self):
+        """'laysa' isim cümlesinin nefy fiilidir; 'la' + 'ysa' diye bölünmemeli."""
+        ilk = EpistemicTokenizer().tokenize("laysa zeydun cemaden")[0]
+        self.assertEqual(ilk, "laysa")
+        self.assertEqual(LocalOntoLexGraphClient().query_closed_set(ilk)["ontologic_type"], "Harf_Nefy")
+
     def test_negative_sentence_is_represented_with_negation(self):
         p = _boru_hatti_kur()
         ir = _ir(p, "zeydun la yadribu")
         self.assertTrue(ir.is_valid_for_z3, "Olumsuz haber cümlesi pragmatik ihlal sayıldı.")
         self.assertTrue(any(_olumsuzluk_icerir(e) for e in _z3_ifadeleri(p, ir)), "IR'de olumsuzluk yok.")
+
+    def test_negative_sentence_is_consistent(self):
+        p = _boru_hatti_kur()
+        ir = _ir(p, "zeydun la yadribu")
+        self.assertTrue(ir.is_valid_for_z3 and ir.predicates, "Olumsuz haber cümlesi IR'ye dönüşmedi.")
+        sonuc = p.l3.execute_sat_check(ir)
+        self.assertEqual(sonuc["status"], "SAT", sonuc["message"])
+
+    def test_negation_contradicts_its_affirmation(self):
+        """Tenâkuz: 'Zeyd vurur' ile 'Zeyd vurmaz' birlikte doğru olamaz."""
+        p = _boru_hatti_kur()
+        sonuc = p.l3.execute_joint_sat_check({"Mujib": _ir(p, "zeydun yadribu"), "Sail": _ir(p, "zeydun la yadribu")})
+        self.assertEqual(sonuc["status"], "UNSAT", sonuc["message"])
+
+    def test_muaradah_with_the_contradictory_reading_succeeds(self):
+        """Mucîb 'Zeyd vurur' der, Sâil 'Zeyd vurmaz' okumasıyla karşı çıkar: çatışma ontolojiye değil tenâkuza dayanır."""
+        p = _boru_hatti_kur()
+        tokens, morph, deps = _cozumle(p, "zeydun yadribu")
+        p.discourse.clear_memory()
+        mucib_sonucu, mucib_okumasi = p.orchestrator.evaluate_statement(tokens, deps, AshariUsul(), morph)
+        self.assertIn(mucib_sonucu["status"], CONSISTENT_STATUSES, mucib_sonucu.get("message"))
+
+        tokens, morph, deps = _cozumle(p, "zeydun la yadribu")
+        p.discourse.set_agent("Sail")
+        sonuc = p.orchestrator.execute_cross_school_muaradah(mucib_okumasi, AshariUsul(), tokens, deps, SalafiUsul(), morph)
+        self.assertEqual(sonuc["status"], "MUARADAH_SUCCESS", sonuc["message"])
+        self.assertEqual(sonuc["conflict"]["axioms"], [])
+        self.assertIn("tenâkuz", sonuc["message"])
+
+    def test_negating_what_the_subject_is_contradicts_its_nature(self):
+        """Sâlibe, mübtedanın ferdini haberin altına giren her şeyden ayırır: 'Zeyd cisim değildir' İnsan'la çelişir."""
+        p = _boru_hatti_kur()
+        p.lexicon.register_word("cism", "Base", "Cism")
+        sonuc = p.l3.execute_sat_check(_ir(p, "laysa zeydun cismen"))
+        self.assertEqual(sonuc["status"], "UNSAT", sonuc["message"])
+
+    def test_negated_tenzih_is_accepted_by_every_school(self):
+        """'Allah cisim değildir' tenzihtir; olumsuzlanan bir nisbet mecaz adayı (karîne-i mânia) değildir."""
+        p = _boru_hatti_kur()
+        p.lexicon.register_word("cism", "Base", "Cism")
+        for usul in (AshariUsul(), SalafiUsul()):
+            with self.subTest(usul=usul.namespace):
+                sonuc = _hukum(p, "laysa allahu cismen", usul)
+                self.assertEqual(sonuc["status"], "SAT", sonuc.get("message") or sonuc.get("reason"))
 
 
 class TestP0_7_Muaraza(unittest.TestCase):

@@ -269,9 +269,13 @@ class EpistemicOrchestrator:
                 if fsm_engine:
                     # Çapraz kilitlenme sağlandı, FSM diyalektiği sonuçlandırır.
                     fsm_engine.resolve_debate()
+                conflict_axioms = joint_check['conflict']['axioms']
+                # [HATA DÜZELTMESİ - P0-6] Çatışmaya hiçbir aksiyom girmiyorsa okumalar birbirinin nakîzidir
+                # (Ör: "Zeyd vurur" / "Zeyd vurmaz"); ontolojiye başvurmadan çelişirler.
+                reason = f"ortak ontolojide bağdaşmıyor {conflict_axioms}" if conflict_axioms else "doğrudan çelişiyor (tenâkuz); ikisi birlikte doğru olamaz"
                 return {
                     "status": "MUARADAH_SUCCESS",
-                    "message": f"Mu'aradah Başarılı: Sâil'in ({sail_usul.namespace}) okuması, Mucîb'in okumasıyla ortak ontolojide bağdaşmıyor {joint_check['conflict']['axioms']}. Diyalektik Kilitlenme (Stalemate).",
+                    "message": f"Mu'aradah Başarılı: Sâil'in ({sail_usul.namespace}) okuması, Mucîb'in okumasıyla {reason}. Diyalektik Kilitlenme (Stalemate).",
                     "sail_reading": sail_reading_ir.predicates,
                     "conflict": joint_check["conflict"]
                 }

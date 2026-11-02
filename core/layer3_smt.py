@@ -31,6 +31,8 @@ class Layer3SMTCircuitBreaker:
     [HATA DÜZELTMESİ - P0-5]: IR'deki sabitler kavramlar değil, lafızların gösterdiği fertlerdir. Haml,
     mübtedanın ferdinin haberle varlıkta birleşmesi (ittihâd) ya da haberin onda kâim olmasıdır. İzafet
     özdeşlik değil nisbettir; bir arazın izafeti, onun muzâfun ileyhte kâim olmasıdır.
+    [HATA DÜZELTMESİ - P0-6]: Sâlibe önerme `Nefy` kapsülüyle derlenir: menfî yüklemin ferdi kapsamda
+    nicelenir ve nisbetin vukû'u olumsuzlanır. Böylece olumlu ve olumsuz okuma tenâkuz eder.
     """
     def __init__(self, solver: AristotelianSolver, timeout_ms: int = 3000, max_cache_size: int = 1000):
         self.core_solver = solver
@@ -48,7 +50,7 @@ class Layer3SMTCircuitBreaker:
             if isinstance(item, tuple):
                 frozen_elements.append(item)
             elif isinstance(item, NestedPredicate):
-                frozen_elements.append((item.operator, self._freeze_ir_matrix(item.args)))
+                frozen_elements.append((item.operator, tuple(item.bound_referents), self._freeze_ir_matrix(item.args)))
         return tuple(sorted(frozen_elements, key=lambda x: str(x)))
 
     def _build_z3_expr(self, item: Union[Tuple[str, str, int], NestedPredicate], w_const: z3.ExprRef, tz_const: z3.ExprRef, tv_const: z3.ExprRef, s_const: z3.ExprRef) -> z3.ExprRef:
@@ -70,13 +72,11 @@ class Layer3SMTCircuitBreaker:
                 # [HATA DÜZELTMESİ - P0-5] Haml: haber (amil) mübtedanın (mamul) ferdiyle ya varlıkta birleşir
                 # (haml-i hüve hüve: "Zeyd insandır") ya da onda kâim olur (haml-i iştikâk: "Zeyd dâribdir").
                 # Hangisinin mümkün olduğuna ontoloji karar verir: cevher başka bir şeyde kâim olmaz.
+                # [HATA DÜZELTMESİ - P0-6] Haml yalnızca bu içerikle derlenir. Yanına konan yorumlanmamış bir
+                # nisbet atomu, olumsuzlamada içeriği değil kendisini yanlışlatarak hükmü boşa çıkarırdı.
                 if pred_id in HAML_RELATIONS:
-                    nisbet = self.core_solver.builder.get_or_create_predicate(pred_id, arity=2)
                     kiyam = self.core_solver.builder.get_or_create_predicate("Rel_Kiyam", arity=2)
-                    return z3.And(
-                        nisbet(w_const, tz_const, tv_const, s_const, amil_const, mamul_const),
-                        z3.Or(mamul_const == amil_const, kiyam(w_const, tz_const, tv_const, s_const, amil_const, mamul_const))
-                    )
+                    return z3.Or(mamul_const == amil_const, kiyam(w_const, tz_const, tv_const, s_const, amil_const, mamul_const))
                 
                 # [FAZ 5 ENTEGRASYONU] Çift-Yönlü Mekân/Müteallak Zerk İşlemi
                 if pred_id == "LocatedIn":
@@ -135,6 +135,12 @@ class Layer3SMTCircuitBreaker:
                 # [FAZ 3/4 ENTEGRASYONU] İnne ve Kardeşleri (Tahkik / Yakîn Makamı)
                 body = args[0] if len(args) == 1 else z3.And(args)
                 return z3.ForAll([w_const, tz_const, tv_const, s_const], body)
+            elif item.operator == "Nefy":
+                # [HATA DÜZELTMESİ - P0-6] Sâlibe: Menfî yüklemin ferdi kapsamda nicelenir ve nisbet kaldırılır.
+                # "Zeyd vurmaz" -> ¬∃d (Darb(d) ∧ nisbet(d, zeyd) ∧ ...); mübtedanın mâhiyeti kapsam dışındadır.
+                body = args[0] if len(args) == 1 else z3.And(args)
+                bound = [z3.Const(name, self.core_solver.builder.EntitySort) for name in item.bound_referents]
+                return z3.Not(z3.Exists(bound, body)) if bound else z3.Not(body)
             elif item.operator == "Exists_Virtual_Agent":
                 # [FAZ 2 ENTEGRASYONU] Edilgen Fiil/Mebnî lil-Meçhul Ontolojik Zırhı
                 # Unknown_Agent_Virtual Skolem sabiti olmaktan çıkarılarak varoluşsal niceleyici (∃x) yapılır.

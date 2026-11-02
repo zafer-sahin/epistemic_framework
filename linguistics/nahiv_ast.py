@@ -207,6 +207,12 @@ class NahivDependencyCompiler:
         if o_type == "Harf_Tevkid":
             dependencies.append((t2, t1, 'Tevkid_Modifier', 'None'))
             return True
+
+        # [HATA DÜZELTMESİ - P0-6] Nefy edatı (lâ, lem, len, leyse) bitiştiği kelimeyi olumsuzlar;
+        # kapsamı cümlenin hükmüne taşımak `_resolve_nefy_scope`'un işidir.
+        if o_type == "Harf_Nefy":
+            dependencies.append((t2, t1, 'Nefy_Modifier', 'None'))
+            return True
             
         if o_type == "Harf_Kasr":
             kasr_direction = 'Mevsuf_to_Sifat'
@@ -730,7 +736,28 @@ class NahivDependencyCompiler:
         if amil_token:
             self._resolve_verbal_arguments(tokens, lexicon, dependencies, amil_token, amil_index)
                     
+        self._resolve_nefy_scope(dependencies)
+
         return dependencies
+
+    def _resolve_nefy_scope(self, dependencies: List[Tuple[str, str, str, str]]) -> None:
+        """
+        .. mantik_kurali:: Nefy'in Kapsamı (Menfî)
+            Olumsuzluk, cümlenin hükmünü (nisbeti) kaldırır; menfî, cümlenin yüklemidir. Fiil cümlesinde
+            fiil, isim cümlesinde haberdir ("leyse Zeydun cemâden": olumsuzlanan Zeyd değil, Zeyd'e
+            cansızlığın nisbetidir). Edat mübtedaya bitişikse kapsam habere, haber şibh-i cümle ise
+            mecrura taşınır.
+        """
+        for index, (head, particle, rel, irab) in enumerate(dependencies):
+            if rel != 'Nefy_Modifier':
+                continue
+            haber = next((amil for amil, mamul, r, _ in dependencies
+                          if r in ['Rabita_Predication', 'Rabita_Identity', 'Rabita_Cümle_Fiiliye'] and mamul == head), None)
+            if haber == 'Kainun_Virtual':
+                harf = next((mamul for amil, mamul, r, _ in dependencies if r in ['Muteallak_Mekan', 'Muteallak_Harf'] and amil == haber), None)
+                haber = next((mamul for amil, mamul, r, _ in dependencies if r == 'Harf_Mecrur' and amil == harf), None)
+            if haber:
+                dependencies[index] = (haber, particle, rel, irab)
 
     def build_ast(self, tokens: List[str], dependencies: List[Tuple[str, str, str, str]], lexicon: Optional[Dict[str, MorphologicalAnalysis]] = None) -> nx.DiGraph:
         """

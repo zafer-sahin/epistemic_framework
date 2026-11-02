@@ -26,13 +26,18 @@ class EpistemicTokenizer:
         # Burada $H \in \text{Huruf-u Meâni}$ (Araz/Bağlaç) ve $C \in \text{Cevher}$ (Kök).
         self.clitic_prefixes = ['wa', 'fa', 'bi', 'li', 'ka', 'la']
         
+        # [HATA DÜZELTMESİ - P0-6] Bitişik 'la-' lâm-ı tevkîddir; tek başına yazılan 'la' ise nefy edatı
+        # 'lâ'dır. İkisi aynı lafızla anılırsa pekiştirme olumsuzluğa döner; bu yüzden bitişik lâm 'le' olarak ayrılır.
+        self.clitic_canonical_forms = {'la': 'le'}
+
         # .. felsefe_notu:: Edât-ı Kasr ve Muktazâ el-Hâl'in Korunması
         # 'İnnema' (Sadece/Ancak) ve 'İlla' (İstisna) gibi kasr edatları, İlm-i Ma'ânî'de 
         # hükmü belirli bir varlığa hapsetme (Universal Exclusion) işlevi görür. Bu 
         # parçacıkların yanlışlıkla ayrıştırılması, önermenin sınırlarını yıkarak mantıksal 
         # kapsamı evrenselleştirir. Bu varlıklar yapısal olarak bölünemez monadlar 
         # (cüz-i lâyetecezzâ) hükmündedir.
-        self.protected_particles = ['innema', 'illa']
+        # 'laysa' (nefy fiili) da bölünmez; aksi halde 'la' + 'ysa' diye parçalanır.
+        self.protected_particles = ['innema', 'illa', 'laysa']
         
     def _algebraic_extract_tokens(self, sentence: str) -> List[str]:
         """
@@ -82,16 +87,17 @@ class EpistemicTokenizer:
             
             if token.startswith(target_prefix):
                 remainder = token[len(target_prefix):]
+                clitic = self.clitic_canonical_forms.get(prefix, prefix)
                 
                 # a) Kalan kısım korumalı bir monad ise (Örn: wa-innema -> wa, innema)
                 if remainder in self.protected_particles:
-                    return [prefix, remainder]
+                    return [clitic, remainder]
                 
                 # b) Kalan kısım asgari kök (Cevher) olabilecek potansiyeldeyse (en az 3 harf/Sülâsî)
                 if len(remainder) >= 3:
                     # Yığılmış arazları (Örn: fa-li-yakul) çözmek için derinlemesine özyineleme (recursion)
                     recursive_split = self._apply_monadic_clitic_splitting(remainder)
-                    return [prefix] + recursive_split
+                    return [clitic] + recursive_split
                     
         # 3. Hiçbir araz bağıntısı bulunamadıysa lafzı (Cevher) bütünüyle döndür
         return [token]

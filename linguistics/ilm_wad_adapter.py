@@ -34,6 +34,8 @@ class NestedPredicate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operator: str
     args: List[Union[Tuple[str, str, int], 'NestedPredicate']]
+    # [HATA DÜZELTMESİ - P0-6] Kapsül içinde nicelenen (∃) fertler; Ör: sâlibede menfî haberin ferdi.
+    bound_referents: List[str] = []
 
 NestedPredicate.model_rebuild()
 
@@ -209,7 +211,7 @@ class IlmWadAdapter:
         [FAZ 3 ENTEGRASYONU]: Cümle-i Fiiliye Haberleri (`Rabita_Cümle_Fiiliye`) için
         aksiyonel yüklem mantığı (`Rel_Rabita_Action`) eklenmiştir.
         """
-        if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
+        if rel_type in ['Tevkid_Modifier', 'Kasr_Modifier', 'Nefy_Modifier', 'Rel_Ihtisas', 'Rabita_Subject', 'Rabita_Predicate'] or rel_type.startswith('Amel_Inne_'):
             return True
             
         if rel_type in ['Rabita_Predication', 'Mubteda_Haber'] and amil == 'Kainun_Virtual':
@@ -390,6 +392,49 @@ class IlmWadAdapter:
                     atomic_predicates.append(role)
                     processed_roles.add(role)
 
+    @staticmethod
+    def _mentions(item: Union[Tuple[str, str, int], NestedPredicate], referent: str) -> bool:
+        if isinstance(item, tuple):
+            _, arg_id, arity = item
+            return referent in (arg_id.split("::") if arity == 2 else [arg_id])
+        return any(IlmWadAdapter._mentions(arg, referent) for arg in item.args)
+
+    def _apply_nefy_scope(self, dependencies: List[Tuple[str, str, str, str]], atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]], active_namespace: str, auto_lexicon: Dict[str, MorphologicalAnalysis], proposition_type: str, epoch: str, allow_tevil: bool, conflicting_node: str) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
+        """
+        .. felsefe_notu:: Sâlibe ve Nisbetin Kaldırılması (Selb)
+        [HATA DÜZELTMESİ - P0-6]: Olumsuz önerme mübtedanın ferdini ortadan kaldırmaz; ona yüklemin
+        nisbetini kaldırır. Menfî yüklemin ferdi `Nefy` kapsülünde nicelenir (∃) ve kapsül olumsuzlanır:
+        "Zeyd vurmaz" -> İnsan(zeyd) ∧ ¬∃d (Darb(d) ∧ nisbet(d, zeyd) ∧ ...). Menfînin ferdini anan atomlar
+        ve ona bağlı fertlerin rolleri kapsama girer; öteki terimlerin mâhiyetleri ve menfîye dokunmayan
+        bağlar dışarıda kalır.
+        """
+        negated_token = next((amil for amil, _, rel, _ in dependencies if rel == 'Nefy_Modifier'), None)
+        if not negated_token:
+            return atomic_predicates
+
+        _, negated_ref = self._resolve_entity(negated_token, active_namespace, auto_lexicon, proposition_type, dependencies, epoch, allow_tevil, conflicting_node)
+        linked_referents = {ref for item in atomic_predicates
+                            if isinstance(item, tuple) and item[2] == 2 and self._mentions(item, negated_ref)
+                            for ref in item[1].split("::")}
+
+        in_scope, out_of_scope = [], []
+        for item in atomic_predicates:
+            is_linked_role = isinstance(item, tuple) and item[2] == 1 and item[0].startswith("Role_") and item[1] in linked_referents
+            target = in_scope if is_linked_role or self._mentions(item, negated_ref) else out_of_scope
+            if item not in target:
+                target.append(item)
+
+        if not in_scope:
+            # Kapsamı kurulamayan olumsuzluk düşürülürse cümle olumlu okunur; bu sessizce yapılmaz.
+            raise ValueError(f"[NEFY KAPSAMI] '{negated_token}' kelimesine yönelen olumsuzluğun kapsamı (menfî) IR'de kurulamadı.")
+
+        bound_referents = [negated_ref]
+        # Edilgen fiilin meçhul faili de menfînin içinde nicelenir: "Zeyd dövülmez" -> ¬∃d ∃a (...).
+        if any(self._mentions(item, "Unknown_Agent_Virtual") for item in in_scope):
+            bound_referents.append("Unknown_Agent_Virtual")
+
+        return out_of_scope + [NestedPredicate(operator="Nefy", args=in_scope, bound_referents=bound_referents)]
+
     def _apply_propositional_capsules(self, has_mani_cem: bool, has_mani_huluv: bool, has_inadi: bool, has_luzumi: bool, atomic_predicates: List[Union[Tuple[str, str, int], NestedPredicate]]) -> List[Union[Tuple[str, str, int], NestedPredicate]]:
         """
         .. mantik_kurali:: Kadiyye-i Şartiyye Sarmalaması
@@ -468,6 +513,8 @@ class IlmWadAdapter:
                  if role not in processed_roles:
                      atomic_predicates.append(role)
                      processed_roles.add(role)
+
+        atomic_predicates = self._apply_nefy_scope(dependencies, atomic_predicates, active_namespace, auto_lexicon, proposition_type, epoch, allow_tevil, conflicting_node)
 
         ir_predicates = self._apply_propositional_capsules(has_mani_cem, has_mani_huluv, has_inadi, has_luzumi, atomic_predicates)
         ir_predicates = self._wrap_with_pragmatic_modalities(ir_predicates, pragmatics_res)

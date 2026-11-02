@@ -50,6 +50,7 @@ class OntologicType(str, Enum):
     HARF_INNE = "Harf_Inne"
     HARF_KASR = "Harf_Kasr"
     HARF_TEVKID = "Harf_Tevkid"
+    HARF_NEFY = "Harf_Nefy"
 
 class HPSGFeatureMatrix(BaseModel):
     """
@@ -162,9 +163,12 @@ class LocalOntoLexGraphClient:
         self._harf_set = {
             "fi", "min", "ila", "ala", "bi", "li", "wa", "au", "summe", "in", "iza", "law",
             "hal", "a", "mata", "kayfa", "man", "ma", "eyne", "aw", "am", "imma", "amma",
-            "illa", "lam", "lan", "fa", "fe", "bal", "lakin"
+            "illa", "fa", "fe", "bal", "lakin"
         }
-        self._tevkid_set = {"kad", "qad", "la", "nun"}
+        # [HATA DÜZELTMESİ - P0-6] Kelimeye bitişik lâm-ı tevkîd, tokenizer'da 'le' olarak ayrılır;
+        # tek başına yazılan 'la' nefy edatı 'lâ'dır ve tevkîd değil olumsuzluk kümesindedir.
+        self._tevkid_set = {"kad", "qad", "le", "nun"}
+        self._nefy_set = {"la", "lam", "lan", "laysa"}
         # İnne ve Kardeşleri (Epistemik Operatörler)
         self._inne_set = {"inna", "anna", "kaanna", "lakinna", "layta", "laalla", "inne", "enne", "keenne", "lakinne", "leyte", "lealle"}
         self._kasr_set = {"innema", "illa"}
@@ -225,6 +229,8 @@ class LocalOntoLexGraphClient:
             return {"pattern": "Harf_Inne", "ontologic_type": "Harf_Inne", "thematic_role": "Epistemic_Operator"}
         if core_word in self._tevkid_set:
             return {"pattern": "Harf_Tevkid", "ontologic_type": "Harf_Tevkid"}
+        if core_word in self._nefy_set:
+            return {"pattern": "Harf_Nefy", "ontologic_type": "Harf_Nefy"}
         if core_word in self._harf_set:
             return {"pattern": "Harf", "ontologic_type": "Harf"}
         return None
