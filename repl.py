@@ -73,7 +73,8 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             self.lexicon.register_word("tekvin", "Maturidi", "Tekvin")
             self.lexicon.register_word("nam", "Base", "Nami")
             self.lexicon.register_word("cemad", "Base", "Cemad")
-            self.lexicon.register_word("zeyd", "Base", "Zeyd_Entity")
+            # Şahıslar (cüz'î) Porphyrios Ağacının düğümü değildir; 'Zeyd' nev'i olan İnsan ile temsil edilir.
+            self.lexicon.register_word("zeyd", "Base", "Insan")
 
             # [FAZ 1 TESTİ] 'Modern' dönem kaydının reddi açılışta değil, tests/regression/test_p0_regressions.py içinde sınanır.
 
