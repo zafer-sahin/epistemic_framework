@@ -104,7 +104,8 @@ class TestDialecticsFSM(unittest.TestCase):
     def test_fsm_muaradah_stalemate_generation(self):
         """
         [Faz 4.3] Mu'aradah saldırısı testi.
-        Karşı-iddia müsellemât, delil ve ontolojiyle birlikte sınanır; saldırı münazarayı sonuçlandırır.
+        Karşı-iddia müsellemât, delil ve ontolojiyle birlikte sınanır. Delil iddiayı karşı-iddiaya rağmen
+        gerektirdiği için mu'âraza düşer; düşen itiraz münazarayı bitirmez (P0-8).
         """
         self.engine.submit_claim("Forall([x], Implies(S(x), P(x)))")
         self.engine.tahrir_i_niza(musellemat=["S"], niza_terms=["P"])
@@ -113,8 +114,8 @@ class TestDialecticsFSM(unittest.TestCase):
         # Sâil Mu'aradah yapar: delili men' etmeden iddianın hilâfını ileri sürer
         result = self.engine.attack_evidence("Muaradah", target_premise="Forall([x], Implies(S(x), Not(P(x))))")
         
-        self.assertIn(result["status"], ["STALEMATE", "MUARADAH_FAILED"])
-        self.assertEqual(self.engine.current_state, "RESOLVED")
+        self.assertEqual(result["status"], "MUARADAH_FAILED", result["message"])
+        self.assertEqual(self.engine.current_state, "AWAITING_ATTACK")
 
     def test_cross_school_muaradah_reports_conflict_reason(self):
         """[Faz 5] Orkestratör üzerinden Mu'aradah: çapraz-ekol çarpışmasında çatışmanın gerekçesi raporlanır."""
@@ -252,10 +253,15 @@ class TestDialecticsFSM(unittest.TestCase):
         sub_p2 = "Forall([x_env], Implies(Insan(x_env), Hayvan(x_env)))"
         self.engine.submit_evidence([sub_p1, sub_p2])
         
-        # Sâil Nakz yapar, ancak Lüzum bağı sağlam olduğu için İlzam edilir (Mucîb kazanır).
+        # Sâil Nakz yapar; Lüzum bağı sağlam olduğu için nakız düşer ama alt-iddia açık kalır (P0-8).
         nakz_response = self.engine.attack_evidence("Nakz")
+        self.assertEqual(nakz_response["status"], "NAKZ_FAILED")
+        self.assertEqual(len(self.engine.claim_stack), 1, "Düşen nakız alt-iddiayı kapatmamalı.")
         
-        self.assertEqual(nakz_response["status"], "SUB_CLAIM_PROVEN")
+        # İtirazı kalmayan Sâil alt-iddiayı teslim eder; ana iddiaya dönülür.
+        teslim_response = self.engine.concede()
+
+        self.assertEqual(teslim_response["status"], "SUB_CLAIM_PROVEN")
         self.assertEqual(len(self.engine.claim_stack), 0, "Alt iddia ispatlanınca yığıt temizlenmelidir.")
         self.assertEqual(self.engine.active_claim, main_claim, "Orijinal Da'vâ'ya dönülmelidir.")
         self.assertEqual(self.engine.current_state, "AWAITING_ATTACK")

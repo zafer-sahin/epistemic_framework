@@ -247,7 +247,8 @@ class TestP0_4_MunazaraScopeDengesi(unittest.TestCase):
         fsm.attack_evidence("Men", "Exists([x], Hayvan(x))")
         fsm.tahrir_i_niza(["Cism"], ["Hayvan"])
         fsm.submit_evidence(["Exists([x], Insan(x))"])
-        self.assertEqual(fsm.attack_evidence("Nakz")["status"], "SUB_CLAIM_PROVEN")
+        self.assertEqual(fsm.attack_evidence("Nakz")["status"], "NAKZ_FAILED")
+        self.assertEqual(fsm.concede()["status"], "SUB_CLAIM_PROVEN")
 
         sonuc = fsm.attack_evidence("Nakz")
         self.assertNotEqual(sonuc["status"], "NAKZ_SUCCESS", "Geçerli ana delil nakzedilmiş sayıldı.")
@@ -474,7 +475,6 @@ class TestP0_7_Muaraza(unittest.TestCase):
         self.assertEqual(fsm.current_state, "AWAITING_ATTACK")
 
 
-@unittest.expectedFailure
 class TestP0_8_Musadere(unittest.TestCase):
     """[P0-8] Döngüsel delil kazanmamalı; tek bir başarısız nakız münazarayı bitirmemelidir."""
 
@@ -499,6 +499,92 @@ class TestP0_8_Musadere(unittest.TestCase):
         fsm.attack_evidence("Nakz")
         self.assertEqual(fsm.current_state, "AWAITING_ATTACK",
                          "Sâil'in men' ve mu'âraza hakkı varken münazara tek nakızla bitirildi.")
+
+    def _munazara(self, iddia: str, musellemat: list, niza: list) -> AdabAlBahthEngine:
+        fsm = AdabAlBahthEngine(AristotelianSolver(self.ontology), DiscourseRegister())
+        fsm.submit_claim(iddia)
+        fsm.tahrir_i_niza(musellemat, niza)
+        return fsm
+
+    def test_circular_evidence_is_rejected_as_musadere(self):
+        """İddianın kendisi delil olamaz; Mucîb iddiayı varsaymayan bir delil getirmelidir."""
+        fsm = self._munazara("Exists([x], Cism(x))", ["Cevher"], ["Cism"])
+        sonuc = fsm.submit_evidence(["Exists([x], Cism(x))"])
+        self.assertEqual(sonuc["status"], "MUSADERE", sonuc["message"])
+        self.assertEqual(fsm.current_state, "AWAITING_EVIDENCE")
+
+    def test_claim_hidden_in_a_conjunction_is_musadere(self):
+        fsm = self._munazara("Exists([x], Cism(x))", ["Cevher"], ["Cism"])
+        sonuc = fsm.submit_evidence(["And(Exists([x], Cemad(x)), Exists([y], Cism(y)))"])
+        self.assertEqual(sonuc["status"], "MUSADERE", sonuc["message"])
+
+    def test_proof_through_the_ontology_is_not_musadere(self):
+        """'Cansız bir şey var' (Cemad ⊂ Cism), 'cisim var' iddiasını gerektirir ama onun aynısı değildir."""
+        fsm = self._munazara("Exists([x], Cism(x))", ["Cevher"], ["Cism"])
+        self.assertEqual(fsm.submit_evidence(["Exists([x], Cemad(x))"])["status"], "EVIDENCE_LOGGED")
+
+    def test_premise_equivalent_only_through_the_ontology_is_not_musadere(self):
+        """Ontolojiye göre 'her cansız insandır' ile 'her cansız hayvandır' aynı kapıya çıkar; yine de biri
+        ötekinin aynısı değildir. Barbara kıyası müsâdere sayılmamalı."""
+        fsm = self._munazara("Forall([x], Implies(Cemad(x), Hayvan(x)))", [], ["Cemad", "Hayvan"])
+        sonuc = fsm.submit_evidence(["Forall([x], Implies(Cemad(x), Insan(x)))", "Forall([x], Implies(Insan(x), Hayvan(x)))"])
+        self.assertEqual(sonuc["status"], "EVIDENCE_LOGGED", sonuc["message"])
+
+    def test_proving_a_premise_through_the_main_claim_is_devr(self):
+        """Men' edilen öncülü ana iddiayla ispatlamak döngüdür (devr)."""
+        fsm = self._munazara("Exists([x], Nami(x))", ["Cism"], ["Nami"])
+        fsm.submit_evidence(["Exists([x], Hayvan(x))", "Forall([x], Implies(Hayvan(x), Nami(x)))"])
+        fsm.attack_evidence("Men", "Exists([x], Hayvan(x))")
+        fsm.tahrir_i_niza(["Cism"], ["Hayvan"])
+        sonuc = fsm.submit_evidence(["Exists([x], Nami(x))", "Forall([x], Implies(Nami(x), Hayvan(x)))"])
+        self.assertEqual(sonuc["status"], "MUSADERE", sonuc["message"])
+
+    def test_undecided_nakz_is_not_a_verdict(self):
+        """Çözücü karar veremezse (UNKNOWN) nakız bir hükümle bitmemeli; münazara açık kalmalı."""
+        solver = AristotelianSolver(self.ontology)
+        fsm = _munazara_delile_kadar(solver, DiscourseRegister())
+        with mock.patch.object(solver.solver, "check", return_value=z3.unknown):
+            sonuc = fsm.attack_evidence("Nakz")
+        self.assertEqual(sonuc["status"], "NAKZ_UNDECIDED", sonuc["message"])
+        self.assertEqual(fsm.current_state, "AWAITING_ATTACK")
+
+    def test_failed_muaradah_does_not_end_debate(self):
+        """Düşen bir mu'âraza da itirazların tükenmesi değildir; Sâil men' edebilir ya da teslim edebilir."""
+        fsm = self._munazara("Exists([x], Cism(x))", ["Cevher"], ["Cism"])
+        fsm.submit_evidence(["Exists([x], Cemad(x))"])
+        sonuc = fsm.attack_evidence("Muaradah", "Forall([x], Not(Cism(x)))")
+        self.assertEqual(sonuc["status"], "MUARADAH_FAILED", sonuc["message"])
+        self.assertEqual(fsm.current_state, "AWAITING_ATTACK")
+
+    def test_concession_of_sail_is_ilzam(self):
+        """İlzâm, itirazları tükenen Sâil'in delili teslim etmesidir."""
+        fsm = self._munazara("Exists([x], Nami(x))", ["Cism"], ["Nami"])
+        fsm.submit_evidence(["Exists([x], Hayvan(x))", "Forall([x], Implies(Hayvan(x), Nami(x)))"])
+        self.assertEqual(fsm.attack_evidence("Nakz")["status"], "NAKZ_FAILED")
+        sonuc = fsm.concede()
+        self.assertEqual(sonuc["status"], "ILZAM", sonuc["message"])
+        self.assertEqual(fsm.current_state, "RESOLVED")
+
+    def test_concession_of_mujib_is_ifham(self):
+        """İfhâm, Mucîb'in cevapsız kalmasıdır: iddiasına delil getiremeyen Mucîb teslim eder."""
+        fsm = self._munazara("Exists([x], Nami(x))", ["Cism"], ["Nami"])
+        sonuc = fsm.concede()
+        self.assertEqual(sonuc["status"], "IFHAM", sonuc["message"])
+        self.assertEqual(fsm.current_state, "RESOLVED")
+
+    def test_ineffective_cross_school_muaradah_does_not_end_debate(self):
+        """Çapraz-ekol mu'âraza düştüğünde de Sâil ilzâm edilmiş sayılmaz; münazara açık kalır."""
+        p = _boru_hatti_kur()
+        tokens, morph, deps = _cozumle(p, "nami zeydun")
+        p.discourse.clear_memory()
+        _, mucib_okumasi = p.orchestrator.evaluate_statement(tokens, deps, AshariUsul(), morph)
+        fsm = _munazara_delile_kadar(AristotelianSolver(p.ontology), p.discourse)
+        p.discourse.set_agent("Sail")
+        sonuc = p.orchestrator.execute_cross_school_muaradah(
+            mucib_okumasi, AshariUsul(), tokens, deps, SalafiUsul(), morph, fsm_engine=fsm)
+        self.assertEqual(sonuc["status"], "MUARADAH_INEFFECTIVE", sonuc["message"])
+        self.assertEqual(fsm.current_state, "AWAITING_ATTACK")
+        self.assertNotIn("İlzam", sonuc["message"])
 
 
 @unittest.expectedFailure

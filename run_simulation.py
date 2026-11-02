@@ -254,17 +254,23 @@ def execute_healthcheck():
     res_tahrir = fsm_engine.tahrir_i_niza(musellemat=["Cemad"], niza_terms=["Nami"])
     print(f"Tahrîr-i Niza': {res_tahrir.get('message')}")
     
+    # İddianın kendisi delil olarak sunulursa müsâderedir; Mucîb başka bir delil getirmelidir.
     res_delil = fsm_engine.submit_evidence(["Forall([x], Implies(Cemad(x), Nami(x)))"])
-    print(f"Delil Sunumu: {res_delil.get('message')}")
+    print(f"Delil Sunumu (iddianın kendisi): [{res_delil.get('status', 'BİLİNMİYOR')}] -> {res_delil.get('message')}")
     
-    res_nakz = fsm_engine.attack_evidence("Nakz")
-    print(f"Nakz (Çürütme) Sonucu: [{res_nakz.get('status', 'BİLİNMİYOR')}] -> {res_nakz.get('message')}")
+    # Ontolojiyle çelişen iddiaya başka delil getiremeyen Mucîb teslim eder (İfhâm).
+    res_teslim = fsm_engine.concede()
+    print(f"Mucîb'in Teslimi: [{res_teslim.get('status', 'BİLİNMİYOR')}] -> {res_teslim.get('message')}")
     
     # Rekürsif Men' Saldırısı (Nöbet Değişimi Simülasyonu)
     fsm_engine.reset_session()
     fsm_engine.submit_claim("Forall([x], Implies(Cemad(x), Nami(x)))")
     fsm_engine.tahrir_i_niza(["Cevher"], ["Cemad", "Nami"])
     fsm_engine.submit_evidence(["Forall([x], Implies(Cemad(x), Hayvan(x)))", "Forall([x], Implies(Hayvan(x), Nami(x)))"])
+
+    # Düşen nakız münazarayı bitirmez; Sâil men' ile devam eder.
+    res_nakz = fsm_engine.attack_evidence("Nakz")
+    print(f"Nakz (Çürütme) Sonucu: [{res_nakz.get('status', 'BİLİNMİYOR')}] -> {res_nakz.get('message')}")
     res_men = fsm_engine.attack_evidence("Men", target_premise="Forall([x], Implies(Cemad(x), Hayvan(x)))")
     print(f"Men' (Rekürsif Da'vâ) Sonucu: [{res_men.get('status', 'BİLİNMİYOR')}] -> Aktif Ajan: {fsm_engine.discourse.active_agent} | {res_men.get('message')}\n")
 

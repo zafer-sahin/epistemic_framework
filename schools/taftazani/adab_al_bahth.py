@@ -11,6 +11,9 @@ class AdabAlBahthEngine:
     Faz 4 ve Faz 5 entegrasyonuyla: Rekürsif Men' (İç içe İspat Yükümlülüğü), Mülâzama 
     Counter-Model Çözümlemesi, Tahrîr-i Mahall-i Niza' (Kavramsal İzolasyon) ve ortak ontolojide
     sınanan Mu'aradah (karşı-iddia) mekanizmalarını barındırır.
+    [HATA DÜZELTMESİ - P0-8]: Müsâdere (iddiayı öncül olarak almak) ve devr delil sunulurken reddedilir.
+    Düşen bir nakız ya da mu'âraza münazarayı bitirmez; münazara teslîmle biter (`concede`): Sâil
+    teslim ederse ilzâm, Mucîb teslim ederse ifhâm.
     """
     def __init__(self, solver: AristotelianSolver, discourse: DiscourseRegister):
         self.solver = solver
@@ -145,11 +148,62 @@ class AdabAlBahthEngine:
             "message": f"Müsellemât (Kabul): {musellemat} | Niza' (İhtilaf): {niza_terms}. Sâil iddiayı sınırlandırdı, Mucîb delil getirmelidir."
         }
 
+    @staticmethod
+    def _conjuncts(expr: z3.ExprRef) -> List[z3.ExprRef]:
+        """İfadenin kendisi ve iç içe And'lerdeki bütün cüz'leri."""
+        parts = [expr]
+        if z3.is_and(expr):
+            for child in expr.children():
+                parts.extend(AdabAlBahthEngine._conjuncts(child))
+        return parts
+
+    @staticmethod
+    def _entails(premise: z3.ExprRef, conclusion: z3.ExprRef) -> bool:
+        """Salt mantık bakımından (ontoloji ve müsellemât olmadan) öncülün neticeyi gerektirip gerektirmediği."""
+        solver = z3.Solver()
+        solver.set("timeout", 2000)
+        solver.add(premise, z3.Not(conclusion))
+        return solver.check() == z3.unsat
+
+    def _find_musadere(self, premises: List[str]) -> Optional[Tuple[str, str]]:
+        """
+        .. mantik_kurali:: Müsâdere ale'l-Matlûb ve Devr
+            Delil, ispat edeceği şeyi öncül olarak alamaz. Bir öncül ya da öncülün bir cüz'ü, salt mantık
+            bakımından iddiaya eşdeğerse (iddianın ta kendisi ya da başka sözle ifadesiyse) delil müsâderedir;
+            men' edilmiş bir öncülün ispatında ana iddialardan birine eşdeğerse devirdir. Eşdeğerlik ontoloji
+            ve müsellemât olmadan sınanır: arka plan bilgisiyle birbirinden çıkan iki önermeden birini
+            ötekiyle ispatlamak müsâdere değildir ("cansız bir şey var" öncülü, Cemad ⊂ Cism sayesinde "cisim
+            var" iddiasını gerektirir ama onun aynısı değildir).
+        """
+        claims = [self.active_claim] + [entry[0] for entry in reversed(self.claim_stack)]
+        for premise in premises:
+            self._auto_register_predicates(premise)
+            for part in self._conjuncts(self.solver.builder.parse(premise)):
+                for claim in claims:
+                    claim_expr = self.solver.builder.parse(claim)
+                    if self._entails(part, claim_expr) and self._entails(claim_expr, part):
+                        return premise, claim
+        return None
+
     def submit_evidence(self, premises: List[str]) -> Dict[str, Any]:
         if self.current_state != "AWAITING_EVIDENCE":
             raise ValueError("[DİYALEKTİK İHLAL] Şu an delil sunma aşamasında değilsiniz. (Tahrîr-i Niza' yapılmamış olabilir)")
         
         self.discourse.set_agent("Mujib")
+
+        # [HATA DÜZELTMESİ - P0-8] İddiayı varsayan delil, kapsam açılmadan reddedilir; Mucîb başka delil getirebilir.
+        try:
+            musadere = self._find_musadere(premises)
+        except Exception as e:
+            return {"status": "ERROR", "message": f"Delil Derleme Hatası (Sentaks/Arite/Müsellemât): {e}"}
+
+        if musadere is not None:
+            premise, claim = musadere
+            kind = "müsâdere ale'l-matlûb" if claim == self.active_claim else "devr: men' edilen öncül ana iddiayla ispatlanıyor"
+            return {
+                "status": "MUSADERE",
+                "message": f"Delil, ispat edeceği şeyi varsayıyor ({kind}): '{premise}' öncülü '{claim}' iddiasının aynısı. Mucîb, iddiayı varsaymayan bir delil getirmelidir."
+            }
 
         self._open_evidence_scope()
 
@@ -209,10 +263,13 @@ class AdabAlBahthEngine:
             Nakz saldırısı, öncüllerin doğru kabul edildiği bir modelde neticenin (iddianın) yanlış 
             olabileceğini ispatlama sürecidir. Hadd-i Evsat (orta terim) neticeyi ontolojik bir zorunlulukla 
             bağlamıyorsa (Mülâzama yoksa), SMT çözücü bir Counter-Model bulacak ve Mucîb'in istidlâli Fâsid sayılacaktır.
+            [HATA DÜZELTMESİ - P0-8]: Karşı-model yoksa yalnızca bu itiraz düşer (NAKZ_FAILED). İlzâm,
+            Sâil'in itirazlarının tükenmesidir; men' ve mu'âraza hakkı sürer, münazara açık kalır.
             """
             from linguistics.discourse_state import DenialLevel
             self.discourse.update_epistemic_state("Sail", DenialLevel.MUNKIR)
 
+            counter_model = None
             self.solver.solver.push()
             try:
                 for p in self.active_premises:
@@ -224,31 +281,32 @@ class AdabAlBahthEngine:
                 self.solver.solver.add(z3.Not(self.solver.builder.parse(self.active_claim)))
                 
                 check_result = self.solver.solver.check()
-                
-                if check_result == z3.unsat:
-                    response = {
-                        "status": "ILZAM", 
-                        "message": "Sâil'in Nakz girişimi başarısız. Mülâzama (Lüzum bağı) ontolojik olarak geçerli. Öncüller zorunlu olarak neticeyi veriyor. Mucîb kazandı (İlzam)."
-                    }
-                else:
+                if check_result == z3.sat:
                     counter_model = self.solver.solver.model()
-                    response = {
-                        "status": "NAKZ_SUCCESS", 
-                        "message": "Fâsid İstidlâl kanıtlandı. Öncüller doğru olduğu halde neticenin yanlış olabildiği bir model (Counter-Model) bulundu. Mülâzama koptu.",
-                        "counter_model_extract": str(counter_model)
-                    }
             finally:
                 self.solver.solver.pop()
 
-            self._close_evidence_scope()
+            if check_result == z3.unsat:
+                return {
+                    "status": "NAKZ_FAILED",
+                    "message": "Sâil'in Nakz girişimi düştü: Mülâzama (Lüzum bağı) geçerli, öncüller zorunlu olarak neticeyi veriyor. Münazara sürüyor; Sâil men' ya da mu'âraza edebilir veya delili teslim edebilir."
+                }
+            if check_result == z3.unknown:
+                # Çözücünün karar verememesi bir hüküm değildir; münazara açık kalır.
+                return {
+                    "status": "NAKZ_UNDECIDED",
+                    "message": "Nakz karara bağlanamadı: öncüllerin neticeyi gerektirip gerektirmediği belirlenemedi. Sâil'in saldırısı bekleniyor."
+                }
 
-            if self.claim_stack and response["status"] == "ILZAM":
-                return self._resolve_sub_claim()
-            elif self.claim_stack and response["status"] == "NAKZ_SUCCESS":
+            self._close_evidence_scope()
+            if self.claim_stack:
                 return self._revert_sub_claim_failure("Alt-iddianın delili Nakz edildi. Üst iddia kanıtsız kaldı.")
-            else:
-                self.current_state = "RESOLVED"
-                return response
+            self.current_state = "RESOLVED"
+            return {
+                "status": "NAKZ_SUCCESS",
+                "message": "Fâsid İstidlâl kanıtlandı. Öncüller doğru olduğu halde neticenin yanlış olabildiği bir model (Counter-Model) bulundu. Mülâzama koptu.",
+                "counter_model_extract": str(counter_model)
+            }
                 
         elif attack_type == "Muaradah":
             """
@@ -260,6 +318,7 @@ class AdabAlBahthEngine:
               iddianın hilâfı değildir; mu'âraza iddiaya yöneltilmemiştir (MUARADAH_FAILED).
             - Kapsamın, karşı-iddia doğruyken iddianın yanlış olduğu bir modeli varsa delil, iddiayı
               karşı-iddiaya karşı ispatlamıyor demektir; argüman askıya alınır (STALEMATE).
+            Düşen mu'âraza münazarayı bitirmez (P0-8); Sâil'in men' ve teslim hakkı sürer.
             Karşı delil (Sâil'in kendi öncülleri) ve rollerin değişmesi henüz modellenmediği için,
             geçerli bir delile karşı yalın bir karşı-iddia kilitlenme üretemez.
             """
@@ -290,25 +349,55 @@ class AdabAlBahthEngine:
                     "message": "Mu'aradah karara bağlanamadı: karşı-iddianın delil ve ontolojiyle ilişkisi belirlenemedi. Sâil'in saldırısı bekleniyor."
                 }
 
-            self._close_evidence_scope()
-            self.current_state = "RESOLVED"
-
             if compatible == z3.unsat:
                 return {
                     "status": "MUARADAH_FAILED",
-                    "message": "Sâil'in karşı-iddiası, men' etmediği delil ve ortak ontolojiyle çelişiyor. Mu'aradah başarısız. Mucîb haklıdır."
+                    "message": "Sâil'in karşı-iddiası, men' etmediği delil ve ortak ontolojiyle çelişiyor. Mu'aradah düştü; münazara sürüyor (Sâil men' edebilir ya da delili teslim edebilir)."
                 }
             if undermines_claim == z3.unsat:
                 return {
                     "status": "MUARADAH_FAILED",
-                    "message": "Sâil'in karşı-iddiası delille bağdaşıyor, ancak delil karşı-iddiaya rağmen iddiayı gerektiriyor: karşı-iddia iddianın hilâfı değil. Mu'aradah başarısız. Mucîb haklıdır."
+                    "message": "Sâil'in karşı-iddiası delille bağdaşıyor, ancak delil karşı-iddiaya rağmen iddiayı gerektiriyor: karşı-iddia iddianın hilâfı değil. Mu'aradah düştü; münazara sürüyor (Sâil men' edebilir ya da delili teslim edebilir)."
                 }
+
+            self._close_evidence_scope()
+            self.current_state = "RESOLVED"
             return {
                 "status": "STALEMATE",
                 "message": "Mu'aradah başarılı. Karşı-iddia delil ve ortak ontolojiyle bağdaşıyor; delil, iddiayı karşı-iddiaya karşı ispatlamıyor. Argüman askıya alındı (Stalemate)."
             }
         else:
             return {"status": "ERROR", "message": "Geçersiz Âdâb-ı Bahs saldırı tipi."}
+
+    def concede(self) -> Dict[str, Any]:
+        """
+        .. felsefe_notu:: Teslîm: İlzâm ve İfhâm
+            Münazara tek bir itirazın düşmesiyle değil, nöbeti tutan tarafın cevapsız kalıp teslim etmesiyle
+            biter. İtirazları tükenen Sâil delili teslim ederse ilzâm olur: iddia sabittir. Men' edilmiş bir
+            öncülün ispatında Sâil'in teslimi alt-iddiayı sabit kılar ve ana iddiaya dönülür. İddiasına (ya
+            da men' edilen öncüle) delil getiremeyen Mucîb teslim ederse ifhâm olur: iddia sabit olmamıştır.
+        """
+        if self.current_state == "AWAITING_ATTACK":
+            self._close_evidence_scope()
+            if self.claim_stack:
+                return self._resolve_sub_claim()
+            self.current_state = "RESOLVED"
+            return {
+                "status": "ILZAM",
+                "message": "Sâil delili teslim etti; itirazları tükendi. İddia sabit oldu, Sâil ilzâm edildi (Mucîb kazandı)."
+            }
+
+        if self.current_state == "AWAITING_EVIDENCE":
+            unproven = "men' edilen öncüle" if self.claim_stack else "iddiasına"
+            self._close_evidence_scope()
+            self.claim_stack.clear()
+            self.current_state = "RESOLVED"
+            return {
+                "status": "IFHAM",
+                "message": f"Mucîb {unproven} delil getiremeyip teslim etti; cevapsız kaldı. İddia sabit olmadı, Mucîb ifhâm edildi (Sâil kazandı)."
+            }
+
+        raise ValueError(f"[DİYALEKTİK İHLAL] Mevcut durum '{self.current_state}'. Teslim ancak delil ya da itiraz nöbetinde yapılabilir.")
 
     def _resolve_sub_claim(self) -> Dict[str, Any]:
         """Alt-iddia başarıyla ispatlandığında yığıttan ana iddiaya geri dönüş yapar."""

@@ -29,7 +29,7 @@ class EpistemicShell(cmd.Cmd):
 [AKTİF] N-TIER EPİSTEMİK ÇIKARIM MOTORU VE DİYALEKTİK REPL
 Durum: 0 Entropi | Rejim: Asenkron Çoklu-Ekol (Polymorphic Multi-Agent)
 Varsayılan Ekol: Eş'arî (AshariUsul)
-Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, clear
+Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, teslim, clear
 Çıkmak için 'exit'.
 =============================================================================
 """
@@ -259,6 +259,14 @@ Komutlar: set_usul, parse_sentence, muaradah, claim, tahrir, evidence, attack, c
             if "counter_model_extract" in res:
                 print("\n[KARŞI-MODEL (COUNTER-MODEL) BİLEŞENİ]:")
                 print(res["counter_model_extract"])
+        except Exception as e:
+            print(f"[FSM ÇÖKÜŞÜ] {e}")
+
+    def do_teslim(self, arg):
+        """[P0-8] Nöbeti tutan taraf teslim eder: itiraz nöbetinde Sâil (ilzâm), delil nöbetinde Mucîb (ifhâm)."""
+        try:
+            res = self.fsm.concede()
+            print(f"[{res['status']}] {res['message']}")
         except Exception as e:
             print(f"[FSM ÇÖKÜŞÜ] {e}")
 

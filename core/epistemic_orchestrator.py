@@ -220,6 +220,7 @@ class EpistemicOrchestrator:
         ontolojisinde yapılır. Ontolojiyle kendi başına çelişen Mucîb iddiası MUJIB_INVALID, iki okuma
         bağdaşmıyorsa MUARADAH_SUCCESS, bağdaşıyorsa MUARADAH_INEFFECTIVE döner. Çözücü karar veremezse
         (MUARADAH_UNDECIDED) münazara açık kalır.
+        [HATA DÜZELTMESİ - P0-8]: MUARADAH_INEFFECTIVE de münazarayı bitirmez; ilzâm Sâil'in teslimiyle gelir.
         """
         
         if fsm_engine and getattr(fsm_engine, "current_state", None) != "AWAITING_ATTACK":
@@ -257,11 +258,11 @@ class EpistemicOrchestrator:
                 joint_check = self.l3.execute_joint_sat_check({"Mujib": mujib_claim_ir, "Sail": sail_reading_ir})
 
             if joint_check["status"] == "SAT":
-                if fsm_engine:
-                    fsm_engine.resolve_debate()
+                # [HATA DÜZELTMESİ - P0-8] Düşen mu'âraza ilzâm değildir; münazara açık kalır, Sâil'in
+                # men', nakz ve teslim hakkı sürer.
                 return {
                     "status": "MUARADAH_INEFFECTIVE",
-                    "message": "Mu'aradah Başarısız: Sâil'in okuması Mucîb'inkiyle ortak ontolojide bağdaşıyor; ontolojik bir çelişki yaratmadı (Paralel Gerçeklik). Mucîb kazandı (İlzam).",
+                    "message": "Mu'aradah Başarısız: Sâil'in okuması Mucîb'inkiyle ortak ontolojide bağdaşıyor; ontolojik bir çelişki yaratmadı (Paralel Gerçeklik). Mucîb'in iddiası ayakta; münazara sürüyor.",
                     "sail_reading": sail_reading_ir.predicates
                 }
 
