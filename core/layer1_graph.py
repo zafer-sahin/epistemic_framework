@@ -2,6 +2,12 @@ from typing import Dict, Any, Optional, List, Tuple
 from linguistics.ilm_wad_adapter import SemanticStatementIR, NestedPredicate
 from core.models import BaseOntology, EpistemicEntity
 
+# Bir terimi ötekine mahmul, nitelik, cüz' ya da mekân olarak yükleyen bağlar (isnâd-ı vasfî).
+ATTRIBUTIVE_RELATIONS = {
+    "Rel_Rabita_Predication", "Rel_Rabita_Identity", "Rel_Mubteda_Haber", "Rel_Bedel_Identity",
+    "Rel_Mudaf_MudafIlayh", "Rel_Sifat_Mevsuf", "LocatedIn",
+}
+
 class Layer1HeuristicGraph:
     def __init__(self, ontology: BaseOntology):
         self.ontology = ontology
@@ -177,7 +183,10 @@ class Layer1HeuristicGraph:
                 if isinstance(item, tuple):
                     pred_id, arg_id, arity = item
                 
-                    if arity == 2 and '::' in arg_id:
+                    # [HATA DÜZELTMESİ - P0-10] Karîne-i mânia, zâhirin muhal olduğuna delâlettir ve ancak bir
+                    # terime Vâcib ile bağdaşmayan bir nitelik, cüz' ya da mekân yüklenirken doğar. Fâil/mef'ûl
+                    # bağları Allah'ı hakîkî fâil olarak anar ("Allah insanı yarattı" mecaz değildir).
+                    if arity == 2 and '::' in arg_id and pred_id in ATTRIBUTIVE_RELATIONS:
                         amil_str, mamul_str = arg_id.split('::', 1)
                         for amil_id in _concepts_of(amil_str):
                             for mamul_id in _concepts_of(mamul_str):

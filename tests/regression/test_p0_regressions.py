@@ -629,7 +629,6 @@ class TestP0_9_Gecerlilik(unittest.TestCase):
         self.assertTrue(self.solver.verify_syllogism(onculler, netice))
 
 
-@unittest.expectedFailure
 class TestP0_10_SelefiReddi(unittest.TestCase):
     """[P0-10] Allah ile mahlûkat arasındaki düz (fâil) ilişki mecaz sayılıp reddedilmemelidir."""
 
@@ -642,6 +641,24 @@ class TestP0_10_SelefiReddi(unittest.TestCase):
         )
         self.assertFalse(p.l1.analyze_ir(ir)["is_metaphor_likely"], "'Allah insanı tekvin etti' mecaz sayıldı.")
         self.assertNotEqual(SalafiUsul().execute_dag(ir, p.l1, p.l2, p.l3, 0)["status"], "REJECTED_BY_USUL")
+
+    def test_attribution_to_wajib_remains_a_karine_candidate(self):
+        """Lafzî 'yed'in Allah'a izafeti bir nitelik yüklemedir; karîne adayı olarak işaretlenmeye devam etmeli."""
+        p = _boru_hatti_kur()
+        analiz = p.l1.analyze_ir(_ir(p, "yadu allahi", "Ashari"))
+        self.assertTrue(analiz["is_metaphor_likely"])
+        self.assertIn("Sifat_Yed_Literal::Wajib_al_Wujud", analiz["flagged_elements"])
+
+    def test_salafi_accepts_a_consistent_literal_reading(self):
+        """'Beytullah' (izafet-i teşrîf) zâhiriyle tutarlıdır; te'vile gerek olmadığı için te'vil yasağı da bağlamaz."""
+        p = _boru_hatti_kur()
+        sonuc = _hukum(p, "beytu allahi", SalafiUsul())
+        self.assertEqual(sonuc["status"], "SAT", sonuc.get("reason") or sonuc.get("message"))
+
+    def test_salafi_rejects_when_the_literal_reading_is_impossible(self):
+        """'Allah gökte' zâhiriyle tenzihe aykırıdır; te'vil gerekir ama Selefî usûl onu reddeder."""
+        p = _boru_hatti_kur()
+        self.assertEqual(_hukum(p, "allahu fi semai", SalafiUsul())["status"], "REJECTED_BY_USUL")
 
 
 if __name__ == "__main__":
